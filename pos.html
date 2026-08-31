@@ -24,6 +24,7 @@
   .btn-gris{background:#e5e7eb;color:#333;}
   button:disabled{opacity:.5;cursor:not-allowed;}
   input,select{padding:9px 10px;border:1px solid var(--borde);border-radius:6px;font-size:.95rem;width:100%;}
+  input.money-input{text-align:right;font-variant-numeric:tabular-nums;}
   label{font-size:.8rem;color:var(--gris);display:block;margin-bottom:3px;}
   .campo{margin-bottom:12px;}
   .pantalla{display:none;padding:16px;max-width:1100px;margin:0 auto;}
@@ -33,33 +34,44 @@
   .msg-error{background:#fdecea;color:var(--rojo);padding:10px;border-radius:6px;margin-top:10px;font-size:.9rem;}
   .msg-ok{background:#eafaf1;color:var(--verde-osc);padding:10px;border-radius:6px;margin-top:10px;font-size:.9rem;}
   h1{font-size:1.3rem;margin:0 0 16px;}
-  h2{font-size:1.05rem;margin:0 0 12px;}
+  h2{font-size:1.05rem;margin:0 0 4px;}
+  .nota{font-size:.78rem;color:var(--gris);margin:0 0 10px;}
   .fila{display:flex;gap:16px;flex-wrap:wrap;}
   .col{flex:1;min-width:280px;}
+  .tabla-scroll{overflow-x:auto;}
   table{width:100%;border-collapse:collapse;font-size:.9rem;}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--borde);}
-  th{color:var(--gris);font-weight:600;font-size:.78rem;text-transform:uppercase;}
+  td.num, th.num{text-align:right;}
+  th{color:var(--gris);font-weight:600;font-size:.78rem;text-transform:uppercase;white-space:nowrap;}
   .resultados{max-height:260px;overflow-y:auto;border:1px solid var(--borde);border-radius:6px;margin-top:6px;}
-  .resultado-item{padding:10px;border-bottom:1px solid var(--borde);display:flex;justify-content:space-between;align-items:center;cursor:pointer;}
+  .resultado-item{padding:10px;border-bottom:1px solid var(--borde);display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:10px;}
   .resultado-item:hover{background:#f0f7f2;}
   .resultado-item:last-child{border-bottom:none;}
   .stock-bajo{color:var(--rojo);font-weight:600;}
   .cant-input{width:60px;text-align:center;}
   .totales{margin-top:14px;font-size:.95rem;}
-  .totales .linea{display:flex;justify-content:space-between;padding:4px 0;}
+  .totales .linea{display:flex;justify-content:space-between;padding:4px 0;gap:12px;}
   .totales .total-final{font-size:1.3rem;font-weight:700;border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;}
-  .pago-linea{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
-  .pago-linea select{flex:2;}
-  .pago-linea input{flex:1;}
-  .modal-fondo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:50;}
+  .pago-linea{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed var(--borde);}
+  .pago-linea .pago-forma{flex:1 1 140px;}
+  .pago-linea .pago-monto{flex:1 1 130px;min-width:120px;}
+  .pago-linea .pago-referencia{flex:1 1 100%;}
+  .pago-linea .quitar{flex:0 0 auto;}
+  .modal-fondo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:50;padding:16px;}
   .modal-fondo.activo{display:flex;}
-  .modal{background:#fff;border-radius:10px;padding:22px;max-width:420px;width:92%;max-height:85vh;overflow-y:auto;}
-  .quitar{color:var(--rojo);cursor:pointer;font-size:.85rem;background:none;border:none;padding:0;}
+  .modal{background:#fff;border-radius:10px;padding:22px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto;}
+  .quitar{color:var(--rojo);cursor:pointer;font-size:.85rem;background:none;border:none;padding:4px;}
   #ticket-imprimible{display:none;}
   @media print{
     body *{visibility:hidden;}
     #ticket-imprimible, #ticket-imprimible *{visibility:visible;}
-    #ticket-imprimible{display:block;position:absolute;top:0;left:0;width:100%;padding:10px;font-family:monospace;font-size:12px;}
+    #ticket-imprimible{display:block;position:absolute;top:0;left:0;width:100%;padding:10px;font-size:12px;}
+  }
+  @media (max-width:480px){
+    header{padding:10px 12px;}
+    .pantalla{padding:10px;}
+    .card{padding:14px;}
+    .centrado{margin:30px auto;}
   }
 </style>
 </head>
@@ -122,8 +134,8 @@
     <h1>Abrir caja</h1>
     <p style="color:var(--gris);font-size:.9rem;" id="abrir-caja-info"></p>
     <div class="campo">
-      <label>Fondo inicial ($)</label>
-      <input type="number" id="fondo-inicial" step="0.01" min="0" value="0">
+      <label>Fondo inicial</label>
+      <input type="text" inputmode="decimal" id="fondo-inicial" class="money-input" value="0">
     </div>
     <button class="btn-primario" style="width:100%" id="btn-abrir-caja">Abrir caja</button>
     <div id="abrir-caja-error"></div>
@@ -141,10 +153,13 @@
       </div>
       <div class="card" style="margin-top:14px;">
         <h2>Carrito</h2>
-        <table>
-          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead>
-          <tbody id="carrito-body"></tbody>
-        </table>
+        <p class="nota" id="nota-impuestos"></p>
+        <div class="tabla-scroll">
+          <table>
+            <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
+            <tbody id="carrito-body"></tbody>
+          </table>
+        </div>
         <p id="carrito-vacio" style="color:var(--gris);">Aún no hay productos en el carrito.</p>
       </div>
     </div>
@@ -162,6 +177,7 @@
         </div>
         <div id="pagos-lista" style="margin-top:14px;"></div>
         <button class="btn-secundario" id="btn-agregar-pago" style="width:100%;margin-top:6px;">+ Forma de pago</button>
+        <div id="pago-aviso" style="color:var(--rojo);font-size:.8rem;margin-top:6px;"></div>
         <div class="totales">
           <div class="linea"><span>Pagado</span><span id="tot-pagado">$0.00</span></div>
           <div class="linea"><span id="restante-label">Restante</span><span id="tot-restante">$0.00</span></div>
@@ -181,7 +197,7 @@
       <label>Tipo</label>
       <select id="mov-tipo"><option value="entrada">Entrada (ingreso de efectivo)</option><option value="salida">Salida (retiro de efectivo)</option></select>
     </div>
-    <div class="campo"><label>Monto ($)</label><input type="number" id="mov-monto" step="0.01" min="0.01"></div>
+    <div class="campo"><label>Monto</label><input type="text" inputmode="decimal" id="mov-monto" class="money-input"></div>
     <div class="campo"><label>Motivo</label><input type="text" id="mov-motivo" placeholder="Ej. depósito al banco, cambio, etc."></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="mov-cancelar">Cancelar</button>
@@ -195,8 +211,9 @@
 <div class="modal-fondo" id="modal-cerrar-caja">
   <div class="modal">
     <h2>Cerrar caja</h2>
-    <p style="color:var(--gris);font-size:.9rem;">Cuenta el efectivo físico en la caja y captúralo aquí.</p>
-    <div class="campo"><label>Efectivo contado ($)</label><input type="number" id="cierre-efectivo" step="0.01" min="0"></div>
+    <p class="nota">Este es el desglose de lo que debería haber en caja, calculado con lo registrado en el sistema. Revísalo antes de contar el efectivo físico.</p>
+    <div class="totales" id="cierre-resumen"></div>
+    <div class="campo" style="margin-top:14px;"><label>Efectivo contado</label><input type="text" inputmode="decimal" id="cierre-efectivo" class="money-input"></div>
     <div class="campo"><label>Observaciones (opcional)</label><input type="text" id="cierre-obs"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="cierre-cancelar">Cancelar</button>
@@ -234,12 +251,41 @@ const SUPABASE_URL = "https://vsfzkktmdwqkfbecmfcj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const money = (n) => '$' + (Number(n)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2});
+const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
+
+// ---------- Formato de campos de dinero ($, miles, alineado a la derecha) ----------
+function parseMoney(str){
+  if(str===null || str===undefined) return NaN;
+  const limpio = String(str).replace(/[^0-9.\-]/g,'');
+  if(limpio==='') return NaN;
+  return parseFloat(limpio);
+}
+function moneyInputValue(el){
+  const n = parseMoney(el.value);
+  return isNaN(n) ? 0 : n;
+}
+function attachMoneyInput(el){
+  if(el.dataset.moneyAttached) return;
+  el.dataset.moneyAttached = '1';
+  el.classList.add('money-input');
+  const formatear = ()=>{
+    const n = parseMoney(el.value);
+    el.value = isNaN(n) ? '' : money(n);
+  };
+  const desformatear = ()=>{
+    const n = parseMoney(el.value);
+    el.value = isNaN(n) ? '' : n.toFixed(2);
+    el.select();
+  };
+  el.addEventListener('focus', desformatear);
+  el.addEventListener('blur', formatear);
+  formatear();
+}
 
 const state = {
   usuario: null, rol: null,
-  empresaId: null, empresaNombre: '',
+  empresaId: null, empresaNombre: '', desglosarImpuestos: true,
   sucursalId: null, sucursalNombre: '',
   almacenId: null, cajaId: null, cajaNombre: '',
   listaPrecioId: null, periodoOperacionId: null,
@@ -250,6 +296,15 @@ const state = {
   carrito: [], // {varianteId, nombre, precio, cantidad, tasaImpuesto, impuestoId, stock, codigo}
   pagos: [], // {formaPagoId, monto, referencia}
 };
+
+function precioMostrar(item){
+  // Respeta empresas.desglosar_impuestos_ticket: si se desglosa el impuesto en el ticket,
+  // el precio mostrado en búsqueda/carrito es el precio base (sin IVA). Si no se desglosa,
+  // se muestra el precio final (con IVA incluido).
+  const base = Number(item.precio) || 0;
+  if(state.desglosarImpuestos) return base;
+  return base * (1 + (Number(item.tasaImpuesto)||0));
+}
 
 function mostrarPantalla(id){
   document.querySelectorAll('.pantalla').forEach(p=>p.classList.remove('activa'));
@@ -314,6 +369,7 @@ async function iniciarSesionApp(){
   if(!empresa){ mostrarError('No se encontró una empresa activa para tu cuenta.'); return; }
   state.empresaId = empresa.id;
   state.empresaNombre = empresa.nombre_comercial;
+  state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
 
   const { data: sucursales } = await sb.from('sucursales').select('*').eq('empresa_id', empresa.id).eq('activo', true);
   if(!sucursales || sucursales.length===0){ mostrarError('La empresa no tiene sucursales activas.'); return; }
@@ -387,10 +443,11 @@ async function seleccionarSucursalCaja(sucursal, caja){
 }
 
 // ---------- ABRIR CAJA ----------
+attachMoneyInput($('fondo-inicial'));
 $('btn-abrir-caja').addEventListener('click', async ()=>{
   $('abrir-caja-error').innerHTML = '';
-  const fondo = parseFloat($('fondo-inicial').value || '0');
-  if(isNaN(fondo) || fondo < 0){ $('abrir-caja-error').innerHTML = '<div class="msg-error">Captura un fondo inicial válido.</div>'; return; }
+  const fondo = moneyInputValue($('fondo-inicial'));
+  if(fondo < 0){ $('abrir-caja-error').innerHTML = '<div class="msg-error">Captura un fondo inicial válido.</div>'; return; }
   const { data, error } = await sb.from('sesiones_caja').insert({
     caja_id: state.cajaId, usuario_id: state.usuario.id, fondo_inicial: fondo
   }).select().single();
@@ -404,6 +461,9 @@ async function entrarAlPOS(){
   $('header-app').style.display = 'flex';
   $('hdr-empresa').textContent = state.empresaNombre;
   $('hdr-info').textContent = `${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} (${state.rol})`;
+  $('nota-impuestos').textContent = state.desglosarImpuestos
+    ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
+    : 'Precios mostrados con IVA incluido.';
 
   await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago()]);
   reiniciarVenta();
@@ -437,7 +497,7 @@ async function cargarCatalogo(){
     })
     .filter(p=>p.precio !== null);
 }
-$('btn-actualizar-catalogo').addEventListener('click', async ()=>{ await cargarCatalogo(); });
+$('btn-actualizar-catalogo').addEventListener('click', async ()=>{ await cargarCatalogo(); renderResultados(buscarInput.value.trim()); renderCarrito(); });
 
 async function cargarClientes(){
   const { data } = await sb.from('clientes').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('es_publico_general', {ascending:false});
@@ -475,7 +535,7 @@ function renderResultados(q){
   cont.innerHTML = resultados.map((p,i)=>`
     <div class="resultado-item" data-idx="${i}">
       <span>${p.nombre}</span>
-      <span>${money(p.precio)} · <span class="${p.stock<=0?'stock-bajo':''}">stock: ${p.stock}</span></span>
+      <span style="white-space:nowrap;">${money(precioMostrar(p))} · <span class="${p.stock<=0?'stock-bajo':''}">stock: ${p.stock}</span></span>
     </div>`).join('') || '<div class="resultado-item">Sin resultados</div>';
   cont.querySelectorAll('.resultado-item[data-idx]').forEach(el=>{
     el.addEventListener('click', ()=>{
@@ -504,9 +564,9 @@ function renderCarrito(){
   body.innerHTML = state.carrito.map((l,i)=>`
     <tr>
       <td>${l.nombre}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}</td>
-      <td><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
-      <td>${money(l.precio)}</td>
-      <td>${money(l.precio*l.cantidad)}</td>
+      <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num">${money(precioMostrar(l))}</td>
+      <td class="num">${money(precioMostrar(l)*l.cantidad)}</td>
       <td><button class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`).join('');
   body.querySelectorAll('.cant-input').forEach(inp=>{
@@ -534,23 +594,32 @@ function calcularTotales(){
   return { subtotal, impuesto, total };
 }
 
+function faltaAutorizacion(){
+  return state.pagos.some(p=>{
+    const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
+    return forma?.requiere_autorizacion && !(p.referencia||'').trim();
+  });
+}
+
 function recalcularTotales(){
   const { subtotal, impuesto, total } = calcularTotales();
   $('tot-subtotal').textContent = money(subtotal);
   $('tot-impuesto').textContent = money(impuesto);
   $('tot-total').textContent = money(total);
-  const pagado = state.pagos.reduce((s,p)=>s+(parseFloat(p.monto)||0),0);
+  const pagado = state.pagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);
   $('tot-pagado').textContent = money(pagado);
   const restante = total - pagado;
   $('restante-label').textContent = restante > 0 ? 'Restante' : 'Cambio';
   $('tot-restante').textContent = money(Math.abs(restante));
-  $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001;
+  const faltaAuth = faltaAutorizacion();
+  $('pago-aviso').textContent = faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '';
+  $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth;
 }
 
 // ---------- PAGOS ----------
 $('btn-agregar-pago').addEventListener('click', ()=>{
   const { total } = calcularTotales();
-  const pagado = state.pagos.reduce((s,p)=>s+(parseFloat(p.monto)||0),0);
+  const pagado = state.pagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);
   const restante = Math.max(0, total - pagado);
   state.pagos.push({ formaPagoId: state.formasPago[0]?.id || '', monto: restante.toFixed(2), referencia:'' });
   renderPagos();
@@ -558,17 +627,30 @@ $('btn-agregar-pago').addEventListener('click', ()=>{
 
 function renderPagos(){
   const cont = $('pagos-lista');
-  cont.innerHTML = state.pagos.map((p,i)=>`
+  cont.innerHTML = state.pagos.map((p,i)=>{
+    const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
+    const requiereAuth = !!forma?.requiere_autorizacion;
+    return `
     <div class="pago-linea">
       <select data-idx="${i}" class="pago-forma">${state.formasPago.map(f=>`<option value="${f.id}" ${f.id===p.formaPagoId?'selected':''}>${f.nombre}</option>`).join('')}</select>
-      <input type="number" step="0.01" class="pago-monto" data-idx="${i}" value="${p.monto}">
+      <input type="text" inputmode="decimal" class="pago-monto money-input" data-idx="${i}" value="${p.monto}">
       <button class="quitar" data-idx="${i}">✕</button>
-    </div>`).join('');
+      ${requiereAuth ? `<input type="text" class="pago-referencia" data-idx="${i}" placeholder="No. de autorización" value="${p.referencia||''}">` : ''}
+    </div>`;
+  }).join('');
   cont.querySelectorAll('.pago-forma').forEach(sel=>sel.addEventListener('change', ()=>{
     state.pagos[Number(sel.dataset.idx)].formaPagoId = sel.value;
+    renderPagos();
   }));
-  cont.querySelectorAll('.pago-monto').forEach(inp=>inp.addEventListener('input', ()=>{
-    state.pagos[Number(inp.dataset.idx)].monto = inp.value;
+  cont.querySelectorAll('.pago-monto').forEach(inp=>{
+    attachMoneyInput(inp);
+    inp.addEventListener('input', ()=>{
+      state.pagos[Number(inp.dataset.idx)].monto = inp.value;
+      recalcularTotales();
+    });
+  });
+  cont.querySelectorAll('.pago-referencia').forEach(inp=>inp.addEventListener('input', ()=>{
+    state.pagos[Number(inp.dataset.idx)].referencia = inp.value;
     recalcularTotales();
   }));
   cont.querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{
@@ -593,7 +675,7 @@ $('btn-cobrar').addEventListener('click', async ()=>{
     variante_id: l.varianteId, codigo_escaneado: l.codigo, cantidad: l.cantidad,
     precio_unitario: l.precio, descuento_unitario: 0, impuesto_id: l.impuestoId, tasa_impuesto_aplicada: l.tasaImpuesto,
   }));
-  const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseFloat(p.monto)||0, referencia: p.referencia||'' }));
+  const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
 
   const { data: ventaId, error } = await sb.rpc('registrar_venta', {
     p_venta: payloadVenta, p_detalle: payloadDetalle, p_pagos: payloadPagos
@@ -611,12 +693,18 @@ $('btn-cobrar').addEventListener('click', async ()=>{
 function mostrarTicket(ventaId, venta){
   const cliente = state.clientes.find(c=>c.id===state.clienteId);
   const fecha = new Date().toLocaleString('es-MX');
-  const filas = state.carrito.map(l=>`${l.nombre} x${l.cantidad} — ${money(l.precio*l.cantidad)}`).join('<br>');
+  const filasItems = state.carrito.map(l=>`
+    <tr><td>${l.nombre} x${l.cantidad}</td><td class="num">${money(precioMostrar(l)*l.cantidad)}</td></tr>
+  `).join('');
   const html = `
     <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
     <p>Cliente: ${cliente?.nombre || 'Público en general'}<br>Atendió: ${state.usuario.nombre}</p>
-    <p>${filas}</p>
-    <p>Subtotal: ${money(venta.subtotal)}<br>Impuestos: ${money(venta.impuesto_total)}<br><strong>Total: ${money(venta.total)}</strong></p>
+    <table><tbody>${filasItems}</tbody></table>
+    <div class="totales">
+      <div class="linea"><span>Subtotal</span><span>${money(venta.subtotal)}</span></div>
+      <div class="linea"><span>Impuestos</span><span>${money(venta.impuesto_total)}</span></div>
+      <div class="linea total-final"><span>Total</span><span>${money(venta.total)}</span></div>
+    </div>
   `;
   $('ticket-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
@@ -636,14 +724,15 @@ function reiniciarVenta(){
 }
 
 // ---------- MOVIMIENTO DE CAJA ----------
+attachMoneyInput($('mov-monto'));
 $('btn-movimiento-caja').addEventListener('click', ()=>{ $('modal-movimiento').classList.add('activo'); });
 $('mov-cancelar').addEventListener('click', ()=>{ $('modal-movimiento').classList.remove('activo'); });
 $('mov-confirmar').addEventListener('click', async ()=>{
   $('mov-error').innerHTML='';
   const tipo = $('mov-tipo').value;
-  const monto = parseFloat($('mov-monto').value);
+  const monto = moneyInputValue($('mov-monto'));
   const motivo = $('mov-motivo').value.trim();
-  if(isNaN(monto) || monto<=0 || !motivo){ $('mov-error').innerHTML='<div class="msg-error">Captura un monto y motivo válidos.</div>'; return; }
+  if(monto<=0 || !motivo){ $('mov-error').innerHTML='<div class="msg-error">Captura un monto y motivo válidos.</div>'; return; }
   const { error } = await sb.from('caja_movimientos').insert({
     sesion_caja_id: state.sesionCaja.id, tipo, monto, motivo, usuario_id: state.usuario.id
   });
@@ -653,23 +742,64 @@ $('mov-confirmar').addEventListener('click', async ()=>{
 });
 
 // ---------- CERRAR CAJA ----------
-$('btn-cerrar-caja').addEventListener('click', ()=>{ $('modal-cerrar-caja').classList.add('activo'); });
+attachMoneyInput($('cierre-efectivo'));
+
+async function calcularResumenCierre(){
+  const sesion = state.sesionCaja;
+  const formaEfectivo = state.formasPago.find(f=>f.nombre==='Efectivo');
+  let ventasEfectivo = 0;
+  if(formaEfectivo){
+    const { data: ventasSesion } = await sb.from('ventas').select('id').eq('sesion_caja_id', sesion.id);
+    const ventaIds = (ventasSesion||[]).map(v=>v.id);
+    if(ventaIds.length){
+      const { data: pagos } = await sb.from('venta_pagos').select('monto, forma_pago_id').in('venta_id', ventaIds).eq('forma_pago_id', formaEfectivo.id);
+      ventasEfectivo = (pagos||[]).reduce((s,p)=>s+Number(p.monto),0);
+    }
+  }
+  const { data: movs } = await sb.from('caja_movimientos').select('tipo, monto').eq('sesion_caja_id', sesion.id);
+  const entradas = (movs||[]).filter(m=>m.tipo==='entrada').reduce((s,m)=>s+Number(m.monto),0);
+  const salidas = (movs||[]).filter(m=>m.tipo==='salida').reduce((s,m)=>s+Number(m.monto),0);
+  const fondoInicial = Number(sesion.fondo_inicial);
+  const esperado = fondoInicial + ventasEfectivo + entradas - salidas;
+  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado };
+}
+
+function renderResumenCierre(r){
+  $('cierre-resumen').innerHTML = `
+    <div class="linea"><span>Fondo inicial</span><span>${money(r.fondoInicial)}</span></div>
+    <div class="linea"><span>+ Ventas en efectivo</span><span>${money(r.ventasEfectivo)}</span></div>
+    <div class="linea"><span>+ Entradas de caja</span><span>${money(r.entradas)}</span></div>
+    <div class="linea"><span>− Salidas de caja</span><span>${money(r.salidas)}</span></div>
+    <div class="linea total-final"><span>Efectivo esperado</span><span>${money(r.esperado)}</span></div>
+  `;
+}
+
+$('btn-cerrar-caja').addEventListener('click', async ()=>{
+  $('cierre-resumen').innerHTML = 'Calculando…';
+  $('modal-cerrar-caja').classList.add('activo');
+  const resumen = await calcularResumenCierre();
+  renderResumenCierre(resumen);
+});
 $('cierre-cancelar').addEventListener('click', ()=>{ $('modal-cerrar-caja').classList.remove('activo'); });
 $('cierre-confirmar').addEventListener('click', async ()=>{
   $('cierre-error').innerHTML='';
-  const efectivo = parseFloat($('cierre-efectivo').value);
-  if(isNaN(efectivo) || efectivo<0){ $('cierre-error').innerHTML='<div class="msg-error">Captura el efectivo contado.</div>'; return; }
+  const efectivo = moneyInputValue($('cierre-efectivo'));
+  if(efectivo<0){ $('cierre-error').innerHTML='<div class="msg-error">Captura el efectivo contado.</div>'; return; }
   const obs = $('cierre-obs').value.trim();
   const { data, error } = await sb.rpc('cerrar_sesion_caja', {
     p_sesion_id: state.sesionCaja.id, p_efectivo_contado: efectivo, p_observaciones: obs || null
   });
   if(error){ $('cierre-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
-  const resultado = data[0];
+  const r = data[0];
   $('modal-cerrar-caja').classList.remove('activo');
   $('resultado-cierre-body').innerHTML = `
-    <div class="linea"><span>Efectivo esperado</span><span>${money(resultado.efectivo_esperado)}</span></div>
-    <div class="linea"><span>Efectivo contado</span><span>${money(efectivo)}</span></div>
-    <div class="linea total-final"><span>Diferencia</span><span>${money(resultado.diferencia)}</span></div>
+    <div class="linea"><span>Fondo inicial</span><span>${money(r.fondo_inicial)}</span></div>
+    <div class="linea"><span>+ Ventas en efectivo</span><span>${money(r.ventas_efectivo)}</span></div>
+    <div class="linea"><span>+ Entradas de caja</span><span>${money(r.entradas)}</span></div>
+    <div class="linea"><span>− Salidas de caja</span><span>${money(r.salidas)}</span></div>
+    <div class="linea"><span>Efectivo esperado</span><span>${money(r.efectivo_esperado)}</span></div>
+    <div class="linea"><span>Efectivo contado</span><span>${money(r.efectivo_contado)}</span></div>
+    <div class="linea total-final"><span>Diferencia</span><span>${money(r.diferencia)}</span></div>
   `;
   $('modal-resultado-cierre').classList.add('activo');
 });
