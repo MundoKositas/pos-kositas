@@ -148,6 +148,19 @@
         </table>
       </div>
       <p class="nota" id="cat-vacio" style="display:none;">No hay productos que coincidan con la búsqueda.</p>
+      <div class="fila" style="justify-content:space-between;align-items:center;margin-top:10px;">
+        <p class="nota" id="cat-pagina-info" style="margin:0;"></p>
+        <div class="fila" style="gap:8px;align-items:center;">
+          <label class="nota" style="margin:0;">Por página</label>
+          <select id="cat-pagina-tamano" style="width:auto;">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+          <button type="button" class="btn-gris" id="cat-pagina-anterior">‹ Anterior</button>
+          <button type="button" class="btn-gris" id="cat-pagina-siguiente">Siguiente ›</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -398,7 +411,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.4.001';
+const APP_VERSION = '1.4.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -514,6 +527,7 @@ const state = {
   costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
   catalogoOrden: [], indiceCatalogo: -1,
   formSnapshot: '', marcas: [],
+  catalogoPagina: 1, catalogoPorPagina: 50,
 };
 
 function mostrarPantalla(id){
@@ -717,9 +731,21 @@ $('cat-filtro-categoria').addEventListener('change', ()=>{
   const lineasFiltradas = catId ? state.lineas.filter(l=>l.categoria_id===catId) : state.lineas;
   llenarSelectConTodas('cat-filtro-linea', lineasFiltradas, l=>l.id, l=>l.nombre);
   $('cat-filtro-linea').value = '';
+  state.catalogoPagina = 1;
   renderCatalogo();
 });
-$('cat-filtro-linea').addEventListener('change', renderCatalogo);
+$('cat-filtro-linea').addEventListener('change', ()=>{ state.catalogoPagina = 1; renderCatalogo(); });
+$('cat-pagina-tamano').addEventListener('change', ()=>{
+  state.catalogoPorPagina = Number($('cat-pagina-tamano').value) || 50;
+  state.catalogoPagina = 1;
+  renderCatalogo();
+});
+$('cat-pagina-anterior').addEventListener('click', ()=>{
+  if(state.catalogoPagina > 1){ state.catalogoPagina--; renderCatalogo(); }
+});
+$('cat-pagina-siguiente').addEventListener('click', ()=>{
+  state.catalogoPagina++; renderCatalogo(); // renderCatalogo() acota el valor si se pasa del total de páginas
+});
 
 // ---------- CATÁLOGO DE PRODUCTOS ----------
 async function cargarProductos(){
@@ -759,8 +785,11 @@ async function cargarProductos(){
   renderCatalogo();
   renderReporte();
 }
-$('cat-buscar').addEventListener('input', renderCatalogo);
+$('cat-buscar').addEventListener('input', ()=>{ state.catalogoPagina = 1; renderCatalogo(); });
 
+// Paginación: pensada para un inventario de miles de productos — el Catálogo completo (filtrado)
+// solo se usa para armar el orden de Anterior/Siguiente de la ficha de producto (state.catalogoOrden);
+// lo que se pinta en la tabla es solo la página actual, tamaño elegible (25/50/100, default 50).
 function renderCatalogo(){
   const filtro = $('cat-buscar').value.trim().toLowerCase();
   const filtroCategoria = $('cat-filtro-categoria').value;
@@ -780,10 +809,22 @@ function renderCatalogo(){
     return true;
   }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 
-  state.catalogoOrden = items.map(p=>p.varianteId); // para Anterior/Siguiente en el modal de producto
+  state.catalogoOrden = items.map(p=>p.varianteId); // para Anterior/Siguiente en el modal de producto (sobre TODO lo filtrado, no solo la página)
+
+  const totalPaginas = Math.max(1, Math.ceil(items.length / state.catalogoPorPagina));
+  if(state.catalogoPagina > totalPaginas) state.catalogoPagina = totalPaginas;
+  if(state.catalogoPagina < 1) state.catalogoPagina = 1;
+  const inicio = (state.catalogoPagina - 1) * state.catalogoPorPagina;
+  const pagina = items.slice(inicio, inicio + state.catalogoPorPagina);
+
+  $('cat-pagina-info').textContent = items.length
+    ? `Página ${state.catalogoPagina} de ${totalPaginas} — ${items.length} producto${items.length===1?'':'s'}`
+    : 'Sin productos que coincidan con la búsqueda.';
+  $('cat-pagina-anterior').disabled = state.catalogoPagina <= 1;
+  $('cat-pagina-siguiente').disabled = state.catalogoPagina >= totalPaginas;
 
   $('cat-vacio').style.display = items.length ? 'none' : 'block';
-  $('cat-tabla-body').innerHTML = items.map(p=>{
+  $('cat-tabla-body').innerHTML = pagina.map(p=>{
     const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id) : null;
     const bajoMinimo = p.inventariable && Number(p.stock) <= Number(p.minimo) && Number(p.maximo) > 0;
     const estadoTag = !p.activo ? '<span class="tag tag-off">Inactivo</span>' : (bajoMinimo ? '<span class="tag tag-bajo">Bajo mínimo</span>' : '<span class="tag tag-ok">Activo</span>');
@@ -1595,7 +1636,9 @@ function renderReporte(){
 
 // ---------- EXPORTAR REPORTE DE PRECIOS (PDF / Excel) ----------
 // Recalcula las mismas filas que se ven en pantalla (mismas listas marcadas, mismo modo con/sin
-// impuestos) para que lo exportado siempre coincida con lo que el usuario está viendo.
+// impuestos) para que lo exportado siempre coincida con lo que el usuario está viendo. Las columnas
+// de precio se regresan como número (no como texto ya formateado con "$") para que cada exportador
+// pueda alinearlas a la derecha con el mecanismo nativo de cada formato (ver exportarReporteExcel/PDF).
 function datosReporteActual(){
   const listaIds = Array.from(document.querySelectorAll('.chk-reporte-lista:checked')).map(chk=>chk.value);
   const listas = state.listasPrecio.filter(l=>listaIds.includes(l.id));
@@ -1607,9 +1650,8 @@ function datosReporteActual(){
     const nombreCol = p.marca ? `${p.nombre} (${p.marca})` : p.nombre;
     const celdas = listas.map(l=>{
       const precio = p.precios.find(pr=>pr.listaPrecioId===l.id);
-      if(!precio) return '—';
-      const valor = conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : precio.precio;
-      return money(valor);
+      if(!precio) return null; // sin precio en esa lista — cada exportador decide cómo mostrarlo (ej. "—")
+      return conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : redondear2(precio.precio);
     });
     return [nombreCol, ...celdas];
   });
@@ -1621,7 +1663,19 @@ $('reporte-exportar').addEventListener('click', ()=>{
 });
 function exportarReporteExcel(){
   const { encabezados, filas } = datosReporteActual();
-  const ws = XLSX.utils.aoa_to_sheet([encabezados, ...filas]);
+  // Las columnas de precio se escriben como número real de Excel (no texto con "$"), con formato de
+  // moneda vía el formato de celda (.z) — así Excel las alinea a la derecha de forma nativa, igual
+  // que cualquier columna numérica, sin depender de estilos de celda (que la versión gratuita de
+  // SheetJS no soporta escribir).
+  const datos = [encabezados, ...filas.map(fila => fila.map((v,i)=> i===0 ? v : (v==null ? '—' : v)))];
+  const ws = XLSX.utils.aoa_to_sheet(datos);
+  const rango = XLSX.utils.decode_range(ws['!ref']);
+  for(let f=1; f<=rango.e.r; f++){
+    for(let c=1; c<=rango.e.c; c++){
+      const celda = ws[XLSX.utils.encode_cell({r:f, c})];
+      if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
+    }
+  }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Reporte de precios');
   const fecha = new Date().toISOString().slice(0,10);
@@ -1629,15 +1683,20 @@ function exportarReporteExcel(){
 }
 function exportarReportePDF(){
   const { encabezados, filas, conImpuestos } = datosReporteActual();
+  const cuerpo = filas.map(fila => fila.map((v,i)=> i===0 ? v : (v==null ? '—' : money(v))));
+  // columnStyles alinea a la derecha todas las columnas de precio (todas menos la 0, "Producto"),
+  // tanto en el encabezado como en el cuerpo de la tabla.
+  const columnStyles = {};
+  for(let i=1; i<encabezados.length; i++) columnStyles[i] = { halign: 'right' };
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: encabezados.length > 4 ? 'landscape' : 'portrait' });
   doc.setFontSize(14);
-  doc.text('Reporte de lista de precios — Mundo Kositas', 14, 16);
+  doc.text(`Reporte de lista de precios — ${state.empresaNombre || ''}`, 14, 16);
   doc.setFontSize(10);
   doc.text(`Generado: ${new Date().toLocaleString('es-MX')} — Precios ${conImpuestos?'con':'sin'} impuestos`, 14, 22);
   doc.autoTable({
-    head: [encabezados], body: filas, startY: 28,
-    styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] },
+    head: [encabezados], body: cuerpo, startY: 28,
+    styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
   });
   const fecha = new Date().toISOString().slice(0,10);
   doc.save(`reporte_precios_${fecha}.pdf`);
