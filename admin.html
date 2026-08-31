@@ -296,6 +296,15 @@
   </div>
 </div>
 
+<!-- MODAL: ver ticket de venta (desde el folio del Kardex) -->
+<div class="modal-fondo" id="modal-ticket">
+  <div class="modal" id="card-ticket">
+    <h2 style="margin-top:0;">Ticket de venta</h2>
+    <div id="ticket-contenido"><p class="nota">Cargando…</p></div>
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="ticket-cerrar">Cerrar</button>
+  </div>
+</div>
+
 <!-- MODAL: lista de precio -->
 <div class="modal-fondo" id="modal-lista">
   <div class="modal ancho" id="card-lista">
@@ -356,7 +365,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.3.001';
+const APP_VERSION = '1.3.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1094,7 +1103,7 @@ async function cargarKardex(){
   const hasta = $('kardex-hasta').value;
   $('kardex-actualizar').disabled = true;
   const { data, error } = await sb.from('movimientos_inventario_detalle')
-    .select('cantidad, costo_unitario, movimientos_inventario!inner(fecha, tipo, folio, descripcion)')
+    .select('cantidad, costo_unitario, movimientos_inventario!inner(fecha, tipo, folio, descripcion, clasificacion, referencia)')
     .eq('variante_id', state.varianteEditId)
     .gte('movimientos_inventario.fecha', desde)
     .lte('movimientos_inventario.fecha', hasta)
@@ -1110,10 +1119,16 @@ async function cargarKardex(){
   const TIPO_LABEL = { entrada: 'Entrada', salida: 'Salida', transferencia: 'Transferencia', ajuste: 'Ajuste' };
   $('kardex-tabla-body').innerHTML = filas.map(f=>{
     const mov = f.movimientos_inventario;
+    // El folio de una venta de POS es un link al ticket (movimientos_inventario.referencia guarda
+    // el id de la venta); otros tipos de movimiento (compras, ajustes, etc.) solo muestran el folio.
+    const esVenta = mov.clasificacion === 'venta_pos' && mov.referencia;
+    const folioHtml = esVenta
+      ? `<a href="#" class="link-ticket" data-venta="${mov.referencia}" style="color:var(--azul);">${mov.folio || '—'}</a>`
+      : (mov.folio || '—');
     return `<tr>
       <td>${mov.fecha}</td>
       <td>${TIPO_LABEL[mov.tipo] || mov.tipo}</td>
-      <td>${mov.folio || '—'}</td>
+      <td>${folioHtml}</td>
       <td>${mov.descripcion || '—'}</td>
       <td class="num">${f.cantidad}</td>
       <td class="num">${f.costo_unitario!=null ? money(f.costo_unitario) : '—'}</td>
@@ -1121,8 +1136,94 @@ async function cargarKardex(){
   }).join('');
   $('kardex-vacio').textContent = 'No hay movimientos registrados en este rango de fechas.';
   $('kardex-vacio').style.display = filas.length ? 'none' : 'block';
+  $('kardex-tabla-body').querySelectorAll('.link-ticket').forEach(a=>{
+    a.addEventListener('click', (e)=>{ e.preventDefault(); abrirTicket(a.dataset.venta); });
+  });
 }
 $('kardex-actualizar').addEventListener('click', cargarKardex);
+
+// ---------- VER TICKET (desde el folio del Kardex) ----------
+// movimientos_inventario.referencia guarda directamente el id de la venta (ver registrar_venta,
+// migración 039), así que no hace falta pasar por el folio para encontrarla.
+async function abrirTicket(ventaId){
+  $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
+  $('modal-ticket').classList.add('activo');
+
+  const { data: v, error } = await sb.from('ventas')
+    .select(`
+      folio, fecha_hora, subtotal, descuento_total, impuesto_total, total, tipo_venta,
+      cliente:clientes(nombre, es_publico_general),
+      vendedor:usuarios(nombre),
+      detalle:venta_detalle(
+        cantidad, precio_unitario, descuento_unitario,
+        variante:variantes(producto:productos(nombre)),
+        impuestos:venta_detalle_impuestos(tasa_aplicada, monto, impuesto:impuestos(nombre))
+      ),
+      pagos:venta_pagos(monto, referencia, forma_pago:formas_pago(nombre))
+    `)
+    .eq('id', ventaId)
+    .maybeSingle();
+
+  if(error){
+    $('ticket-contenido').innerHTML = `<div class="msg-error">No se pudo cargar el ticket: ${error.message}</div>`;
+    return;
+  }
+  if(!v){
+    $('ticket-contenido').innerHTML = '<div class="msg-error">No se encontró la venta asociada a este movimiento.</div>';
+    return;
+  }
+
+  const fecha = v.fecha_hora ? new Date(v.fecha_hora).toLocaleString('es-MX') : '—';
+  const clienteTxt = (v.cliente && !v.cliente.es_publico_general) ? v.cliente.nombre : 'Público en general';
+
+  const filasDetalle = (v.detalle||[]).map(d=>{
+    const importe = (Number(d.precio_unitario) - Number(d.descuento_unitario||0)) * Number(d.cantidad);
+    return `<tr>
+      <td>${d.variante?.producto?.nombre || '—'}</td>
+      <td class="num">${d.cantidad}</td>
+      <td class="num">${money(d.precio_unitario)}</td>
+      <td class="num">${money(importe)}</td>
+    </tr>`;
+  }).join('');
+
+  const impuestosMap = {};
+  (v.detalle||[]).forEach(d=>{
+    (d.impuestos||[]).forEach(i=>{
+      const nombre = i.impuesto?.nombre || 'Impuesto';
+      impuestosMap[nombre] = (impuestosMap[nombre]||0) + Number(i.monto);
+    });
+  });
+  const impuestosHtml = Object.entries(impuestosMap).map(([nombre, monto])=>`
+    <div class="fila" style="justify-content:space-between;"><span>${nombre}</span><span>${money(monto)}</span></div>
+  `).join('');
+
+  const pagosHtml = (v.pagos||[]).map(p=>`
+    <div class="fila" style="justify-content:space-between;">
+      <span>${p.forma_pago?.nombre || 'Pago'}${p.referencia?` (${p.referencia})`:''}</span><span>${money(p.monto)}</span>
+    </div>
+  `).join('');
+
+  $('ticket-contenido').innerHTML = `
+    <p class="nota" style="margin:0 0 10px;">Folio ${v.folio} · ${fecha} · ${v.tipo_venta==='credito'?'Crédito':'Contado'} · Cliente: ${clienteTxt}${v.vendedor?.nombre?` · Atendió: ${v.vendedor.nombre}`:''}</p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. unit.</th><th class="num">Importe</th></tr></thead>
+        <tbody>${filasDetalle}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;border-top:1px solid var(--borde);padding-top:10px;">
+      <div class="fila" style="justify-content:space-between;"><span>Subtotal</span><span>${money(v.subtotal)}</span></div>
+      ${v.descuento_total>0?`<div class="fila" style="justify-content:space-between;"><span>Descuento</span><span>-${money(v.descuento_total)}</span></div>`:''}
+      ${impuestosHtml}
+      <div class="fila" style="justify-content:space-between;font-weight:700;"><span>Total</span><span>${money(v.total)}</span></div>
+    </div>
+    <div style="margin-top:10px;border-top:1px solid var(--borde);padding-top:10px;">
+      <p class="nota" style="margin:0 0 4px;">Formas de pago</p>
+      ${pagosHtml || '<p class="nota">Sin pagos registrados.</p>'}
+    </div>
+  `;
+}
+$('ticket-cerrar').addEventListener('click', ()=>{ $('modal-ticket').classList.remove('activo'); });
 
 // ---------- LISTAS DE PRECIO ----------
 function renderListasPrecio(){
