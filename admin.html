@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Kositas — Catálogo y Precios</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Librerías para exportar el Reporte de precios (usadas solo al presionar Exportar) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --verde:#2f7d4f; --verde-osc:#245f3c; --rojo:#c0392b; --gris:#6b7280;
@@ -184,6 +188,13 @@
         <input type="checkbox" id="reporte-con-impuestos" style="width:auto;"> Mostrar precios con impuestos
       </label>
       <div id="reporte-checks" style="margin-bottom:14px;"></div>
+      <div class="fila" style="gap:8px;align-items:center;margin:0 0 14px;">
+        <select id="reporte-formato-exportar" style="width:auto;">
+          <option value="excel">Excel (.xlsx)</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button type="button" class="btn-secundario" id="reporte-exportar">Exportar</button>
+      </div>
       <div class="tabla-scroll">
         <table>
           <thead><tr id="reporte-encabezado"><th>Producto</th></tr></thead>
@@ -227,7 +238,16 @@
       </div>
       <div class="grid-2">
         <div class="campo"><label>Nombre</label><input type="text" id="prod-nombre"></div>
-        <div class="campo"><label>Marca</label><input type="text" id="prod-marca"></div>
+        <div class="campo">
+          <label>Marca</label>
+          <select id="prod-marca"></select>
+          <div class="fila" id="prod-marca-nueva" style="display:none;gap:6px;margin-top:6px;">
+            <input type="text" id="prod-marca-nueva-nombre" placeholder="Nombre de la nueva marca" style="flex:1;">
+            <button type="button" class="btn-secundario" id="prod-marca-nueva-guardar">Guardar marca</button>
+            <button type="button" class="btn-gris" id="prod-marca-nueva-cancelar">Cancelar</button>
+          </div>
+          <div id="prod-marca-nueva-error"></div>
+        </div>
       </div>
       <div class="grid-2">
         <div class="campo"><label>Categoría</label><select id="prod-categoria"></select></div>
@@ -293,6 +313,19 @@
       <button class="btn-primario" style="flex:1;" id="prod-guardar">Guardar <span class="tecla">F10</span></button>
     </div>
     <div id="prod-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: confirmar salida con cambios sin guardar (Cancelar / Anterior / Siguiente) -->
+<div class="modal-fondo" id="modal-confirmar-salida">
+  <div class="modal" id="card-confirmar-salida">
+    <h2 style="margin-top:0;">Cambios sin guardar</h2>
+    <p class="nota">Tienes cambios sin guardar en este producto. ¿Deseas guardar los cambios?</p>
+    <div id="confirmar-salida-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="confirmar-salida-continuar">Continuar sin guardar <span class="tecla">F9</span></button>
+      <button class="btn-primario" style="flex:1;" id="confirmar-salida-guardar">Guardar <span class="tecla">F10</span></button>
+    </div>
   </div>
 </div>
 
@@ -365,7 +398,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.3.002';
+const APP_VERSION = '1.4.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -456,6 +489,12 @@ const TECLAS_FUNCION = ['F9','F10'];
 document.addEventListener('keydown', (e)=>{
   if(!TECLAS_FUNCION.includes(e.key)) return;
   e.preventDefault();
+  // El modal de "cambios sin guardar" se abre encima del modal de producto, así que se revisa primero.
+  if($('modal-confirmar-salida').classList.contains('activo')){
+    if(e.key==='F9') $('confirmar-salida-continuar').click();
+    else if(e.key==='F10' && !$('confirmar-salida-guardar').disabled) $('confirmar-salida-guardar').click();
+    return;
+  }
   if($('modal-producto').classList.contains('activo')){
     if(e.key==='F9') $('prod-cancelar').click();
     else if(e.key==='F10' && !$('prod-guardar').disabled) $('prod-guardar').click();
@@ -474,7 +513,7 @@ const state = {
   listaEditId: null,
   costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
   catalogoOrden: [], indiceCatalogo: -1,
-  formSnapshot: '',
+  formSnapshot: '', marcas: [],
 };
 
 function mostrarPantalla(id){
@@ -591,13 +630,14 @@ document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
 
 // ---------- CATÁLOGOS BASE ----------
 async function cargarCatalogosBase(){
-  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}] = await Promise.all([
+  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}] = await Promise.all([
     sb.from('impuestos').select('*').order('nombre'),
     sb.from('categorias').select('*').order('nombre'),
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
     sb.from('unidades_medida').select('*').order('descripcion'),
     sb.from('listas_precio').select('*').order('nombre'),
     sb.from('listas_precio_margen_linea').select('*'),
+    sb.from('marcas').select('*').eq('activo', true).order('nombre'),
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
@@ -605,6 +645,7 @@ async function cargarCatalogosBase(){
   state.unidades = unidades || [];
   state.listasPrecio = listas || [];
   state.margenesLinea = margenesLinea || [];
+  state.marcas = marcas || [];
 
   llenarSelect('prod-categoria', state.categorias, c=>c.id, c=>c.nombre);
   $('prod-categoria').addEventListener('change', ()=>{
@@ -625,6 +666,52 @@ function llenarSelectConTodas(id, items, valFn, textFn){
   $(id).innerHTML = '<option value="">Todas</option>' + items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
   if(valorActual && items.some(i=>valFn(i)===valorActual)) $(id).value = valorActual;
 }
+
+// ---------- CATÁLOGO DE MARCAS (select en el formulario de producto, con alta rápida) ----------
+// productos.marca sigue siendo texto libre en la base de datos (lo usan búsqueda, catálogo, reportes
+// y el POS sin cambios); este select solo controla de dónde vienen los valores permitidos para
+// evitar duplicados por error de dedo ("Aqualike" vs "AquaLike"). Si el producto ya tiene guardado
+// un valor que no está en el catálogo (dato capturado antes de este cambio), se agrega como opción
+// aparte para no perderlo.
+function llenarSelectMarcas(valorSeleccionado){
+  const opciones = state.marcas.map(m=>`<option value="${m.nombre}">${m.nombre}</option>`).join('');
+  let html = `<option value="">— Sin marca —</option>${opciones}<option value="__nueva__">+ Agregar nueva marca…</option>`;
+  if(valorSeleccionado && !state.marcas.some(m=>m.nombre===valorSeleccionado)){
+    html = `<option value="${valorSeleccionado}">${valorSeleccionado} (fuera del catálogo)</option>` + html;
+  }
+  $('prod-marca').innerHTML = html;
+  $('prod-marca').value = valorSeleccionado || '';
+  $('prod-marca-nueva').style.display = 'none';
+  $('prod-marca-nueva-error').innerHTML = '';
+}
+$('prod-marca').addEventListener('change', ()=>{
+  if($('prod-marca').value === '__nueva__'){
+    $('prod-marca-nueva').style.display = 'flex';
+    $('prod-marca-nueva-nombre').value = '';
+    $('prod-marca-nueva-nombre').focus();
+  } else {
+    $('prod-marca-nueva').style.display = 'none';
+  }
+});
+$('prod-marca-nueva-cancelar').addEventListener('click', ()=>{
+  $('prod-marca-nueva').style.display = 'none';
+  $('prod-marca').value = '';
+});
+$('prod-marca-nueva-guardar').addEventListener('click', async ()=>{
+  const nombre = $('prod-marca-nueva-nombre').value.trim();
+  $('prod-marca-nueva-error').innerHTML = '';
+  if(!nombre){ $('prod-marca-nueva-error').innerHTML = '<div class="msg-error">Escribe un nombre.</div>'; return; }
+  $('prod-marca-nueva-guardar').disabled = true;
+  const { data, error } = await sb.rpc('guardar_marca', { p_empresa_id: state.empresaId, p_nombre: nombre });
+  $('prod-marca-nueva-guardar').disabled = false;
+  if(error){ $('prod-marca-nueva-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  const marcaNueva = data[0];
+  if(!state.marcas.some(m=>m.id===marcaNueva.id)){
+    state.marcas.push({ id: marcaNueva.id, nombre: marcaNueva.nombre, activo: true, empresa_id: state.empresaId });
+    state.marcas.sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  }
+  llenarSelectMarcas(marcaNueva.nombre);
+});
 $('cat-filtro-categoria').addEventListener('change', ()=>{
   const catId = $('cat-filtro-categoria').value;
   const lineasFiltradas = catId ? state.lineas.filter(l=>l.categoria_id===catId) : state.lineas;
@@ -801,7 +888,7 @@ function abrirProducto(varianteId){
   $('prod-error').innerHTML = '';
   $('producto-titulo').textContent = p ? `Editar producto — ${p.nombre}` : 'Nuevo producto';
   $('prod-nombre').value = p?.nombre || '';
-  $('prod-marca').value = p?.marca || '';
+  llenarSelectMarcas(p?.marca || '');
   $('prod-clave-sat').value = p?.claveSat || '';
   $('prod-minimo').value = p?.minimo ?? 0;
   $('prod-maximo').value = p?.maximo ?? 0;
@@ -884,18 +971,44 @@ function capturarEstadoFormulario(){
 function formTieneCambios(){
   return capturarEstadoFormulario() !== state.formSnapshot;
 }
-function confirmarSalirSinGuardar(){
-  if(!formTieneCambios()) return true;
-  return confirm('Tienes cambios sin guardar en este producto. Si continúas, se perderán. ¿Deseas continuar?');
+// Si el formulario tiene cambios sin guardar, muestra el modal de confirmación y ejecuta
+// continuarFn solo después de que el usuario decida (Guardar y continuar, o Continuar sin guardar).
+// Si no hay cambios, continuarFn se ejecuta de inmediato.
+let accionPendienteSalida = null;
+function manejarSalidaConCambios(continuarFn){
+  if(!formTieneCambios()){ continuarFn(); return; }
+  accionPendienteSalida = continuarFn;
+  $('confirmar-salida-error').innerHTML = '';
+  $('modal-confirmar-salida').classList.add('activo');
 }
+$('confirmar-salida-continuar').addEventListener('click', ()=>{
+  $('modal-confirmar-salida').classList.remove('activo');
+  const accion = accionPendienteSalida;
+  accionPendienteSalida = null;
+  if(accion) accion();
+});
+$('confirmar-salida-guardar').addEventListener('click', async ()=>{
+  $('confirmar-salida-guardar').disabled = true;
+  const ok = await guardarProducto();
+  $('confirmar-salida-guardar').disabled = false;
+  if(!ok){
+    $('confirmar-salida-error').innerHTML = '<div class="msg-error">No se pudo guardar. Revisa el error en el formulario.</div>';
+    return;
+  }
+  $('modal-confirmar-salida').classList.remove('activo');
+  const accion = accionPendienteSalida;
+  accionPendienteSalida = null;
+  if(accion) accion();
+});
 
 $('prod-anterior').addEventListener('click', ()=> irARegistro(-1));
 $('prod-siguiente').addEventListener('click', ()=> irARegistro(1));
 function irARegistro(delta){
-  if(!confirmarSalirSinGuardar()) return;
-  const nuevoIndice = state.indiceCatalogo + delta;
-  if(nuevoIndice < 0 || nuevoIndice >= state.catalogoOrden.length) return;
-  abrirProducto(state.catalogoOrden[nuevoIndice]);
+  manejarSalidaConCambios(()=>{
+    const nuevoIndice = state.indiceCatalogo + delta;
+    if(nuevoIndice < 0 || nuevoIndice >= state.catalogoOrden.length) return;
+    abrirProducto(state.catalogoOrden[nuevoIndice]);
+  });
 }
 
 function tasaTotalSeleccionada(){
@@ -1036,24 +1149,36 @@ function actualizarResumenPrecio(){
 }
 
 $('prod-cancelar').addEventListener('click', ()=>{
-  if(!confirmarSalirSinGuardar()) return;
-  $('modal-producto').classList.remove('activo');
+  manejarSalidaConCambios(()=>{
+    $('modal-producto').classList.remove('activo');
+  });
 });
 $('prod-guardar').addEventListener('click', async ()=>{
   if($('prod-guardar').disabled) return;
   $('prod-guardar').disabled = true;
+  const ok = await guardarProducto();
+  $('prod-guardar').disabled = false;
+  if(ok) $('modal-producto').classList.remove('activo');
+});
+// Lógica de guardado del producto, reutilizada por el botón Guardar normal (F10) y por el botón
+// Guardar del modal de "cambios sin guardar" (Anterior/Siguiente/Cancelar con cambios pendientes).
+// Devuelve true si se guardó correctamente, false si hubo un error de validación o del servidor.
+async function guardarProducto(){
   $('prod-error').innerHTML = '';
 
   const nombre = $('prod-nombre').value.trim();
-  if(!nombre){ $('prod-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; $('prod-guardar').disabled=false; return; }
+  if(!nombre){ $('prod-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return false; }
+  if($('prod-marca').value === '__nueva__'){
+    $('prod-error').innerHTML = '<div class="msg-error">Termina de agregar la nueva marca (o cancélala) antes de guardar.</div>';
+    return false;
+  }
 
   const codigosBarraPayload = leerCodigosBarra().filter(c=>c.codigo);
   const codigosVistos = new Set();
   for(const c of codigosBarraPayload){
     if(codigosVistos.has(c.codigo)){
       $('prod-error').innerHTML = `<div class="msg-error">El código de barras ${c.codigo} está repetido en este mismo producto.</div>`;
-      $('prod-guardar').disabled = false;
-      return;
+      return false;
     }
     codigosVistos.add(c.codigo);
   }
@@ -1083,13 +1208,14 @@ $('prod-guardar').addEventListener('click', async ()=>{
   const { error } = await sb.rpc('guardar_producto', { p: payload });
   if(error){
     $('prod-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
-    $('prod-guardar').disabled = false;
-    return;
+    return false;
   }
-  $('modal-producto').classList.remove('activo');
-  $('prod-guardar').disabled = false;
   await cargarProductos();
-});
+  // El snapshot se actualiza para que formTieneCambios() ya no detecte estos cambios como pendientes
+  // (relevante para el flujo de "Guardar y continuar" desde el modal de cambios sin guardar).
+  state.formSnapshot = capturarEstadoFormulario();
+  return true;
+}
 
 // ---------- KARDEX ----------
 async function cargarKardex(){
@@ -1465,6 +1591,56 @@ function renderReporte(){
     }).join('');
     return `<tr><td>${p.nombre}${p.marca?` <span class="nota">(${p.marca})</span>`:''}</td>${celdas}</tr>`;
   }).join('');
+}
+
+// ---------- EXPORTAR REPORTE DE PRECIOS (PDF / Excel) ----------
+// Recalcula las mismas filas que se ven en pantalla (mismas listas marcadas, mismo modo con/sin
+// impuestos) para que lo exportado siempre coincida con lo que el usuario está viendo.
+function datosReporteActual(){
+  const listaIds = Array.from(document.querySelectorAll('.chk-reporte-lista:checked')).map(chk=>chk.value);
+  const listas = state.listasPrecio.filter(l=>listaIds.includes(l.id));
+  const conImpuestos = $('reporte-con-impuestos').checked;
+  const productosOrdenados = [...state.productos].sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const encabezados = ['Producto', ...listas.map(l=>`${l.nombre}${conImpuestos?' (con imp.)':' (sin imp.)'}`)];
+  const filas = productosOrdenados.map(p=>{
+    const tasaProducto = p.impuestos.reduce((s,i)=>s+i.tasa, 0);
+    const nombreCol = p.marca ? `${p.nombre} (${p.marca})` : p.nombre;
+    const celdas = listas.map(l=>{
+      const precio = p.precios.find(pr=>pr.listaPrecioId===l.id);
+      if(!precio) return '—';
+      const valor = conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : precio.precio;
+      return money(valor);
+    });
+    return [nombreCol, ...celdas];
+  });
+  return { encabezados, filas, conImpuestos };
+}
+$('reporte-exportar').addEventListener('click', ()=>{
+  const formato = $('reporte-formato-exportar').value;
+  if(formato === 'pdf') exportarReportePDF(); else exportarReporteExcel();
+});
+function exportarReporteExcel(){
+  const { encabezados, filas } = datosReporteActual();
+  const ws = XLSX.utils.aoa_to_sheet([encabezados, ...filas]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Reporte de precios');
+  const fecha = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `reporte_precios_${fecha}.xlsx`);
+}
+function exportarReportePDF(){
+  const { encabezados, filas, conImpuestos } = datosReporteActual();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: encabezados.length > 4 ? 'landscape' : 'portrait' });
+  doc.setFontSize(14);
+  doc.text('Reporte de lista de precios — Mundo Kositas', 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Generado: ${new Date().toLocaleString('es-MX')} — Precios ${conImpuestos?'con':'sin'} impuestos`, 14, 22);
+  doc.autoTable({
+    head: [encabezados], body: filas, startY: 28,
+    styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] },
+  });
+  const fecha = new Date().toISOString().slice(0,10);
+  doc.save(`reporte_precios_${fecha}.pdf`);
 }
 
 // ---------- ARRANQUE ----------
