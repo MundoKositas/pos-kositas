@@ -96,6 +96,7 @@
 <!-- LOGIN -->
 <div class="pantalla activa" id="pantalla-login">
   <div class="card centrado" id="card-login">
+    <img id="login-logo" alt="" style="display:none;max-height:64px;max-width:220px;object-fit:contain;margin:0 auto 12px;">
     <h1>POS Kositas</h1>
     <div class="campo">
       <label>Correo</label>
@@ -260,7 +261,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.0.010';
+const APP_VERSION = '1.1.001';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -297,7 +298,7 @@ function attachMoneyInput(el){
 
 const state = {
   usuario: null, rol: null,
-  empresaId: null, empresaNombre: '', desglosarImpuestos: true,
+  empresaId: null, empresaNombre: '', desglosarImpuestos: true, logoUrl: '',
   sucursalId: null, sucursalNombre: '',
   almacenId: null, cajaId: null, cajaNombre: '',
   listaPrecioId: null, periodoOperacionId: null,
@@ -308,6 +309,14 @@ const state = {
   carrito: [], // {varianteId, nombre, precio, cantidad, impuestos:[{impuestoId,nombre,tasa}], stock, codigo}
   pagos: [], // {formaPagoId, monto, referencia}
 };
+
+// Ruta fija del logotipo dentro del bucket público "empresa" (mismo mecanismo que admin.html) — se
+// sube siempre como logo.png, así la pantalla de login puede mostrarlo sin consultar la base de datos
+// (antes de iniciar sesión todavía no se sabe qué empresa es).
+const LOGO_URL_FIJA = `${SUPABASE_URL}/storage/v1/object/public/empresa/logo.png`;
+$('login-logo').addEventListener('error', ()=>{ $('login-logo').style.display = 'none'; });
+$('login-logo').addEventListener('load', ()=>{ $('login-logo').style.display = 'block'; });
+$('login-logo').src = LOGO_URL_FIJA;
 
 function tasaTotal(item){
   return (item.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0), 0);
@@ -474,6 +483,7 @@ async function iniciarSesionApp(){
   state.empresaId = empresa.id;
   state.empresaNombre = empresa.nombre_comercial;
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
+  state.logoUrl = empresa.logo_url || '';
 
   const { data: sucursales } = await sb.from('sucursales').select('*').eq('empresa_id', empresa.id).eq('activo', true);
   if(!sucursales || sucursales.length===0){ mostrarError('La empresa no tiene sucursales activas.'); return; }
@@ -895,7 +905,9 @@ function mostrarTicket(ventaId, venta, desglose){
       : '';
     return `<div class="linea monto-grande"><span>${nombre}</span><span>${money(p.monto)}</span></div>${detalle}`;
   }).join('');
+  const logoHtml = state.logoUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${state.logoUrl}" alt="" style="max-height:56px;max-width:100%;object-fit:contain;"></div>` : '';
   const html = `
+    ${logoHtml}
     <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
     <p>Cliente: ${cliente?.nombre || 'Público en general'}<br>Atendió: ${state.usuario.nombre}</p>
     <table><tbody>${filasItems}</tbody></table>

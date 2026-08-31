@@ -85,11 +85,15 @@
 <body>
 
 <header id="header-app" style="display:none;">
-  <div>
-    <div class="marca" id="hdr-empresa">Mundo Kositas</div>
-    <div class="info" id="hdr-info"></div>
+  <div class="fila" style="align-items:center;gap:10px;">
+    <img id="hdr-logo" alt="" style="display:none;height:34px;width:34px;object-fit:contain;border-radius:6px;">
+    <div>
+      <div class="marca" id="hdr-empresa">Mundo Kositas</div>
+      <div class="info" id="hdr-info"></div>
+    </div>
   </div>
   <div class="acciones">
+    <button class="btn-gris" id="btn-config-empresa">Logotipo</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
 </header>
@@ -97,6 +101,7 @@
 <!-- LOGIN -->
 <div class="pantalla activa" id="pantalla-login">
   <div class="centrado card" id="card-login">
+    <img id="login-logo" alt="" style="display:none;max-height:64px;max-width:220px;object-fit:contain;margin:0 auto 12px;">
     <h1>Admin Kositas</h1>
     <p class="nota">Catálogo, precios e inventario — Mundo Kositas</p>
     <div class="campo"><label>Correo</label><input type="email" id="login-email" autocomplete="username"></div>
@@ -342,6 +347,23 @@
   </div>
 </div>
 
+<!-- MODAL: logotipo de la empresa (aparece en el ticket del POS, el encabezado de admin.html,
+     el Reporte de precios en PDF y las pantallas de login de ambas apps) -->
+<div class="modal-fondo" id="modal-empresa-config">
+  <div class="modal" id="card-empresa-config">
+    <h2 style="margin-top:0;">Logotipo de la empresa</h2>
+    <p class="nota">Se usa en el ticket del Punto de Venta, aquí en el encabezado, en el Reporte de precios exportado a PDF, y en las pantallas de inicio de sesión de ambas aplicaciones.</p>
+    <div style="text-align:center;margin:14px 0;">
+      <img id="empresa-logo-preview" alt="" style="display:none;max-height:120px;max-width:100%;object-fit:contain;">
+      <p class="nota" id="empresa-logo-vacio">Todavía no se ha subido un logotipo.</p>
+    </div>
+    <div class="campo"><label>Subir / reemplazar logotipo</label><input type="file" id="empresa-logo-archivo" accept="image/*"></div>
+    <p class="nota">Cualquier imagen sirve (PNG, JPG, etc.) — se ajusta automáticamente al formato correcto.</p>
+    <div id="empresa-logo-estado"></div>
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="empresa-config-cerrar">Cerrar</button>
+  </div>
+</div>
+
 <!-- MODAL: ver ticket de venta (desde el folio del Kardex) -->
 <div class="modal-fondo" id="modal-ticket">
   <div class="modal" id="card-ticket">
@@ -411,7 +433,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.4.002';
+const APP_VERSION = '1.5.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -528,7 +550,25 @@ const state = {
   catalogoOrden: [], indiceCatalogo: -1,
   formSnapshot: '', marcas: [],
   catalogoPagina: 1, catalogoPorPagina: 50,
+  logoUrl: '',
 };
+// Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
+// (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
+// cambia y las pantallas de login (antes de iniciar sesión, cuando todavía no se sabe qué empresa es)
+// pueden mostrarlo sin necesitar ninguna consulta a la base de datos.
+const LOGO_URL_FIJA = `${SUPABASE_URL}/storage/v1/object/public/empresa/logo.png`;
+$('login-logo').addEventListener('error', ()=>{ $('login-logo').style.display = 'none'; });
+$('login-logo').addEventListener('load', ()=>{ $('login-logo').style.display = 'block'; });
+$('login-logo').src = LOGO_URL_FIJA;
+// Muestra/oculta el logotipo del encabezado (ya autenticado) según haya URL guardada en la empresa.
+function actualizarLogoHeader(){
+  if(state.logoUrl){
+    $('hdr-logo').src = state.logoUrl;
+    $('hdr-logo').style.display = 'block';
+  } else {
+    $('hdr-logo').style.display = 'none';
+  }
+}
 
 function mostrarPantalla(id){
   document.querySelectorAll('.pantalla').forEach(p=>p.classList.remove('activa'));
@@ -561,6 +601,70 @@ async function hacerLogin(){
   await iniciarSesionApp();
 }
 $('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); location.reload(); });
+
+// ---------- LOGOTIPO DE LA EMPRESA ----------
+// Se sube siempre con el mismo nombre de archivo (logo.png) al bucket público "empresa", convertido
+// a PNG en el navegador si el original es de otro formato (para que la ruta pública sea siempre la
+// misma y las pantallas de login puedan mostrarlo sin consultar la base de datos — ver LOGO_URL_FIJA).
+$('btn-config-empresa').addEventListener('click', ()=>{
+  $('empresa-logo-estado').innerHTML = '';
+  if(state.logoUrl){
+    $('empresa-logo-preview').src = state.logoUrl;
+    $('empresa-logo-preview').style.display = 'block';
+    $('empresa-logo-vacio').style.display = 'none';
+  } else {
+    $('empresa-logo-preview').style.display = 'none';
+    $('empresa-logo-vacio').style.display = 'block';
+  }
+  $('empresa-logo-archivo').value = '';
+  $('modal-empresa-config').classList.add('activo');
+});
+$('empresa-config-cerrar').addEventListener('click', ()=>{ $('modal-empresa-config').classList.remove('activo'); });
+
+function convertirImagenAPng(archivo){
+  return new Promise((resolve, reject)=>{
+    const lector = new FileReader();
+    lector.onerror = ()=> reject(new Error('No se pudo leer el archivo.'));
+    lector.onload = ()=>{
+      const img = new Image();
+      img.onerror = ()=> reject(new Error('El archivo no es una imagen válida.'));
+      img.onload = ()=>{
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        canvas.toBlob(blob=>{
+          if(!blob) reject(new Error('No se pudo convertir la imagen.'));
+          else resolve(blob);
+        }, 'image/png');
+      };
+      img.src = lector.result;
+    };
+    lector.readAsDataURL(archivo);
+  });
+}
+$('empresa-logo-archivo').addEventListener('change', async (e)=>{
+  const archivo = e.target.files[0];
+  if(!archivo) return;
+  $('empresa-logo-estado').innerHTML = '<p class="nota">Subiendo logotipo…</p>';
+  try{
+    const png = await convertirImagenAPng(archivo);
+    const { error: errSubida } = await sb.storage.from('empresa').upload('logo.png', png, { upsert: true, contentType: 'image/png' });
+    if(errSubida) throw errSubida;
+    const { data: pub } = sb.storage.from('empresa').getPublicUrl('logo.png');
+    const urlConVersion = `${pub.publicUrl}?v=${Date.now()}`; // evita que el navegador muestre una copia vieja en caché
+    const { error: errGuardar } = await sb.from('empresas').update({ logo_url: urlConVersion }).eq('id', state.empresaId);
+    if(errGuardar) throw errGuardar;
+    state.logoUrl = urlConVersion;
+    actualizarLogoHeader();
+    $('empresa-logo-preview').src = urlConVersion;
+    $('empresa-logo-preview').style.display = 'block';
+    $('empresa-logo-vacio').style.display = 'none';
+    $('empresa-logo-estado').innerHTML = '<p class="nota">Logotipo actualizado.</p>';
+  } catch(err){
+    $('empresa-logo-estado').innerHTML = `<div class="msg-error">${err.message || 'No se pudo subir el logotipo.'}</div>`;
+  }
+});
 
 const ROLES_PERMITIDOS = ['Super Admin', 'Admin de Empresa', 'Gerente', 'Almacenista', 'Comprador'];
 
@@ -598,6 +702,7 @@ async function iniciarSesionApp(){
   if(!empresa){ return mostrarError('No se encontró una empresa activa para tu cuenta.'); }
   state.empresaId = empresa.id;
   state.empresaNombre = empresa.nombre_comercial;
+  state.logoUrl = empresa.logo_url || '';
 
   const { data: almacenes } = await sb.from('almacenes').select('*').eq('activo', true);
   state.almacenId = almacenes?.[0]?.id || null;
@@ -605,6 +710,7 @@ async function iniciarSesionApp(){
   $('hdr-empresa').textContent = state.empresaNombre;
   $('hdr-info').textContent = `${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
   $('header-app').style.display = 'flex';
+  actualizarLogoHeader();
 
   await cargarCatalogosBase();
   await cargarProductos();
@@ -1657,10 +1763,27 @@ function datosReporteActual(){
   });
   return { encabezados, filas, conImpuestos };
 }
-$('reporte-exportar').addEventListener('click', ()=>{
+$('reporte-exportar').addEventListener('click', async ()=>{
   const formato = $('reporte-formato-exportar').value;
-  if(formato === 'pdf') exportarReportePDF(); else exportarReporteExcel();
+  if(formato === 'pdf') await exportarReportePDF(); else exportarReporteExcel();
 });
+// Descarga el logotipo y lo regresa como data URL (jsPDF necesita los datos de la imagen ya
+// cargados, no solo su URL) — si no hay logotipo, o falla la descarga, regresa null y el PDF se
+// genera igual, sin logotipo, en vez de fallar toda la exportación.
+async function logoComoDataUrl(){
+  if(!state.logoUrl) return null;
+  try{
+    const resp = await fetch(state.logoUrl);
+    if(!resp.ok) return null;
+    const blob = await resp.blob();
+    return await new Promise(resolve=>{
+      const lector = new FileReader();
+      lector.onerror = ()=> resolve(null);
+      lector.onload = ()=> resolve(lector.result);
+      lector.readAsDataURL(blob);
+    });
+  } catch(err){ return null; }
+}
 function exportarReporteExcel(){
   const { encabezados, filas } = datosReporteActual();
   // Las columnas de precio se escriben como número real de Excel (no texto con "$"), con formato de
@@ -1681,19 +1804,24 @@ function exportarReporteExcel(){
   const fecha = new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb, `reporte_precios_${fecha}.xlsx`);
 }
-function exportarReportePDF(){
+async function exportarReportePDF(){
   const { encabezados, filas, conImpuestos } = datosReporteActual();
   const cuerpo = filas.map(fila => fila.map((v,i)=> i===0 ? v : (v==null ? '—' : money(v))));
   // columnStyles alinea a la derecha todas las columnas de precio (todas menos la 0, "Producto"),
   // tanto en el encabezado como en el cuerpo de la tabla.
   const columnStyles = {};
   for(let i=1; i<encabezados.length; i++) columnStyles[i] = { halign: 'right' };
+  const logoDataUrl = await logoComoDataUrl();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: encabezados.length > 4 ? 'landscape' : 'portrait' });
+  const margenTexto = logoDataUrl ? 34 : 14; // deja espacio para el logotipo a la izquierda del título
+  if(logoDataUrl){
+    try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* si el formato no es compatible, se omite el logotipo sin interrumpir la exportación */ }
+  }
   doc.setFontSize(14);
-  doc.text(`Reporte de lista de precios — ${state.empresaNombre || ''}`, 14, 16);
+  doc.text(`Reporte de lista de precios — ${state.empresaNombre || ''}`, margenTexto, 16);
   doc.setFontSize(10);
-  doc.text(`Generado: ${new Date().toLocaleString('es-MX')} — Precios ${conImpuestos?'con':'sin'} impuestos`, 14, 22);
+  doc.text(`Generado: ${new Date().toLocaleString('es-MX')} — Precios ${conImpuestos?'con':'sin'} impuestos`, margenTexto, 22);
   doc.autoTable({
     head: [encabezados], body: cuerpo, startY: 28,
     styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
