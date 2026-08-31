@@ -52,6 +52,7 @@
   .totales{margin-top:14px;font-size:.95rem;}
   .totales .linea{display:flex;justify-content:space-between;padding:4px 0;gap:12px;}
   .totales .total-final{font-size:1.3rem;font-weight:700;border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;}
+  .totales .linea.monto-grande{font-size:1.3rem;font-weight:700;padding:3px 0;}
   .pago-linea{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed var(--borde);}
   .pago-linea .pago-forma{flex:1 1 140px;}
   .pago-linea .pago-monto, .pago-linea .pago-recibido{flex:1 1 130px;min-width:120px;}
@@ -182,7 +183,8 @@
         <div id="pago-aviso" style="color:var(--rojo);font-size:.8rem;margin-top:6px;"></div>
         <div class="totales">
           <div class="linea"><span>Pagado</span><span id="tot-pagado">$0.00</span></div>
-          <div class="linea"><span id="restante-label">Restante</span><span id="tot-restante">$0.00</span></div>
+          <div class="linea"><span>Restante</span><span id="tot-restante">$0.00</span></div>
+          <div class="linea monto-grande"><span>Cambio a dar</span><span id="tot-cambio">$0.00</span></div>
         </div>
         <button class="btn-primario" id="btn-cobrar" style="width:100%;margin-top:10px;padding:14px;font-size:1.05rem;" disabled>Cobrar</button>
         <div id="cobro-error"></div>
@@ -256,7 +258,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.0.005';
+const APP_VERSION = '1.0.006';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -639,9 +641,10 @@ function recalcularTotales(){
   $('tot-total').textContent = money(total);
   const pagado = state.pagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);
   $('tot-pagado').textContent = money(pagado);
-  const restante = total - pagado;
-  $('restante-label').textContent = restante > 0 ? 'Restante' : 'Cambio';
-  $('tot-restante').textContent = money(Math.abs(restante));
+  const restante = Math.max(0, total - pagado);
+  $('tot-restante').textContent = money(restante);
+  const cambioTotal = state.pagos.reduce((s,p)=>s+(p.cambio||0),0);
+  $('tot-cambio').textContent = money(cambioTotal);
   state.pagos.forEach((p,i)=>{
     const nota = document.querySelector(`.pago-nota[data-idx="${i}"]`);
     if(!nota) return;
@@ -761,13 +764,14 @@ function mostrarTicket(ventaId, venta){
   const filasItems = state.carrito.map(l=>`
     <tr><td>${l.nombre} x${l.cantidad}</td><td class="num">${money(precioMostrar(l)*l.cantidad)}</td></tr>
   `).join('');
+  const cambioTotal = state.pagos.reduce((s,p)=>s+(p.cambio||0),0);
   const filasPagos = state.pagos.map(p=>{
     const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
     const nombre = forma?.nombre || 'Pago';
-    const cambio = p.cambio > 0.001
-      ? ` (recibió ${money(parseMoney(p.recibido))}, cambio ${money(p.cambio)})`
+    const detalle = p.cambio > 0.001
+      ? `<div class="nota" style="margin:0 0 6px;">(recibió ${money(parseMoney(p.recibido))})</div>`
       : '';
-    return `<tr><td>${nombre}${cambio}</td><td class="num">${money(p.monto)}</td></tr>`;
+    return `<div class="linea monto-grande"><span>${nombre}</span><span>${money(p.monto)}</span></div>${detalle}`;
   }).join('');
   const html = `
     <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
@@ -778,8 +782,11 @@ function mostrarTicket(ventaId, venta){
       <div class="linea"><span>Impuestos</span><span>${money(venta.impuesto_total)}</span></div>
       <div class="linea total-final"><span>Total</span><span>${money(venta.total)}</span></div>
     </div>
-    <p class="nota" style="margin-top:10px;">Forma de pago:</p>
-    <table><tbody>${filasPagos}</tbody></table>
+    <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Forma de pago:</p>
+    <div class="totales" style="margin-top:0;">
+      ${filasPagos}
+      <div class="linea monto-grande" style="border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;"><span>Cambio</span><span>${money(cambioTotal)}</span></div>
+    </div>
   `;
   $('ticket-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
