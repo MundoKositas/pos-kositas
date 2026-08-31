@@ -82,7 +82,9 @@
 
 <header id="header-app" style="display:none;">
   <div class="fila" style="align-items:center;gap:10px;">
-    <img id="hdr-logo" alt="" style="display:none;height:60px;width:auto;max-width:200px;object-fit:contain;">
+    <div id="hdr-logo-caja" style="display:none;background:#fff;border-radius:8px;padding:4px 10px;">
+      <img id="hdr-logo" alt="" style="display:block;height:52px;width:auto;max-width:190px;object-fit:contain;">
+    </div>
     <div>
       <div class="marca" id="hdr-empresa">Mundo Kositas</div>
       <div class="info" id="hdr-info"></div>
@@ -264,7 +266,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.1.003';
+const APP_VERSION = '1.1.004';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -581,9 +583,9 @@ async function entrarAlPOS(){
   $('hdr-info').textContent = `${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
   if(state.logoUrl){
     $('hdr-logo').src = state.logoUrl;
-    $('hdr-logo').style.display = 'block';
+    $('hdr-logo-caja').style.display = 'block';
   } else {
-    $('hdr-logo').style.display = 'none';
+    $('hdr-logo-caja').style.display = 'none';
   }
   $('nota-impuestos').textContent = state.desglosarImpuestos
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
