@@ -64,12 +64,15 @@
   .precio-calculado{font-size:1rem;font-weight:700;color:var(--azul);padding:8px 0;}
   .chip-impuesto{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--borde);border-radius:16px;padding:5px 10px;margin:0 6px 6px 0;font-size:.85rem;cursor:pointer;}
   .chip-impuesto input{width:auto;}
+  .codigo-fila{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
+  .codigo-fila .campo{margin-bottom:0;}
   @media (max-width:480px){
     header{padding:10px 12px;}
     .pantalla{padding:10px;}
     .card{padding:14px;}
     .centrado{margin:30px auto;}
     .grid-2{grid-template-columns:1fr;}
+    .codigo-fila{flex-wrap:wrap;}
   }
 </style>
 </head>
@@ -138,7 +141,7 @@
         <h2 style="margin:0;">Listas de precio</h2>
         <button class="btn-primario" id="btn-nueva-lista">+ Nueva lista de precio</button>
       </div>
-      <p class="nota">Una lista "directo" se captura precio por producto a mano. Una lista "costo + %" se calcula sola cada vez que cambia el costo del producto — nunca se edita el precio a mano en esas.</p>
+      <p class="nota">Una lista "directo" se captura precio por producto a mano. Una lista "costo + %" se calcula sola cada vez que cambia el costo del producto, usando el % de la lista salvo que el producto tenga su propio % específico capturado en su ficha.</p>
       <div class="tabla-scroll">
         <table>
           <thead><tr><th>Nombre</th><th>Modo</th><th class="num">% margen</th><th>Estado</th><th></th></tr></thead>
@@ -152,7 +155,10 @@
   <div class="tab-panel" id="tab-reporte" style="display:none;">
     <div class="card">
       <h2 style="margin-top:0;">Reporte de lista de precios</h2>
-      <p class="nota">Elige qué listas de precio quieres ver como columnas (precios sin impuestos).</p>
+      <p class="nota">Elige qué listas de precio quieres ver como columnas.</p>
+      <label style="display:inline-flex;align-items:center;gap:6px;margin:0 0 14px;">
+        <input type="checkbox" id="reporte-con-impuestos" style="width:auto;"> Mostrar precios con impuestos
+      </label>
       <div id="reporte-checks" style="margin-bottom:14px;"></div>
       <div class="tabla-scroll">
         <table>
@@ -168,6 +174,18 @@
 <div class="modal-fondo" id="modal-producto">
   <div class="modal ancho" id="card-producto">
     <h2 id="producto-titulo">Nuevo producto</h2>
+
+    <div class="campo">
+      <label>Imagen del producto</label>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <img id="prod-imagen-preview" src="" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--borde);display:none;">
+        <div style="flex:1;">
+          <input type="file" accept="image/*" id="prod-imagen-archivo">
+          <p class="nota" id="prod-imagen-estado" style="margin:4px 0 0;"></p>
+        </div>
+      </div>
+    </div>
+
     <div class="grid-2">
       <div class="campo"><label>Nombre</label><input type="text" id="prod-nombre"></div>
       <div class="campo"><label>Marca</label><input type="text" id="prod-marca"></div>
@@ -178,16 +196,21 @@
     </div>
     <div class="grid-2">
       <div class="campo"><label>Unidad de medida</label><select id="prod-unidad"></select></div>
-      <div class="campo"><label>Código de barras</label><input type="text" id="prod-codigo"></div>
+      <div class="campo"><label>Clave SAT prod/serv (opcional)</label><input type="text" id="prod-clave-sat"></div>
     </div>
     <div class="campo">
       <label>Impuestos aplicables</label>
+      <p class="nota" style="margin:0 0 6px;">Se llena solo desde el catálogo de impuestos — para agregar o quitar un impuesto de la lista, se hace en el catálogo de impuestos, no aquí.</p>
       <div id="prod-impuestos"></div>
     </div>
-    <div class="grid-2">
-      <div class="campo"><label>Costo de última compra</label><input type="text" inputmode="decimal" id="prod-costo"></div>
-      <div class="campo"><label>Clave SAT prod/serv (opcional)</label><input type="text" id="prod-clave-sat"></div>
+
+    <div class="campo">
+      <label>Códigos de barra</label>
+      <p class="nota" style="margin:0 0 6px;">El primero es el principal (individual). Agrega más si el producto también se vende o compra en caja/paquete con su propio código — indica cuántas piezas individuales trae.</p>
+      <div id="prod-codigos"></div>
+      <button type="button" class="btn-secundario" id="btn-agregar-codigo">+ Agregar código de barras</button>
     </div>
+
     <div class="grid-2">
       <div class="campo"><label>Mínimo (punto de reorden)</label><input type="number" step="1" min="0" id="prod-minimo" value="0"></div>
       <div class="campo"><label>Máximo</label><input type="number" step="1" min="0" id="prod-maximo" value="0"></div>
@@ -199,8 +222,12 @@
     <div class="campo">
       <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo" checked style="width:auto;"> Activo (visible en el POS)</label>
     </div>
+    <div class="campo">
+      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo-reparto" checked style="width:auto;"> Activo en el catálogo del servicio a domicilio</label>
+    </div>
 
-    <h2>Precios por lista</h2>
+    <h2>Costo y precios</h2>
+    <p class="nota">El costo solo se actualiza con las compras (entradas de inventario, aún por construir) — aquí siempre es de solo lectura.</p>
     <div id="prod-precios"></div>
 
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -223,7 +250,7 @@
       </select>
     </div>
     <div class="campo" id="lista-porcentaje-campo" style="display:none;">
-      <label>% de margen sobre el costo</label>
+      <label>% de margen sobre el costo (default — cada producto puede tener el suyo propio)</label>
       <input type="number" step="0.01" id="lista-porcentaje">
     </div>
     <div class="campo">
@@ -246,11 +273,26 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.0.001';
+const APP_VERSION = '1.1.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+
+// Redondeo especial SOLO para precios calculados por % sobre costo (regla confirmada por Adrián,
+// por efecto de monedas fraccionarias): .00 se queda, .01-.50 sube a .50, .51-.99 sube al peso siguiente.
+// Debe coincidir exactamente con la función redondear_precio_lista() del lado de la base de datos.
+function redondearPrecioLista(n){
+  if(n===null || n===undefined || isNaN(n)) return null;
+  const cents = Math.round(n*100);
+  const enteroCents = Math.floor(cents/100)*100;
+  const frac = cents - enteroCents;
+  let resultCents;
+  if(frac === 0) resultCents = enteroCents;
+  else if(frac >= 1 && frac <= 50) resultCents = enteroCents + 50;
+  else resultCents = enteroCents + 100;
+  return resultCents / 100;
+}
 
 function parseMoney(str){
   if(str===null || str===undefined) return NaN;
@@ -275,7 +317,7 @@ function habilitarEnterSecuencial(container, boton){
   container.addEventListener('keydown', e=>{
     if(e.key !== 'Enter') return;
     const campos = Array.from(container.querySelectorAll('input, select'))
-      .filter(el=>!el.disabled && el.offsetParent!==null);
+      .filter(el=>!el.disabled && el.offsetParent!==null && el.type!=='file');
     const idx = campos.indexOf(e.target);
     if(idx === -1) return;
     e.preventDefault();
@@ -304,6 +346,7 @@ const state = {
   productos: [], impuestos: [], categorias: [], lineas: [], unidades: [], listasPrecio: [],
   productoEditId: null, varianteEditId: null,
   listaEditId: null,
+  costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
 };
 
 function mostrarPantalla(id){
@@ -315,10 +358,6 @@ $('version-tag').textContent = APP_VERSION;
 habilitarEnterSecuencial($('card-login'), $('btn-login'));
 habilitarEnterSecuencial($('card-producto'), $('prod-guardar'));
 habilitarEnterSecuencial($('card-lista'), $('lista-guardar'));
-
-attachMoneyInput($('prod-costo'));
-$('prod-costo').addEventListener('input', ()=>recalcularPreciosModal());
-$('prod-costo').addEventListener('blur', ()=>recalcularPreciosModal());
 
 // ---------- LOGIN ----------
 $('btn-login').addEventListener('click', hacerLogin);
@@ -430,27 +469,35 @@ function llenarSelect(id, items, valFn, textFn){
 async function cargarProductos(){
   const { data, error } = await sb.from('variantes').select(`
     id, nombre_variante, activo,
-    producto:productos(id, nombre, marca, activo, costo_ultima_compra, linea_articulo_id, unidad_medida_id,
-      clave_prod_serv_sat, inventariable, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
-    precios:variante_precios(precio, lista_precio_id),
+    producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
+      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable,
+      producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+    precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
     stock:existencias(cantidad, minimo, maximo, almacen_id),
-    codigos:codigos_barra(codigo)
+    codigos:codigos_barra(codigo, tipo, factor_unidades_base)
   `);
   if(error){ console.error(error); return; }
   state.productos = (data||[]).map(v=>{
     const existenciaAlmacen = (v.stock||[]).find(s=>s.almacen_id===state.almacenId) || v.stock?.[0];
+    const codigos = (v.codigos||[]).map(c=>({codigo: c.codigo, tipo: c.tipo, factor: c.factor_unidades_base}));
     return {
       varianteId: v.id, nombreVariante: v.nombre_variante, activoVariante: v.activo,
       productoId: v.producto.id, nombre: v.producto.nombre, marca: v.producto.marca || '',
-      activo: v.producto.activo, costo: v.producto.costo_ultima_compra,
+      activo: v.producto.activo, activoReparto: v.producto.activo_reparto,
+      imagenUrl: v.producto.imagen_url || null,
+      costo: v.producto.costo_ultima_compra,
       lineaArticuloId: v.producto.linea_articulo_id, unidadMedidaId: v.producto.unidad_medida_id,
       claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable,
       impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
         impuestoId: pi.impuesto_id, nombre: pi.impuestos?.nombre || 'Impuesto', tasa: Number(pi.impuestos?.tasa)||0,
       })),
-      precios: (v.precios||[]).map(p=>({ listaPrecioId: p.lista_precio_id, precio: Number(p.precio) })),
+      precios: (v.precios||[]).map(p=>({
+        listaPrecioId: p.lista_precio_id, precio: Number(p.precio),
+        porcentajeManual: p.porcentaje_margen_manual!=null ? Number(p.porcentaje_margen_manual) : null,
+      })),
       stock: existenciaAlmacen?.cantidad ?? 0, minimo: existenciaAlmacen?.minimo ?? 0, maximo: existenciaAlmacen?.maximo ?? 0,
-      codigo: v.codigos?.[0]?.codigo || '',
+      codigos,
+      codigoPrincipal: codigos.find(c=>c.tipo==='individual')?.codigo || codigos[0]?.codigo || '',
     };
   });
   renderCatalogo();
@@ -463,7 +510,8 @@ function renderCatalogo(){
   const listaPublica = state.listasPrecio.find(l=>l.nombre.toLowerCase().includes('público') || l.nombre.toLowerCase().includes('publico'));
   const items = state.productos.filter(p=>{
     if(!filtro) return true;
-    return p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || p.codigo.includes(filtro);
+    const codigosTxt = p.codigos.map(c=>c.codigo).join(' ').toLowerCase();
+    return p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || codigosTxt.includes(filtro);
   }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 
   $('cat-vacio').style.display = items.length ? 'none' : 'block';
@@ -472,8 +520,9 @@ function renderCatalogo(){
     const bajoMinimo = p.inventariable && Number(p.stock) <= Number(p.minimo) && Number(p.maximo) > 0;
     const estadoTag = !p.activo ? '<span class="tag tag-off">Inactivo</span>' : (bajoMinimo ? '<span class="tag tag-bajo">Bajo mínimo</span>' : '<span class="tag tag-ok">Activo</span>');
     const impuestosTxt = p.impuestos.map(i=>i.nombre).join(', ') || '—';
+    const nombreCelda = `${p.imagenUrl?`<img src="${p.imagenUrl}" alt="" style="width:26px;height:26px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px;">`:''}${p.nombre}${p.codigoPrincipal?` <span class="nota">(${p.codigoPrincipal})</span>`:''}`;
     return `<tr class="fila-clic" data-variante="${p.varianteId}">
-      <td>${p.nombre}${p.codigo?` <span class="nota">(${p.codigo})</span>`:''}</td>
+      <td>${nombreCelda}</td>
       <td>${p.marca||'—'}</td>
       <td class="num">${p.costo!=null ? money(p.costo) : '—'}</td>
       <td class="num">${precioPub ? money(precioPub.precio) : '—'}</td>
@@ -491,22 +540,99 @@ function renderCatalogo(){
 // ---------- MODAL PRODUCTO ----------
 $('btn-nuevo-producto').addEventListener('click', ()=>abrirProducto(null));
 
+$('prod-imagen-archivo').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  $('prod-imagen-estado').textContent = 'Subiendo imagen…';
+  const nombreArchivo = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const { error } = await sb.storage.from('productos').upload(nombreArchivo, file, { upsert: true });
+  if(error){
+    $('prod-imagen-estado').textContent = `Error al subir la imagen: ${error.message}`;
+    return;
+  }
+  const { data } = sb.storage.from('productos').getPublicUrl(nombreArchivo);
+  state.imagenUrlNueva = data.publicUrl;
+  $('prod-imagen-preview').src = data.publicUrl;
+  $('prod-imagen-preview').style.display = 'block';
+  $('prod-imagen-estado').textContent = 'Imagen lista — se guardará junto con el producto.';
+});
+
+function renderCodigosBarra(codigos){
+  const cont = $('prod-codigos');
+  const lista = (codigos && codigos.length) ? codigos : [{codigo:'', tipo:'individual', factor:1}];
+  cont.innerHTML = lista.map((c,i)=>`
+    <div class="codigo-fila" data-idx="${i}">
+      <div class="campo" style="flex:1;"><label>${i===0?'Código principal':'Código adicional'}</label><input type="text" class="codigo-valor" value="${c.codigo||''}"></div>
+      <div class="campo" style="max-width:150px;"><label>Tipo</label>
+        <select class="codigo-tipo">
+          <option value="individual" ${c.tipo!=='empaque'?'selected':''}>Individual</option>
+          <option value="empaque" ${c.tipo==='empaque'?'selected':''}>Empaque</option>
+        </select>
+      </div>
+      <div class="campo codigo-factor-campo" style="max-width:100px;display:${c.tipo==='empaque'?'block':'none'};">
+        <label>Piezas</label><input type="number" min="1" step="1" class="codigo-factor" value="${c.factor||1}">
+      </div>
+      <button type="button" class="btn-gris btn-quitar-codigo">Quitar</button>
+    </div>
+  `).join('');
+  cont.querySelectorAll('.codigo-tipo').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const factorCampo = sel.closest('.codigo-fila').querySelector('.codigo-factor-campo');
+      factorCampo.style.display = sel.value==='empaque' ? 'block' : 'none';
+    });
+  });
+  cont.querySelectorAll('.btn-quitar-codigo').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const filas = leerCodigosBarra();
+      const idx = Number(btn.closest('.codigo-fila').dataset.idx);
+      filas.splice(idx,1);
+      renderCodigosBarra(filas);
+    });
+  });
+}
+function leerCodigosBarra(){
+  return Array.from($('prod-codigos').querySelectorAll('.codigo-fila')).map(fila=>({
+    codigo: fila.querySelector('.codigo-valor').value.trim(),
+    tipo: fila.querySelector('.codigo-tipo').value,
+    factor: Number(fila.querySelector('.codigo-factor').value) || 1,
+  }));
+}
+$('btn-agregar-codigo').addEventListener('click', ()=>{
+  const filas = leerCodigosBarra();
+  filas.push({codigo:'', tipo:'individual', factor:1});
+  renderCodigosBarra(filas);
+});
+
 function abrirProducto(varianteId){
   state.varianteEditId = varianteId;
   const p = varianteId ? state.productos.find(x=>x.varianteId===varianteId) : null;
   state.productoEditId = p ? p.productoId : null;
+  state.costoActual = p?.costo ?? null;
+  state.imagenUrlActual = p?.imagenUrl || null;
+  state.imagenUrlNueva = null;
   $('prod-error').innerHTML = '';
   $('producto-titulo').textContent = p ? 'Editar producto' : 'Nuevo producto';
   $('prod-nombre').value = p?.nombre || '';
   $('prod-marca').value = p?.marca || '';
-  $('prod-codigo').value = p?.codigo || '';
   $('prod-clave-sat').value = p?.claveSat || '';
   $('prod-minimo').value = p?.minimo ?? 0;
   $('prod-maximo').value = p?.maximo ?? 0;
   $('prod-inventariable').checked = p ? !!p.inventariable : true;
   $('prod-activo').checked = p ? !!p.activo : true;
+  $('prod-activo-reparto').checked = p ? !!p.activoReparto : true;
   $('prod-cant-inicial-campo').style.display = p ? 'none' : 'block';
   $('prod-cant-inicial').value = 0;
+
+  $('prod-imagen-archivo').value = '';
+  if(state.imagenUrlActual){
+    $('prod-imagen-preview').src = state.imagenUrlActual;
+    $('prod-imagen-preview').style.display = 'block';
+  } else {
+    $('prod-imagen-preview').style.display = 'none';
+  }
+  $('prod-imagen-estado').textContent = '';
+
+  renderCodigosBarra(p?.codigos && p.codigos.length ? p.codigos : [{codigo:'', tipo:'individual', factor:1}]);
 
   if(p){
     $('prod-categoria').value = state.lineas.find(l=>l.id===p.lineaArticuloId)?.categoria_id || state.categorias[0]?.id || '';
@@ -524,8 +650,6 @@ function abrirProducto(varianteId){
   `).join('');
   $('prod-impuestos').querySelectorAll('.chk-impuesto').forEach(chk=>chk.addEventListener('change', recalcularPreciosModal));
 
-  $('prod-costo').value = p?.costo != null ? money(Number(p.costo)) : '';
-
   renderPreciosModal(p);
   $('modal-producto').classList.add('activo');
   $('prod-nombre').focus();
@@ -541,24 +665,52 @@ function tasaTotalSeleccionada(){
 
 function renderPreciosModal(p){
   const cont = $('prod-precios');
-  const listasActivas = state.listasPrecio.filter(l=>l.activo);
-  cont.innerHTML = listasActivas.map(lista=>{
-    const precioExistente = p?.precios?.find(pr=>pr.listaPrecioId===lista.id)?.precio;
+  const costo = state.costoActual;
+  const tasa = tasaTotalSeleccionada();
+  const costoSin = costo!=null ? money(costo) : '— (sin compras registradas)';
+  const costoCon = costo!=null ? money(redondear2(costo*(1+tasa))) : '— (sin compras registradas)';
+
+  let html = `<div class="lista-precio-campo">
+      <div class="titulo">Costo de última compra</div>
+      <div class="par">
+        <div><label>Sin impuestos</label><div class="precio-calculado" id="costo-sin-impuestos" style="font-size:.95rem;">${costoSin}</div></div>
+        <div><label>Con impuestos</label><div class="precio-calculado" id="costo-con-impuestos" style="font-size:.95rem;">${costoCon}</div></div>
+      </div>
+    </div>`;
+
+  const listasActivas = [...state.listasPrecio.filter(l=>l.activo)].sort((a,b)=>{
+    const aPub = /p[uú]blico/i.test(a.nombre) ? 0 : 1;
+    const bPub = /p[uú]blico/i.test(b.nombre) ? 0 : 1;
+    if(aPub !== bPub) return aPub - bPub;
+    return a.nombre.localeCompare(b.nombre);
+  });
+
+  html += listasActivas.map(lista=>{
+    const precioExistente = p?.precios?.find(pr=>pr.listaPrecioId===lista.id);
     if(lista.modo_calculo === 'porcentaje_sobre_costo'){
+      const overrideVal = precioExistente?.porcentajeManual;
       return `<div class="lista-precio-campo" data-lista="${lista.id}" data-modo="porcentaje">
-        <div class="titulo">${lista.nombre} — costo + ${lista.porcentaje_margen||0}%</div>
-        <div class="precio-calculado" id="precio-calc-${lista.id}">—</div>
-        <p class="nota" style="margin:0;">Se calcula solo a partir del costo de última compra. No se edita a mano.</p>
+        <div class="titulo">${lista.nombre} — costo + % de margen (default de la lista: ${lista.porcentaje_margen||0}%)</div>
+        <div class="campo" style="max-width:320px;">
+          <label>% de margen específico para este producto (opcional)</label>
+          <input type="number" step="0.01" class="porcentaje-override" placeholder="usar ${lista.porcentaje_margen||0}% de la lista" value="${overrideVal!=null?overrideVal:''}">
+        </div>
+        <div class="par">
+          <div><label>Sin impuestos</label><div class="precio-calculado" id="precio-calc-sin-${lista.id}" style="font-size:.95rem;">—</div></div>
+          <div><label>Con impuestos</label><div class="precio-calculado" id="precio-calc-con-${lista.id}" style="font-size:.95rem;">—</div></div>
+        </div>
       </div>`;
     }
     return `<div class="lista-precio-campo" data-lista="${lista.id}" data-modo="directo">
       <div class="titulo">${lista.nombre}</div>
       <div class="par">
-        <div><label>Precio sin impuestos</label><input type="text" inputmode="decimal" class="precio-sin" data-lista="${lista.id}" value="${precioExistente!=null?precioExistente.toFixed(2):''}"></div>
+        <div><label>Precio sin impuestos</label><input type="text" inputmode="decimal" class="precio-sin" data-lista="${lista.id}" value="${precioExistente!=null?Number(precioExistente.precio).toFixed(2):''}"></div>
         <div><label>Precio con impuestos</label><input type="text" inputmode="decimal" class="precio-con" data-lista="${lista.id}"></div>
       </div>
     </div>`;
   }).join('');
+
+  cont.innerHTML = html;
 
   cont.querySelectorAll('.precio-sin').forEach(el=>{
     attachMoneyInput(el);
@@ -575,27 +727,47 @@ function renderPreciosModal(p){
     el.addEventListener('input', ()=>{
       const con = parseMoney(el.value); if(isNaN(con)) return;
       const sinEl = cont.querySelector(`.precio-sin[data-lista="${el.dataset.lista}"]`);
-      const tasa = tasaTotalSeleccionada();
-      sinEl.value = redondear2(con / (1+tasa)).toFixed(2);
+      const tasaAct = tasaTotalSeleccionada();
+      sinEl.value = redondear2(con / (1+tasaAct)).toFixed(2);
     });
   });
+  cont.querySelectorAll('.porcentaje-override').forEach(el=>{
+    el.addEventListener('input', recalcularPreciosModal);
+  });
+
   recalcularPreciosModal();
 }
 
 function recalcularPreciosModal(){
   const tasa = tasaTotalSeleccionada();
+  const costo = state.costoActual;
+
+  const costoConEl = $('costo-con-impuestos');
+  if(costoConEl){ costoConEl.textContent = costo!=null ? money(redondear2(costo*(1+tasa))) : '— (sin compras registradas)'; }
+
   document.querySelectorAll('#prod-precios .precio-sin').forEach(el=>{
     const conEl = document.querySelector(`#prod-precios .precio-con[data-lista="${el.dataset.lista}"]`);
     const sin = parseMoney(el.value);
     if(!isNaN(sin) && conEl){ conEl.value = money(redondear2(sin * (1+tasa))); }
   });
-  const costo = parseMoney($('prod-costo').value);
+
   document.querySelectorAll('#prod-precios [data-modo="porcentaje"]').forEach(div=>{
     const listaId = div.dataset.lista;
     const lista = state.listasPrecio.find(l=>l.id===listaId);
-    const calcEl = $(`precio-calc-${listaId}`);
-    if(isNaN(costo)){ calcEl.textContent = 'Sin costo capturado'; return; }
-    calcEl.textContent = money(redondear2(costo * (1 + (lista?.porcentaje_margen||0)/100)));
+    const overrideInput = div.querySelector('.porcentaje-override');
+    const overrideTxt = overrideInput ? overrideInput.value.trim() : '';
+    const pct = overrideTxt !== '' ? parseFloat(overrideTxt) : (lista?.porcentaje_margen || 0);
+    const calcSin = $(`precio-calc-sin-${listaId}`);
+    const calcCon = $(`precio-calc-con-${listaId}`);
+    if(costo==null){
+      if(calcSin) calcSin.textContent = 'Sin costo capturado';
+      if(calcCon) calcCon.textContent = 'Sin costo capturado';
+      return;
+    }
+    const sinCalc = redondearPrecioLista(costo * (1 + (isNaN(pct)?0:pct) / 100));
+    const conCalc = redondear2(sinCalc * (1+tasa));
+    if(calcSin) calcSin.textContent = money(sinCalc);
+    if(calcCon) calcCon.textContent = money(conCalc);
   });
 }
 
@@ -608,20 +780,39 @@ $('prod-guardar').addEventListener('click', async ()=>{
   const nombre = $('prod-nombre').value.trim();
   if(!nombre){ $('prod-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; $('prod-guardar').disabled=false; return; }
 
+  const codigosBarraPayload = leerCodigosBarra().filter(c=>c.codigo);
+  const codigosVistos = new Set();
+  for(const c of codigosBarraPayload){
+    if(codigosVistos.has(c.codigo)){
+      $('prod-error').innerHTML = `<div class="msg-error">El código de barras ${c.codigo} está repetido en este mismo producto.</div>`;
+      $('prod-guardar').disabled = false;
+      return;
+    }
+    codigosVistos.add(c.codigo);
+  }
+
   const impuestoIds = Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(chk=>chk.value);
   const preciosDirectos = Array.from(document.querySelectorAll('#prod-precios .precio-sin')).map(el=>({
     lista_precio_id: el.dataset.lista, precio: parseMoney(el.value)||0,
   }));
+  const preciosPorcentaje = Array.from(document.querySelectorAll('#prod-precios [data-modo="porcentaje"]')).map(div=>{
+    const overrideInput = div.querySelector('.porcentaje-override');
+    const val = overrideInput ? overrideInput.value.trim() : '';
+    return { lista_precio_id: div.dataset.lista, porcentaje_margen_manual: val==='' ? null : parseFloat(val) };
+  });
 
   const payload = {
     producto_id: state.productoEditId, variante_id: state.varianteEditId,
     empresa_id: state.empresaId, nombre, marca: $('prod-marca').value.trim(),
     linea_articulo_id: $('prod-linea').value, unidad_medida_id: $('prod-unidad').value,
     inventariable: $('prod-inventariable').checked, clave_prod_serv_sat: $('prod-clave-sat').value.trim(),
-    costo_ultima_compra: parseMoney($('prod-costo').value), activo: $('prod-activo').checked,
-    nombre_variante: 'Único', impuesto_ids: impuestoIds, precios_directos: preciosDirectos,
+    activo: $('prod-activo').checked, activo_reparto: $('prod-activo-reparto').checked,
+    imagen_url: state.imagenUrlNueva || state.imagenUrlActual || null,
+    nombre_variante: 'Único', impuesto_ids: impuestoIds,
+    precios_directos: preciosDirectos, precios_porcentaje: preciosPorcentaje,
     almacen_id: state.almacenId, minimo: $('prod-minimo').value, maximo: $('prod-maximo').value,
-    cantidad_inicial: $('prod-cant-inicial').value, codigo_barra: $('prod-codigo').value.trim(),
+    cantidad_inicial: $('prod-cant-inicial').value,
+    codigos_barra: codigosBarraPayload.map(c=>({ codigo: c.codigo, tipo: c.tipo, factor_unidades_base: c.factor })),
   };
 
   const { error } = await sb.rpc('guardar_producto', { p: payload });
@@ -719,17 +910,23 @@ function renderReporteChecks(){
       <input type="checkbox" class="chk-reporte-lista" value="${l.id}" style="width:auto;" checked> ${l.nombre}
     </label>`).join('');
   $('reporte-checks').querySelectorAll('.chk-reporte-lista').forEach(chk=>chk.addEventListener('change', renderReporte));
+  renderReporte(); // los checkboxes se acaban de recrear — refleja de inmediato el estado marcado (todas activas por default).
 }
+$('reporte-con-impuestos').addEventListener('change', renderReporte);
 
 function renderReporte(){
   const listaIds = Array.from(document.querySelectorAll('.chk-reporte-lista:checked')).map(chk=>chk.value);
   const listas = state.listasPrecio.filter(l=>listaIds.includes(l.id));
-  $('reporte-encabezado').innerHTML = '<th>Producto</th>' + listas.map(l=>`<th class="num">${l.nombre}</th>`).join('');
+  const conImpuestos = $('reporte-con-impuestos').checked;
+  $('reporte-encabezado').innerHTML = '<th>Producto</th>' + listas.map(l=>`<th class="num">${l.nombre}${conImpuestos?' (con imp.)':' (sin imp.)'}</th>`).join('');
   const productosOrdenados = [...state.productos].sort((a,b)=>a.nombre.localeCompare(b.nombre));
   $('reporte-tabla-body').innerHTML = productosOrdenados.map(p=>{
+    const tasaProducto = p.impuestos.reduce((s,i)=>s+i.tasa, 0);
     const celdas = listas.map(l=>{
       const precio = p.precios.find(pr=>pr.listaPrecioId===l.id);
-      return `<td class="num">${precio ? money(precio.precio) : '—'}</td>`;
+      if(!precio) return `<td class="num">—</td>`;
+      const valor = conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : precio.precio;
+      return `<td class="num">${money(valor)}</td>`;
     }).join('');
     return `<tr><td>${p.nombre}${p.marca?` <span class="nota">(${p.marca})</span>`:''}</td>${celdas}</tr>`;
   }).join('');
