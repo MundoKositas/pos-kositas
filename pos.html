@@ -22,6 +22,7 @@
   .btn-secundario{background:#fff;color:var(--verde);border:1px solid var(--verde);}
   .btn-peligro{background:var(--rojo);color:#fff;}
   .btn-gris{background:#e5e7eb;color:#333;}
+  .tecla{display:inline-block;margin-left:7px;padding:1px 6px;background:rgba(0,0,0,.18);border-radius:4px;font-size:.72rem;font-family:monospace;vertical-align:1px;}
   button:disabled{opacity:.5;cursor:not-allowed;}
   input,select{padding:9px 10px;border:1px solid var(--borde);border-radius:6px;font-size:.95rem;width:100%;}
   input.money-input{text-align:right;font-variant-numeric:tabular-nums;}
@@ -179,14 +180,15 @@
           <div class="linea total-final"><span>Total</span><span id="tot-total">$0.00</span></div>
         </div>
         <div id="pagos-lista" style="margin-top:14px;"></div>
-        <button class="btn-secundario" id="btn-agregar-pago" style="width:100%;margin-top:6px;">+ Forma de pago</button>
+        <button class="btn-secundario" id="btn-agregar-pago" style="width:100%;margin-top:6px;">+ Forma de pago <span class="tecla">F2</span></button>
+        <p class="nota" style="margin-top:6px;">Atajos: <strong>F3</strong> todo en efectivo · <strong>F5</strong> tarjeta de crédito · <strong>F6</strong> tarjeta de débito</p>
         <div id="pago-aviso" style="color:var(--rojo);font-size:.8rem;margin-top:6px;"></div>
         <div class="totales">
           <div class="linea"><span>Pagado</span><span id="tot-pagado">$0.00</span></div>
           <div class="linea"><span>Restante</span><span id="tot-restante">$0.00</span></div>
           <div class="linea monto-grande"><span>Cambio a dar</span><span id="tot-cambio">$0.00</span></div>
         </div>
-        <button class="btn-primario" id="btn-cobrar" style="width:100%;margin-top:10px;padding:14px;font-size:1.05rem;" disabled>Cobrar</button>
+        <button class="btn-primario" id="btn-cobrar" style="width:100%;margin-top:10px;padding:14px;font-size:1.05rem;" disabled>Cobrar <span class="tecla">F4</span></button>
         <div id="cobro-error"></div>
       </div>
     </div>
@@ -242,8 +244,8 @@
     <h2>Venta registrada</h2>
     <div id="ticket-body" style="font-size:.9rem;"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
-      <button class="btn-secundario" style="flex:1;" id="ticket-imprimir">Imprimir</button>
-      <button class="btn-primario" style="flex:1;" id="ticket-nueva-venta">Nueva venta</button>
+      <button class="btn-secundario" style="flex:1;" id="ticket-imprimir">Imprimir <span class="tecla">F7</span></button>
+      <button class="btn-primario" style="flex:1;" id="ticket-nueva-venta">Nueva venta <span class="tecla">F8</span></button>
     </div>
   </div>
 </div>
@@ -258,7 +260,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.0.008';
+const APP_VERSION = '1.0.009';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -356,6 +358,49 @@ habilitarEnterSecuencial($('card-abrir-caja'), $('btn-abrir-caja'));
 habilitarEnterSecuencial($('card-cobro'), $('btn-cobrar'));
 habilitarEnterSecuencial($('modal-movimiento'), $('mov-confirmar'));
 habilitarEnterSecuencial($('modal-cerrar-caja'), $('cierre-confirmar'));
+
+// ---------- TECLAS DE FUNCIÓN (para operar el cobro sin mouse) ----------
+// F2-F8 se reservan para el sistema: SIEMPRE se bloquea el comportamiento del navegador para
+// estas teclas (ej. F5 normalmente recarga la página — eso perdería la venta en curso), y solo
+// hacen algo cuando la pantalla o modal al que pertenecen está realmente activo.
+// Reemplaza todas las líneas de pago por una sola con la forma de pago indicada, cubriendo el
+// total de la venta — igual que si el cajero diera "+ Forma de pago" y la capturara a mano.
+function usarFormaPagoUnica(nombreForma){
+  if(state.carrito.length===0) return;
+  const forma = state.formasPago.find(f=>f.nombre===nombreForma);
+  const { total } = calcularTotales();
+  if(!forma || total<=0) return;
+  const linea = { formaPagoId: forma.id, monto: total.toFixed(2), referencia: '' };
+  if(forma.nombre === 'Efectivo') linea.recibido = total.toFixed(2);
+  state.pagos = [linea];
+  renderPagos();
+  const campo = document.querySelector(
+    forma.requiere_autorizacion
+      ? '.pago-linea:last-child .pago-referencia'
+      : '.pago-linea:last-child .pago-recibido, .pago-linea:last-child .pago-monto'
+  );
+  if(campo){ campo.focus(); if(campo.select) campo.select(); }
+}
+
+const TECLAS_FUNCION = ['F2','F3','F4','F5','F6','F7','F8'];
+document.addEventListener('keydown', (e)=>{
+  if(!TECLAS_FUNCION.includes(e.key)) return;
+  e.preventDefault(); // bloquea siempre el uso que le da el navegador/Windows a estas teclas
+  const ticketActivo = $('modal-ticket').classList.contains('activo');
+  const cobroActivo = $('pantalla-pos').classList.contains('activa') && !document.querySelector('.modal-fondo.activo');
+  if(ticketActivo){
+    if(e.key==='F7') $('ticket-imprimir').click();
+    else if(e.key==='F8') $('ticket-nueva-venta').click();
+    return;
+  }
+  if(cobroActivo){
+    if(e.key==='F2'){ if(!$('btn-agregar-pago').disabled) $('btn-agregar-pago').click(); }
+    else if(e.key==='F3'){ usarFormaPagoUnica('Efectivo'); }
+    else if(e.key==='F4'){ if(!$('btn-cobrar').disabled) $('btn-cobrar').click(); }
+    else if(e.key==='F5'){ usarFormaPagoUnica('Tarjeta de crédito'); }
+    else if(e.key==='F6'){ usarFormaPagoUnica('Tarjeta de débito'); }
+  }
+});
 
 // ---------- LOGIN ----------
 $('btn-login').addEventListener('click', hacerLogin);
@@ -520,7 +565,7 @@ async function entrarAlPOS(){
 async function cargarCatalogo(){
   const { data, error } = await sb.from('variantes').select(`
     id, nombre_variante, activo,
-    producto:productos(id, nombre, marca, activo, empresa_id, producto_impuestos(impuesto_id, impuestos(tasa))),
+    producto:productos(id, nombre, marca, activo, empresa_id, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id),
     stock:existencias(cantidad, almacen_id),
     codigos:codigos_barra(codigo)
@@ -633,6 +678,12 @@ function renderCarrito(){
   recalcularTotales();
 }
 
+// Ningún importe de dinero debe quedar con más de 2 decimales (ni por errores de punto
+// flotante, ej. 40 * 0.08 en JS no da exactamente 3.20). Todo cálculo de dinero pasa por aquí.
+function redondear2(n){
+  return Math.round((Number(n)||0) * 100) / 100;
+}
+
 function calcularTotales(){
   // El desglose de impuestos es dinámico: solo aparecen los impuestos que de verdad
   // traen los productos del carrito (según el catálogo), no una lista fija en el código.
@@ -641,16 +692,17 @@ function calcularTotales(){
   let subtotal = 0;
   const desglose = {}; // { impuesto_id: {nombre, tasa, monto} }
   for(const l of state.carrito){
-    const lineaBase = l.precio * l.cantidad;
+    const lineaBase = redondear2(l.precio * l.cantidad);
     subtotal += lineaBase;
     (l.impuestos||[]).forEach(imp=>{
-      const monto = lineaBase * (imp.tasa||0);
+      const monto = redondear2(lineaBase * (imp.tasa||0));
       if(!desglose[imp.impuestoId]) desglose[imp.impuestoId] = { nombre: imp.nombre, tasa: imp.tasa, monto: 0 };
-      desglose[imp.impuestoId].monto += monto;
+      desglose[imp.impuestoId].monto = redondear2(desglose[imp.impuestoId].monto + monto);
     });
   }
-  const impuesto = Object.values(desglose).reduce((s,d)=>s+d.monto, 0);
-  const total = subtotal + impuesto;
+  subtotal = redondear2(subtotal);
+  const impuesto = redondear2(Object.values(desglose).reduce((s,d)=>s+d.monto, 0));
+  const total = redondear2(subtotal + impuesto);
   return { subtotal, impuesto, desglose, total };
 }
 
@@ -672,9 +724,9 @@ function sincronizarPagos(){
     if(esEfectivo && p.recibido !== undefined){
       const recibido = parseMoney(p.recibido)||0;
       const restanteAntes = Math.max(0, total - acumulado);
-      const aplicado = Math.min(recibido, restanteAntes);
+      const aplicado = redondear2(Math.min(recibido, restanteAntes));
       p.monto = aplicado.toFixed(2);
-      p.cambio = Math.max(0, recibido - aplicado);
+      p.cambio = redondear2(Math.max(0, recibido - aplicado));
     } else {
       p.cambio = 0;
     }
@@ -847,6 +899,7 @@ function mostrarTicket(ventaId, venta, desglose){
   $('ticket-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
   $('modal-ticket').classList.add('activo');
+  $('ticket-nueva-venta').focus(); // así el foco no se queda "atrapado" en la pantalla de cobro
 }
 $('ticket-nueva-venta').addEventListener('click', ()=>{ $('modal-ticket').classList.remove('activo'); reiniciarVenta(); });
 $('ticket-imprimir').addEventListener('click', ()=> window.print());
@@ -991,6 +1044,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventas_credito)}</span></div>
   `;
   $('modal-resultado-cierre').classList.add('activo');
+  $('resultado-cierre-ok').focus();
 });
 $('resultado-cierre-ok').addEventListener('click', async ()=>{
   $('modal-resultado-cierre').classList.remove('activo');
