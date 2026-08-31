@@ -105,6 +105,7 @@
     </div>
     <button class="btn-primario" style="width:100%" id="btn-login">Entrar</button>
     <div id="login-error"></div>
+    <p style="text-align:center;color:var(--gris);font-size:.75rem;margin-top:14px;margin-bottom:0;" id="version-tag"></p>
   </div>
 </div>
 
@@ -252,6 +253,12 @@ const SUPABASE_URL = "https://vsfzkktmdwqkfbecmfcj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
+// MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
+// así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
+const APP_VERSION = '1.0.005';
+
+
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
 
@@ -311,6 +318,7 @@ function mostrarPantalla(id){
   document.querySelectorAll('.pantalla').forEach(p=>p.classList.remove('activa'));
   $(id).classList.add('activa');
 }
+$('version-tag').textContent = 'v' + APP_VERSION;
 
 // ---------- LOGIN ----------
 $('btn-login').addEventListener('click', hacerLogin);
@@ -461,7 +469,7 @@ $('btn-abrir-caja').addEventListener('click', async ()=>{
 async function entrarAlPOS(){
   $('header-app').style.display = 'flex';
   $('hdr-empresa').textContent = state.empresaNombre;
-  $('hdr-info').textContent = `${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} (${state.rol})`;
+  $('hdr-info').textContent = `${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
   $('nota-impuestos').textContent = state.desglosarImpuestos
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
     : 'Precios mostrados con IVA incluido.';
@@ -644,14 +652,27 @@ function recalcularTotales(){
   const faltaAuth = faltaAutorizacion();
   $('pago-aviso').textContent = faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '';
   $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth;
+  $('btn-agregar-pago').disabled = (pagado >= total - 0.001 && total > 0) || formasDisponiblesNuevaLinea().length===0;
 }
 
 // ---------- PAGOS ----------
+// Formas de pago de un solo uso (ej. Efectivo, Transferencia) no se pueden repetir en varias líneas;
+// las que tienen permite_multiple=true (tarjetas) sí, porque puede haber más de una tarjeta física.
+function formasDisponiblesNuevaLinea(idxPropio){
+  return state.formasPago.filter(f=>{
+    if(f.permite_multiple) return true;
+    if(idxPropio!==undefined && state.pagos[idxPropio]?.formaPagoId===f.id) return true;
+    return !state.pagos.some((p,j)=>j!==idxPropio && p.formaPagoId===f.id);
+  });
+}
+
 $('btn-agregar-pago').addEventListener('click', ()=>{
+  const disponibles = formasDisponiblesNuevaLinea();
+  if(disponibles.length===0) return;
   const { total } = calcularTotales();
   const pagado = state.pagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);
   const restante = Math.max(0, total - pagado);
-  state.pagos.push({ formaPagoId: state.formasPago[0]?.id || '', monto: restante.toFixed(2), referencia:'' });
+  state.pagos.push({ formaPagoId: disponibles[0].id, monto: restante.toFixed(2), referencia:'' });
   renderPagos();
 });
 
@@ -661,9 +682,10 @@ function renderPagos(){
     const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
     const requiereAuth = !!forma?.requiere_autorizacion;
     const esEfectivo = forma?.nombre === 'Efectivo';
+    const opciones = formasDisponiblesNuevaLinea(i);
     return `
     <div class="pago-linea">
-      <select data-idx="${i}" class="pago-forma">${state.formasPago.map(f=>`<option value="${f.id}" ${f.id===p.formaPagoId?'selected':''}>${f.nombre}</option>`).join('')}</select>
+      <select data-idx="${i}" class="pago-forma">${opciones.map(f=>`<option value="${f.id}" ${f.id===p.formaPagoId?'selected':''}>${f.nombre}</option>`).join('')}</select>
       ${esEfectivo
         ? `<input type="text" inputmode="decimal" class="pago-recibido money-input" data-idx="${i}" placeholder="Recibió" value="${p.recibido!==undefined?p.recibido:p.monto}">`
         : `<input type="text" inputmode="decimal" class="pago-monto money-input" data-idx="${i}" value="${p.monto}">`}
@@ -739,6 +761,14 @@ function mostrarTicket(ventaId, venta){
   const filasItems = state.carrito.map(l=>`
     <tr><td>${l.nombre} x${l.cantidad}</td><td class="num">${money(precioMostrar(l)*l.cantidad)}</td></tr>
   `).join('');
+  const filasPagos = state.pagos.map(p=>{
+    const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
+    const nombre = forma?.nombre || 'Pago';
+    const cambio = p.cambio > 0.001
+      ? ` (recibió ${money(parseMoney(p.recibido))}, cambio ${money(p.cambio)})`
+      : '';
+    return `<tr><td>${nombre}${cambio}</td><td class="num">${money(p.monto)}</td></tr>`;
+  }).join('');
   const html = `
     <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
     <p>Cliente: ${cliente?.nombre || 'Público en general'}<br>Atendió: ${state.usuario.nombre}</p>
@@ -748,6 +778,8 @@ function mostrarTicket(ventaId, venta){
       <div class="linea"><span>Impuestos</span><span>${money(venta.impuesto_total)}</span></div>
       <div class="linea total-final"><span>Total</span><span>${money(venta.total)}</span></div>
     </div>
+    <p class="nota" style="margin-top:10px;">Forma de pago:</p>
+    <table><tbody>${filasPagos}</tbody></table>
   `;
   $('ticket-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
@@ -823,18 +855,27 @@ async function calcularResumenCierre(){
   return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose };
 }
 
+function notaComprobante(nombre){
+  if(/tarjeta/i.test(nombre)) return 'entregar los vouchers/comprobantes de la terminal';
+  if(/transferencia/i.test(nombre)) return 'validar los comprobantes de transferencia';
+  return '';
+}
+
 function renderResumenCierre(r){
   const otrasFormas = Object.entries(r.desglose).filter(([nombre])=>nombre!=='Efectivo');
-  const filasOtras = otrasFormas.map(([nombre,total])=>`<div class="linea"><span>${nombre}</span><span>${money(total)}</span></div>`).join('');
+  const filasOtras = otrasFormas.map(([nombre,total])=>{
+    const nota = notaComprobante(nombre);
+    return `<div class="linea"><span>${nombre}${nota?` <span class="nota">(${nota})</span>`:''}</span><span>${money(total)}</span></div>`;
+  }).join('');
   $('cierre-resumen').innerHTML = `
     <div class="linea"><span>Fondo inicial</span><span>${money(r.fondoInicial)}</span></div>
     <div class="linea"><span>+ Ventas en efectivo</span><span>${money(r.ventasEfectivo)}</span></div>
     <div class="linea"><span>+ Entradas de caja</span><span>${money(r.entradas)}</span></div>
     <div class="linea"><span>− Salidas de caja</span><span>${money(r.salidas)}</span></div>
     <div class="linea total-final"><span>Efectivo esperado (a contar)</span><span>${money(r.esperado)}</span></div>
-    <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión (no se cuentan en caja física):</p>
+    <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión (no se cuentan en caja física, pero deben cuadrar con sus comprobantes):</p>
     ${filasOtras}
-    <div class="linea"><span>Ventas a crédito</span><span>${money(r.ventasCredito)}</span></div>
+    <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventasCredito)}</span></div>
   `;
 }
 
@@ -867,7 +908,10 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
   }
   const r = data[0];
   const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
-  const filasOtras = otrasFormas.map(d=>`<div class="linea"><span>${d.forma_pago}</span><span>${money(d.total)}</span></div>`).join('');
+  const filasOtras = otrasFormas.map(d=>{
+    const nota = notaComprobante(d.forma_pago);
+    return `<div class="linea"><span>${d.forma_pago}${nota?` <span class="nota">(${nota})</span>`:''}</span><span>${money(d.total)}</span></div>`;
+  }).join('');
   $('modal-cerrar-caja').classList.remove('activo');
   $('resultado-cierre-body').innerHTML = `
     <div class="linea"><span>Fondo inicial</span><span>${money(r.fondo_inicial)}</span></div>
@@ -879,7 +923,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     <div class="linea total-final"><span>Diferencia</span><span>${money(r.diferencia)}</span></div>
     <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión:</p>
     ${filasOtras || '<p class="nota">(ninguna)</p>'}
-    <div class="linea"><span>Ventas a crédito</span><span>${money(r.ventas_credito)}</span></div>
+    <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventas_credito)}</span></div>
   `;
   $('modal-resultado-cierre').classList.add('activo');
 });
