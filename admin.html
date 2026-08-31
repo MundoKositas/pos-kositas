@@ -36,6 +36,8 @@
   .msg-ok{background:#eafaf1;color:var(--verde-osc);padding:10px;border-radius:6px;margin-top:10px;font-size:.9rem;}
   h1{font-size:1.3rem;margin:0 0 16px;}
   h2{font-size:1.05rem;margin:0 0 4px;}
+  h3.seccion{font-size:.95rem;margin:18px 0 8px;padding-top:12px;border-top:1px solid var(--borde);}
+  h3.seccion:first-child{margin-top:0;padding-top:0;border-top:none;}
   .nota{font-size:.78rem;color:var(--gris);margin:0 0 10px;}
   .fila{display:flex;gap:16px;flex-wrap:wrap;}
   .col{flex:1;min-width:220px;}
@@ -115,9 +117,19 @@
   <div class="tab-panel" id="tab-catalogo">
     <div class="card">
       <div class="fila" style="align-items:flex-end;justify-content:space-between;">
-        <div class="col" style="min-width:240px;">
-          <label>Buscar</label>
-          <input type="text" id="cat-buscar" placeholder="Nombre, marca o código de barras…">
+        <div class="fila" style="flex-wrap:wrap;">
+          <div class="col" style="min-width:220px;">
+            <label>Buscar</label>
+            <input type="text" id="cat-buscar" placeholder="Nombre, marca o código de barras…">
+          </div>
+          <div class="col" style="min-width:170px;">
+            <label>Categoría</label>
+            <select id="cat-filtro-categoria"><option value="">Todas</option></select>
+          </div>
+          <div class="col" style="min-width:170px;">
+            <label>Línea de artículo</label>
+            <select id="cat-filtro-linea"><option value="">Todas</option></select>
+          </div>
         </div>
         <button class="btn-primario" id="btn-nuevo-producto">+ Nuevo producto</button>
       </div>
@@ -173,62 +185,93 @@
 <!-- MODAL: producto -->
 <div class="modal-fondo" id="modal-producto">
   <div class="modal ancho" id="card-producto">
-    <h2 id="producto-titulo">Nuevo producto</h2>
-
-    <div class="campo">
-      <label>Imagen del producto</label>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <img id="prod-imagen-preview" src="" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--borde);display:none;">
-        <div style="flex:1;">
-          <input type="file" accept="image/*" id="prod-imagen-archivo">
-          <p class="nota" id="prod-imagen-estado" style="margin:4px 0 0;"></p>
-        </div>
+    <div class="fila" style="justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:nowrap;">
+      <h2 id="producto-titulo" style="margin:0;">Nuevo producto</h2>
+      <div class="fila" id="prod-nav" style="gap:8px;display:none;flex-wrap:nowrap;">
+        <button type="button" class="btn-gris" id="prod-anterior">‹ Anterior</button>
+        <button type="button" class="btn-gris" id="prod-siguiente">Siguiente ›</button>
       </div>
     </div>
 
-    <div class="grid-2">
-      <div class="campo"><label>Nombre</label><input type="text" id="prod-nombre"></div>
-      <div class="campo"><label>Marca</label><input type="text" id="prod-marca"></div>
-    </div>
-    <div class="grid-2">
-      <div class="campo"><label>Categoría</label><select id="prod-categoria"></select></div>
-      <div class="campo"><label>Línea de artículo</label><select id="prod-linea"></select></div>
-    </div>
-    <div class="grid-2">
-      <div class="campo"><label>Unidad de medida</label><select id="prod-unidad"></select></div>
-      <div class="campo"><label>Clave SAT prod/serv (opcional)</label><input type="text" id="prod-clave-sat"></div>
-    </div>
-    <div class="campo">
-      <label>Impuestos aplicables</label>
-      <p class="nota" style="margin:0 0 6px;">Se llena solo desde el catálogo de impuestos — para agregar o quitar un impuesto de la lista, se hace en el catálogo de impuestos, no aquí.</p>
-      <div id="prod-impuestos"></div>
+    <div class="tabs" id="prod-tabs" style="margin-bottom:6px;">
+      <button type="button" class="tab-btn activo" data-prodtab="prod-panel-datos">Datos</button>
+      <button type="button" class="tab-btn" data-prodtab="prod-panel-kardex" id="tab-kardex">Kardex</button>
     </div>
 
-    <div class="campo">
-      <label>Códigos de barra</label>
-      <p class="nota" style="margin:0 0 6px;">El primero es el principal (individual). Agrega más si el producto también se vende o compra en caja/paquete con su propio código — indica cuántas piezas individuales trae.</p>
-      <div id="prod-codigos"></div>
-      <button type="button" class="btn-secundario" id="btn-agregar-codigo">+ Agregar código de barras</button>
+    <div id="prod-panel-datos">
+      <h3 class="seccion">Datos del producto</h3>
+      <div class="campo">
+        <label>Imagen del producto</label>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <img id="prod-imagen-preview" src="" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--borde);display:none;">
+          <div style="flex:1;">
+            <input type="file" accept="image/*" id="prod-imagen-archivo">
+            <p class="nota" id="prod-imagen-estado" style="margin:4px 0 0;"></p>
+          </div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="campo"><label>Nombre</label><input type="text" id="prod-nombre"></div>
+        <div class="campo"><label>Marca</label><input type="text" id="prod-marca"></div>
+      </div>
+      <div class="grid-2">
+        <div class="campo"><label>Categoría</label><select id="prod-categoria"></select></div>
+        <div class="campo"><label>Línea de artículo</label><select id="prod-linea"></select></div>
+      </div>
+      <div class="grid-2">
+        <div class="campo"><label>Unidad de medida</label><select id="prod-unidad"></select></div>
+        <div class="campo"><label>Clave SAT prod/serv (opcional)</label><input type="text" id="prod-clave-sat"></div>
+      </div>
+
+      <h3 class="seccion">Impuestos</h3>
+      <div class="campo">
+        <p class="nota" style="margin:0 0 6px;">Se llena solo desde el catálogo de impuestos — para agregar o quitar un impuesto de la lista, se hace en el catálogo de impuestos, no aquí.</p>
+        <div id="prod-impuestos"></div>
+      </div>
+
+      <h3 class="seccion">Costo y precios</h3>
+      <p class="nota">El costo solo se actualiza con las compras (entradas de inventario, aún por construir) — aquí siempre es de solo lectura.</p>
+      <div id="prod-precios"></div>
+
+      <h3 class="seccion">Códigos de barra</h3>
+      <div class="campo">
+        <p class="nota" style="margin:0 0 6px;">El primero es el principal (individual). Agrega más si el producto también se vende o compra en caja/paquete con su propio código — indica cuántas piezas individuales trae.</p>
+        <div id="prod-codigos"></div>
+        <button type="button" class="btn-secundario" id="btn-agregar-codigo">+ Agregar código de barras</button>
+      </div>
+
+      <h3 class="seccion">Otros datos</h3>
+      <div class="grid-2">
+        <div class="campo"><label>Mínimo (punto de reorden)</label><input type="number" step="1" min="0" id="prod-minimo" value="0"></div>
+        <div class="campo"><label>Máximo</label><input type="number" step="1" min="0" id="prod-maximo" value="0"></div>
+      </div>
+      <div class="campo" id="prod-cant-inicial-campo"><label>Existencia inicial</label><input type="number" step="1" min="0" id="prod-cant-inicial" value="0"></div>
+      <div class="campo">
+        <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-inventariable" checked style="width:auto;"> Es inventariable (controla stock)</label>
+      </div>
+      <div class="campo">
+        <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo" checked style="width:auto;"> Activo (visible en el POS)</label>
+      </div>
+      <div class="campo">
+        <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo-reparto" checked style="width:auto;"> Activo en el catálogo del servicio a domicilio</label>
+      </div>
     </div>
 
-    <div class="grid-2">
-      <div class="campo"><label>Mínimo (punto de reorden)</label><input type="number" step="1" min="0" id="prod-minimo" value="0"></div>
-      <div class="campo"><label>Máximo</label><input type="number" step="1" min="0" id="prod-maximo" value="0"></div>
+    <div id="prod-panel-kardex" style="display:none;">
+      <h3 class="seccion">Kardex — entradas y salidas</h3>
+      <div class="fila" style="align-items:flex-end;">
+        <div class="col" style="min-width:140px;"><label>Desde</label><input type="date" id="kardex-desde"></div>
+        <div class="col" style="min-width:140px;"><label>Hasta</label><input type="date" id="kardex-hasta"></div>
+        <button type="button" class="btn-secundario" id="kardex-actualizar">Actualizar</button>
+      </div>
+      <div class="tabla-scroll" style="margin-top:12px;">
+        <table>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Folio</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Costo unitario</th></tr></thead>
+          <tbody id="kardex-tabla-body"></tbody>
+        </table>
+      </div>
+      <p class="nota" id="kardex-vacio" style="display:none;"></p>
     </div>
-    <div class="campo" id="prod-cant-inicial-campo"><label>Existencia inicial</label><input type="number" step="1" min="0" id="prod-cant-inicial" value="0"></div>
-    <div class="campo">
-      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-inventariable" checked style="width:auto;"> Es inventariable (controla stock)</label>
-    </div>
-    <div class="campo">
-      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo" checked style="width:auto;"> Activo (visible en el POS)</label>
-    </div>
-    <div class="campo">
-      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo-reparto" checked style="width:auto;"> Activo en el catálogo del servicio a domicilio</label>
-    </div>
-
-    <h2>Costo y precios</h2>
-    <p class="nota">El costo solo se actualiza con las compras (entradas de inventario, aún por construir) — aquí siempre es de solo lectura.</p>
-    <div id="prod-precios"></div>
 
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button class="btn-gris" style="flex:1;" id="prod-cancelar">Cancelar <span class="tecla">F9</span></button>
@@ -273,14 +316,16 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.1.001';
+const APP_VERSION = '1.2.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
 
-// Redondeo especial SOLO para precios calculados por % sobre costo (regla confirmada por Adrián,
-// por efecto de monedas fraccionarias): .00 se queda, .01-.50 sube a .50, .51-.99 sube al peso siguiente.
+// Redondeo especial SOLO para el precio CON IMPUESTOS calculado por % sobre costo (regla confirmada
+// por Adrián, por efecto de monedas fraccionarias): .00 se queda, .01-.50 sube a .50, .51-.99 sube
+// al peso siguiente. El precio sin impuestos que se guarda es el que resulta de "desarmar" ese precio
+// con impuestos ya redondeado (con / (1+tasa), redondeo normal a 2 decimales) — nunca al revés.
 // Debe coincidir exactamente con la función redondear_precio_lista() del lado de la base de datos.
 function redondearPrecioLista(n){
   if(n===null || n===undefined || isNaN(n)) return null;
@@ -347,6 +392,8 @@ const state = {
   productoEditId: null, varianteEditId: null,
   listaEditId: null,
   costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
+  catalogoOrden: [], indiceCatalogo: -1,
+  formSnapshot: '',
 };
 
 function mostrarPantalla(id){
@@ -358,6 +405,10 @@ $('version-tag').textContent = APP_VERSION;
 habilitarEnterSecuencial($('card-login'), $('btn-login'));
 habilitarEnterSecuencial($('card-producto'), $('prod-guardar'));
 habilitarEnterSecuencial($('card-lista'), $('lista-guardar'));
+// Enter dentro del Kardex actualiza el rango en vez de intentar guardar el producto.
+$('prod-panel-kardex').addEventListener('keydown', e=>{
+  if(e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); cargarKardex(); }
+});
 
 // ---------- LOGIN ----------
 $('btn-login').addEventListener('click', hacerLogin);
@@ -428,13 +479,26 @@ function mostrarError(msg){
   $('login-error').innerHTML = `<div class="msg-error">${msg}</div>`;
 }
 
-// ---------- TABS ----------
-document.querySelectorAll('.tab-btn').forEach(btn=>{
+// ---------- TABS (pantalla principal) ----------
+document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('activo'));
+    document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(b=>b.classList.remove('activo'));
     document.querySelectorAll('.tab-panel').forEach(p=>p.style.display='none');
     btn.classList.add('activo');
     $(btn.dataset.tab).style.display='block';
+  });
+});
+
+// ---------- TABS (dentro del modal de producto: Datos / Kardex) ----------
+document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.disabled) return;
+    document.querySelectorAll('#prod-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
+    btn.classList.add('activo');
+    const esKardex = btn.dataset.prodtab === 'prod-panel-kardex';
+    $('prod-panel-datos').style.display = esKardex ? 'none' : 'block';
+    $('prod-panel-kardex').style.display = esKardex ? 'block' : 'none';
+    if(esKardex) cargarKardex();
   });
 });
 
@@ -460,10 +524,26 @@ async function cargarCatalogosBase(){
   });
   $('prod-categoria').dispatchEvent(new Event('change'));
   llenarSelect('prod-unidad', state.unidades, u=>u.id, u=>`${u.descripcion} (${u.clave})`);
+
+  llenarSelectConTodas('cat-filtro-categoria', state.categorias, c=>c.id, c=>c.nombre);
+  llenarSelectConTodas('cat-filtro-linea', state.lineas, l=>l.id, l=>l.nombre);
 }
 function llenarSelect(id, items, valFn, textFn){
   $(id).innerHTML = items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
 }
+function llenarSelectConTodas(id, items, valFn, textFn){
+  const valorActual = $(id).value;
+  $(id).innerHTML = '<option value="">Todas</option>' + items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
+  if(valorActual && items.some(i=>valFn(i)===valorActual)) $(id).value = valorActual;
+}
+$('cat-filtro-categoria').addEventListener('change', ()=>{
+  const catId = $('cat-filtro-categoria').value;
+  const lineasFiltradas = catId ? state.lineas.filter(l=>l.categoria_id===catId) : state.lineas;
+  llenarSelectConTodas('cat-filtro-linea', lineasFiltradas, l=>l.id, l=>l.nombre);
+  $('cat-filtro-linea').value = '';
+  renderCatalogo();
+});
+$('cat-filtro-linea').addEventListener('change', renderCatalogo);
 
 // ---------- CATÁLOGO DE PRODUCTOS ----------
 async function cargarProductos(){
@@ -507,12 +587,24 @@ $('cat-buscar').addEventListener('input', renderCatalogo);
 
 function renderCatalogo(){
   const filtro = $('cat-buscar').value.trim().toLowerCase();
+  const filtroCategoria = $('cat-filtro-categoria').value;
+  const filtroLinea = $('cat-filtro-linea').value;
   const listaPublica = state.listasPrecio.find(l=>l.nombre.toLowerCase().includes('público') || l.nombre.toLowerCase().includes('publico'));
   const items = state.productos.filter(p=>{
-    if(!filtro) return true;
-    const codigosTxt = p.codigos.map(c=>c.codigo).join(' ').toLowerCase();
-    return p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || codigosTxt.includes(filtro);
+    if(filtro){
+      const codigosTxt = p.codigos.map(c=>c.codigo).join(' ').toLowerCase();
+      if(!(p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || codigosTxt.includes(filtro))) return false;
+    }
+    if(filtroLinea){
+      if(p.lineaArticuloId !== filtroLinea) return false;
+    } else if(filtroCategoria){
+      const catDeLinea = state.lineas.find(l=>l.id===p.lineaArticuloId)?.categoria_id;
+      if(catDeLinea !== filtroCategoria) return false;
+    }
+    return true;
   }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+
+  state.catalogoOrden = items.map(p=>p.varianteId); // para Anterior/Siguiente en el modal de producto
 
   $('cat-vacio').style.display = items.length ? 'none' : 'block';
   $('cat-tabla-body').innerHTML = items.map(p=>{
@@ -603,6 +695,13 @@ $('btn-agregar-codigo').addEventListener('click', ()=>{
   renderCodigosBarra(filas);
 });
 
+function irAPanelDatos(){
+  document.querySelectorAll('#prod-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
+  $('prod-tabs').querySelector('[data-prodtab="prod-panel-datos"]').classList.add('activo');
+  $('prod-panel-datos').style.display = 'block';
+  $('prod-panel-kardex').style.display = 'none';
+}
+
 function abrirProducto(varianteId){
   state.varianteEditId = varianteId;
   const p = varianteId ? state.productos.find(x=>x.varianteId===varianteId) : null;
@@ -651,8 +750,63 @@ function abrirProducto(varianteId){
   $('prod-impuestos').querySelectorAll('.chk-impuesto').forEach(chk=>chk.addEventListener('change', recalcularPreciosModal));
 
   renderPreciosModal(p);
+
+  // Navegación Anterior/Siguiente — respeta el orden y filtro actuales del Catálogo.
+  state.indiceCatalogo = varianteId ? state.catalogoOrden.indexOf(varianteId) : -1;
+  $('prod-nav').style.display = p ? 'flex' : 'none';
+  $('prod-anterior').disabled = state.indiceCatalogo <= 0;
+  $('prod-siguiente').disabled = state.indiceCatalogo === -1 || state.indiceCatalogo >= state.catalogoOrden.length - 1;
+
+  // Kardex: pestaña deshabilitada para producto nuevo (aún no existe variante que buscar);
+  // rango de fechas por default = mes actual.
+  $('tab-kardex').disabled = !p;
+  const hoy = new Date();
+  const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  $('kardex-desde').value = primerDiaMes.toISOString().slice(0,10);
+  $('kardex-hasta').value = hoy.toISOString().slice(0,10);
+  $('kardex-tabla-body').innerHTML = '';
+  $('kardex-vacio').style.display = 'none';
+  irAPanelDatos();
+
   $('modal-producto').classList.add('activo');
   $('prod-nombre').focus();
+
+  state.formSnapshot = capturarEstadoFormulario();
+}
+
+function capturarEstadoFormulario(){
+  return JSON.stringify({
+    imagen: state.imagenUrlNueva || state.imagenUrlActual || null,
+    nombre: $('prod-nombre').value.trim(),
+    marca: $('prod-marca').value.trim(),
+    categoria: $('prod-categoria').value,
+    linea: $('prod-linea').value,
+    unidad: $('prod-unidad').value,
+    claveSat: $('prod-clave-sat').value.trim(),
+    impuestos: Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(c=>c.value).sort(),
+    codigos: leerCodigosBarra(),
+    minimo: $('prod-minimo').value, maximo: $('prod-maximo').value,
+    cantidadInicial: $('prod-cant-inicial').value,
+    inventariable: $('prod-inventariable').checked, activo: $('prod-activo').checked, activoReparto: $('prod-activo-reparto').checked,
+    preciosDirectos: Array.from(document.querySelectorAll('#prod-precios .precio-sin')).map(el=>({ lista: el.dataset.lista, valor: el.value })),
+    preciosPorcentaje: Array.from(document.querySelectorAll('#prod-precios [data-modo="porcentaje"]')).map(div=>({ lista: div.dataset.lista, override: div.querySelector('.porcentaje-override')?.value || '' })),
+  });
+}
+function formTieneCambios(){
+  return capturarEstadoFormulario() !== state.formSnapshot;
+}
+function confirmarSalirSinGuardar(){
+  if(!formTieneCambios()) return true;
+  return confirm('Tienes cambios sin guardar en este producto. Si continúas, se perderán. ¿Deseas continuar?');
+}
+
+$('prod-anterior').addEventListener('click', ()=> irARegistro(-1));
+$('prod-siguiente').addEventListener('click', ()=> irARegistro(1));
+function irARegistro(delta){
+  if(!confirmarSalirSinGuardar()) return;
+  const nuevoIndice = state.indiceCatalogo + delta;
+  if(nuevoIndice < 0 || nuevoIndice >= state.catalogoOrden.length) return;
+  abrirProducto(state.catalogoOrden[nuevoIndice]);
 }
 
 function tasaTotalSeleccionada(){
@@ -751,6 +905,9 @@ function recalcularPreciosModal(){
     if(!isNaN(sin) && conEl){ conEl.value = money(redondear2(sin * (1+tasa))); }
   });
 
+  // Para listas "costo + %": el redondeo psicológico (.00/.50/peso) se aplica al precio CON
+  // impuestos (lo que paga el cliente); el precio sin impuestos se obtiene desarmando ese valor
+  // ya redondeado, nunca al revés. Debe coincidir con recalcular_precios_producto en Supabase.
   document.querySelectorAll('#prod-precios [data-modo="porcentaje"]').forEach(div=>{
     const listaId = div.dataset.lista;
     const lista = state.listasPrecio.find(l=>l.id===listaId);
@@ -764,14 +921,19 @@ function recalcularPreciosModal(){
       if(calcCon) calcCon.textContent = 'Sin costo capturado';
       return;
     }
-    const sinCalc = redondearPrecioLista(costo * (1 + (isNaN(pct)?0:pct) / 100));
-    const conCalc = redondear2(sinCalc * (1+tasa));
+    const sinCrudo = costo * (1 + (isNaN(pct)?0:pct) / 100);
+    const conCrudo = sinCrudo * (1+tasa);
+    const conCalc = redondearPrecioLista(conCrudo);
+    const sinCalc = redondear2(conCalc / (1+tasa));
     if(calcSin) calcSin.textContent = money(sinCalc);
     if(calcCon) calcCon.textContent = money(conCalc);
   });
 }
 
-$('prod-cancelar').addEventListener('click', ()=>{ $('modal-producto').classList.remove('activo'); });
+$('prod-cancelar').addEventListener('click', ()=>{
+  if(!confirmarSalirSinGuardar()) return;
+  $('modal-producto').classList.remove('activo');
+});
 $('prod-guardar').addEventListener('click', async ()=>{
   if($('prod-guardar').disabled) return;
   $('prod-guardar').disabled = true;
@@ -825,6 +987,48 @@ $('prod-guardar').addEventListener('click', async ()=>{
   $('prod-guardar').disabled = false;
   await cargarProductos();
 });
+
+// ---------- KARDEX ----------
+async function cargarKardex(){
+  if(!state.varianteEditId){
+    $('kardex-tabla-body').innerHTML = '';
+    $('kardex-vacio').textContent = 'Guarda el producto primero para poder ver su historial de entradas y salidas.';
+    $('kardex-vacio').style.display = 'block';
+    return;
+  }
+  const desde = $('kardex-desde').value;
+  const hasta = $('kardex-hasta').value;
+  $('kardex-actualizar').disabled = true;
+  const { data, error } = await sb.from('movimientos_inventario_detalle')
+    .select('cantidad, costo_unitario, movimientos_inventario!inner(fecha, tipo, folio, descripcion)')
+    .eq('variante_id', state.varianteEditId)
+    .gte('movimientos_inventario.fecha', desde)
+    .lte('movimientos_inventario.fecha', hasta)
+    .order('fecha', { foreignTable: 'movimientos_inventario', ascending: false });
+  $('kardex-actualizar').disabled = false;
+  if(error){
+    $('kardex-tabla-body').innerHTML = '';
+    $('kardex-vacio').textContent = `Error al cargar el historial: ${error.message}`;
+    $('kardex-vacio').style.display = 'block';
+    return;
+  }
+  const filas = data || [];
+  const TIPO_LABEL = { entrada: 'Entrada', salida: 'Salida', transferencia: 'Transferencia', ajuste: 'Ajuste' };
+  $('kardex-tabla-body').innerHTML = filas.map(f=>{
+    const mov = f.movimientos_inventario;
+    return `<tr>
+      <td>${mov.fecha}</td>
+      <td>${TIPO_LABEL[mov.tipo] || mov.tipo}</td>
+      <td>${mov.folio || '—'}</td>
+      <td>${mov.descripcion || '—'}</td>
+      <td class="num">${f.cantidad}</td>
+      <td class="num">${f.costo_unitario!=null ? money(f.costo_unitario) : '—'}</td>
+    </tr>`;
+  }).join('');
+  $('kardex-vacio').textContent = 'No hay movimientos registrados en este rango de fechas.';
+  $('kardex-vacio').style.display = filas.length ? 'none' : 'block';
+}
+$('kardex-actualizar').addEventListener('click', cargarKardex);
 
 // ---------- LISTAS DE PRECIO ----------
 function renderListasPrecio(){
