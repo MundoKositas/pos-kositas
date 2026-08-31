@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Kositas — Catálogo y Precios</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --verde:#2f7d4f; --verde-osc:#245f3c; --rojo:#c0392b; --gris:#6b7280;
+    --bg:#f4f6f5; --card:#ffffff; --borde:#e2e5e3; --texto:#222; --azul:#1d5fa8;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--texto);}
+  header{background:var(--azul);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+  header .marca{font-weight:700;font-size:1.1rem;}
+  header .info{font-size:.85rem;opacity:.95;}
+  header .acciones{display:flex;gap:8px;flex-wrap:wrap;}
+  button{cursor:pointer;border:none;border-radius:6px;padding:9px 14px;font-size:.9rem;font-weight:600;}
+  .btn-primario{background:var(--verde);color:#fff;}
+  .btn-primario:hover{background:var(--verde-osc);}
+  .btn-secundario{background:#fff;color:var(--azul);border:1px solid var(--azul);}
+  .btn-peligro{background:var(--rojo);color:#fff;}
+  .btn-gris{background:#e5e7eb;color:#333;}
+  .tecla{display:inline-block;margin-left:7px;padding:1px 6px;background:rgba(0,0,0,.18);border-radius:4px;font-size:.72rem;font-family:monospace;vertical-align:1px;}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  input,select{padding:9px 10px;border:1px solid var(--borde);border-radius:6px;font-size:.95rem;width:100%;}
+  input.money-input{text-align:right;font-variant-numeric:tabular-nums;}
+  label{font-size:.8rem;color:var(--gris);display:block;margin-bottom:3px;}
+  .campo{margin-bottom:12px;}
+  .pantalla{display:none;padding:16px;max-width:1200px;margin:0 auto;}
+  .pantalla.activa{display:block;}
+  .card{background:var(--card);border:1px solid var(--borde);border-radius:10px;padding:20px;}
+  .centrado{max-width:380px;margin:60px auto;}
+  .msg-error{background:#fdecea;color:var(--rojo);padding:10px;border-radius:6px;margin-top:10px;font-size:.9rem;}
+  .msg-ok{background:#eafaf1;color:var(--verde-osc);padding:10px;border-radius:6px;margin-top:10px;font-size:.9rem;}
+  h1{font-size:1.3rem;margin:0 0 16px;}
+  h2{font-size:1.05rem;margin:0 0 4px;}
+  .nota{font-size:.78rem;color:var(--gris);margin:0 0 10px;}
+  .fila{display:flex;gap:16px;flex-wrap:wrap;}
+  .col{flex:1;min-width:220px;}
+  .tabla-scroll{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:.9rem;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--borde);white-space:nowrap;}
+  td.num, th.num{text-align:right;}
+  th{color:var(--gris);font-weight:600;font-size:.78rem;text-transform:uppercase;}
+  tr.fila-clic{cursor:pointer;}
+  tr.fila-clic:hover{background:#f0f5fa;}
+  .tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;}
+  .tag-ok{background:#eafaf1;color:var(--verde-osc);}
+  .tag-off{background:#fdecea;color:var(--rojo);}
+  .tag-bajo{background:#fff4e5;color:#9a6700;}
+  .tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+  .tab-btn{background:#fff;color:var(--gris);border:1px solid var(--borde);}
+  .tab-btn.activo{background:var(--azul);color:#fff;border-color:var(--azul);}
+  .modal-fondo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .modal-fondo.activo{display:flex;}
+  .modal{background:#fff;border-radius:10px;padding:22px;max-width:560px;width:100%;max-height:88vh;overflow-y:auto;}
+  .modal.ancho{max-width:640px;}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .lista-precio-campo{border:1px solid var(--borde);border-radius:8px;padding:10px;margin-bottom:10px;}
+  .lista-precio-campo .titulo{font-weight:600;font-size:.85rem;margin-bottom:8px;}
+  .lista-precio-campo .par{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .precio-calculado{font-size:1rem;font-weight:700;color:var(--azul);padding:8px 0;}
+  .chip-impuesto{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--borde);border-radius:16px;padding:5px 10px;margin:0 6px 6px 0;font-size:.85rem;cursor:pointer;}
+  .chip-impuesto input{width:auto;}
+  @media (max-width:480px){
+    header{padding:10px 12px;}
+    .pantalla{padding:10px;}
+    .card{padding:14px;}
+    .centrado{margin:30px auto;}
+    .grid-2{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<header id="header-app" style="display:none;">
+  <div>
+    <div class="marca" id="hdr-empresa">Mundo Kositas</div>
+    <div class="info" id="hdr-info"></div>
+  </div>
+  <div class="acciones">
+    <button class="btn-gris" id="btn-logout">Salir</button>
+  </div>
+</header>
+
+<!-- LOGIN -->
+<div class="pantalla activa" id="pantalla-login">
+  <div class="centrado card" id="card-login">
+    <h1>Admin Kositas</h1>
+    <p class="nota">Catálogo, precios e inventario — Mundo Kositas</p>
+    <div class="campo"><label>Correo</label><input type="email" id="login-email" autocomplete="username"></div>
+    <div class="campo"><label>Contraseña</label><input type="password" id="login-password" autocomplete="current-password"></div>
+    <button class="btn-primario" style="width:100%;" id="btn-login">Entrar</button>
+    <div id="login-error"></div>
+    <p class="nota" style="text-align:center;margin-top:16px;">v<span id="version-tag"></span></p>
+  </div>
+</div>
+
+<div class="pantalla" id="pantalla-cargando"><div class="centrado card"><p>Cargando…</p></div></div>
+
+<!-- ADMIN -->
+<div class="pantalla" id="pantalla-admin">
+  <div class="tabs">
+    <button class="tab-btn activo" data-tab="tab-catalogo">Catálogo</button>
+    <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
+    <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
+  </div>
+
+  <!-- TAB CATÁLOGO -->
+  <div class="tab-panel" id="tab-catalogo">
+    <div class="card">
+      <div class="fila" style="align-items:flex-end;justify-content:space-between;">
+        <div class="col" style="min-width:240px;">
+          <label>Buscar</label>
+          <input type="text" id="cat-buscar" placeholder="Nombre, marca o código de barras…">
+        </div>
+        <button class="btn-primario" id="btn-nuevo-producto">+ Nuevo producto</button>
+      </div>
+      <div class="tabla-scroll" style="margin-top:14px;">
+        <table>
+          <thead><tr>
+            <th>Producto</th><th>Marca</th><th class="num">Costo</th><th class="num">Precio público</th>
+            <th class="num">Stock</th><th class="num">Mín./Máx.</th><th>Impuestos</th><th>Estado</th>
+          </tr></thead>
+          <tbody id="cat-tabla-body"></tbody>
+        </table>
+      </div>
+      <p class="nota" id="cat-vacio" style="display:none;">No hay productos que coincidan con la búsqueda.</p>
+    </div>
+  </div>
+
+  <!-- TAB LISTAS DE PRECIO -->
+  <div class="tab-panel" id="tab-listas" style="display:none;">
+    <div class="card">
+      <div class="fila" style="justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;">Listas de precio</h2>
+        <button class="btn-primario" id="btn-nueva-lista">+ Nueva lista de precio</button>
+      </div>
+      <p class="nota">Una lista "directo" se captura precio por producto a mano. Una lista "costo + %" se calcula sola cada vez que cambia el costo del producto — nunca se edita el precio a mano en esas.</p>
+      <div class="tabla-scroll">
+        <table>
+          <thead><tr><th>Nombre</th><th>Modo</th><th class="num">% margen</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="listas-tabla-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB REPORTE DE PRECIOS -->
+  <div class="tab-panel" id="tab-reporte" style="display:none;">
+    <div class="card">
+      <h2 style="margin-top:0;">Reporte de lista de precios</h2>
+      <p class="nota">Elige qué listas de precio quieres ver como columnas (precios sin impuestos).</p>
+      <div id="reporte-checks" style="margin-bottom:14px;"></div>
+      <div class="tabla-scroll">
+        <table>
+          <thead><tr id="reporte-encabezado"><th>Producto</th></tr></thead>
+          <tbody id="reporte-tabla-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: producto -->
+<div class="modal-fondo" id="modal-producto">
+  <div class="modal ancho" id="card-producto">
+    <h2 id="producto-titulo">Nuevo producto</h2>
+    <div class="grid-2">
+      <div class="campo"><label>Nombre</label><input type="text" id="prod-nombre"></div>
+      <div class="campo"><label>Marca</label><input type="text" id="prod-marca"></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>Categoría</label><select id="prod-categoria"></select></div>
+      <div class="campo"><label>Línea de artículo</label><select id="prod-linea"></select></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>Unidad de medida</label><select id="prod-unidad"></select></div>
+      <div class="campo"><label>Código de barras</label><input type="text" id="prod-codigo"></div>
+    </div>
+    <div class="campo">
+      <label>Impuestos aplicables</label>
+      <div id="prod-impuestos"></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>Costo de última compra</label><input type="text" inputmode="decimal" id="prod-costo"></div>
+      <div class="campo"><label>Clave SAT prod/serv (opcional)</label><input type="text" id="prod-clave-sat"></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>Mínimo (punto de reorden)</label><input type="number" step="1" min="0" id="prod-minimo" value="0"></div>
+      <div class="campo"><label>Máximo</label><input type="number" step="1" min="0" id="prod-maximo" value="0"></div>
+    </div>
+    <div class="campo" id="prod-cant-inicial-campo"><label>Existencia inicial</label><input type="number" step="1" min="0" id="prod-cant-inicial" value="0"></div>
+    <div class="campo">
+      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-inventariable" checked style="width:auto;"> Es inventariable (controla stock)</label>
+    </div>
+    <div class="campo">
+      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo" checked style="width:auto;"> Activo (visible en el POS)</label>
+    </div>
+
+    <h2>Precios por lista</h2>
+    <div id="prod-precios"></div>
+
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="prod-cancelar">Cancelar <span class="tecla">F9</span></button>
+      <button class="btn-primario" style="flex:1;" id="prod-guardar">Guardar <span class="tecla">F10</span></button>
+    </div>
+    <div id="prod-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: lista de precio -->
+<div class="modal-fondo" id="modal-lista">
+  <div class="modal" id="card-lista">
+    <h2 id="lista-titulo">Nueva lista de precio</h2>
+    <div class="campo"><label>Nombre</label><input type="text" id="lista-nombre"></div>
+    <div class="campo"><label>Modo de cálculo</label>
+      <select id="lista-modo">
+        <option value="directo">Directo (se captura el precio a mano por producto)</option>
+        <option value="porcentaje_sobre_costo">Costo + % de margen (se calcula solo)</option>
+      </select>
+    </div>
+    <div class="campo" id="lista-porcentaje-campo" style="display:none;">
+      <label>% de margen sobre el costo</label>
+      <input type="number" step="0.01" id="lista-porcentaje">
+    </div>
+    <div class="campo">
+      <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lista-activo" checked style="width:auto;"> Activa</label>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="lista-cancelar">Cancelar <span class="tecla">F9</span></button>
+      <button class="btn-primario" style="flex:1;" id="lista-guardar">Guardar <span class="tecla">F10</span></button>
+    </div>
+    <div id="lista-recalcular-cont" style="margin-top:10px;display:none;">
+      <button class="btn-secundario" style="width:100%;" id="lista-recalcular">Recalcular todos los precios de esta lista ahora</button>
+    </div>
+    <div id="lista-error"></div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://vsfzkktmdwqkfbecmfcj.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
+const APP_VERSION = '1.0.001';
+
+const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
+const $ = (id) => document.getElementById(id);
+function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+
+function parseMoney(str){
+  if(str===null || str===undefined) return NaN;
+  const limpio = String(str).replace(/[^0-9.\-]/g,'');
+  if(limpio==='') return NaN;
+  return parseFloat(limpio);
+}
+function attachMoneyInput(el){
+  if(el.dataset.moneyAttached) return;
+  el.dataset.moneyAttached = '1';
+  el.classList.add('money-input');
+  const formatear = ()=>{ const n = parseMoney(el.value); el.value = isNaN(n) ? '' : money(n); };
+  const desformatear = ()=>{ const n = parseMoney(el.value); el.value = isNaN(n) ? '' : n.toFixed(2); el.select(); };
+  el.addEventListener('focus', desformatear);
+  el.addEventListener('blur', formatear);
+  formatear();
+}
+
+// ---------- NAVEGACIÓN POR TECLADO ----------
+function habilitarEnterSecuencial(container, boton){
+  if(!container) return;
+  container.addEventListener('keydown', e=>{
+    if(e.key !== 'Enter') return;
+    const campos = Array.from(container.querySelectorAll('input, select'))
+      .filter(el=>!el.disabled && el.offsetParent!==null);
+    const idx = campos.indexOf(e.target);
+    if(idx === -1) return;
+    e.preventDefault();
+    const siguiente = campos[idx+1];
+    if(siguiente){ siguiente.focus(); if(siguiente.select) siguiente.select(); }
+    else if(boton && !boton.disabled){ boton.click(); }
+  });
+}
+const TECLAS_FUNCION = ['F9','F10'];
+document.addEventListener('keydown', (e)=>{
+  if(!TECLAS_FUNCION.includes(e.key)) return;
+  e.preventDefault();
+  if($('modal-producto').classList.contains('activo')){
+    if(e.key==='F9') $('prod-cancelar').click();
+    else if(e.key==='F10' && !$('prod-guardar').disabled) $('prod-guardar').click();
+    return;
+  }
+  if($('modal-lista').classList.contains('activo')){
+    if(e.key==='F9') $('lista-cancelar').click();
+    else if(e.key==='F10' && !$('lista-guardar').disabled) $('lista-guardar').click();
+  }
+});
+
+const state = {
+  usuario: null, rol: null, empresaId: null, empresaNombre: '', almacenId: null,
+  productos: [], impuestos: [], categorias: [], lineas: [], unidades: [], listasPrecio: [],
+  productoEditId: null, varianteEditId: null,
+  listaEditId: null,
+};
+
+function mostrarPantalla(id){
+  document.querySelectorAll('.pantalla').forEach(p=>p.classList.remove('activa'));
+  $(id).classList.add('activa');
+}
+$('version-tag').textContent = APP_VERSION;
+
+habilitarEnterSecuencial($('card-login'), $('btn-login'));
+habilitarEnterSecuencial($('card-producto'), $('prod-guardar'));
+habilitarEnterSecuencial($('card-lista'), $('lista-guardar'));
+
+attachMoneyInput($('prod-costo'));
+$('prod-costo').addEventListener('input', ()=>recalcularPreciosModal());
+$('prod-costo').addEventListener('blur', ()=>recalcularPreciosModal());
+
+// ---------- LOGIN ----------
+$('btn-login').addEventListener('click', hacerLogin);
+async function hacerLogin(){
+  $('login-error').innerHTML = '';
+  const email = $('login-email').value.trim();
+  const password = $('login-password').value;
+  if(!email || !password){ $('login-error').innerHTML = '<div class="msg-error">Captura tu correo y contraseña.</div>'; return; }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ $('login-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  await iniciarSesionApp();
+}
+$('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); location.reload(); });
+
+const ROLES_PERMITIDOS = ['Super Admin', 'Admin de Empresa', 'Gerente', 'Almacenista', 'Comprador'];
+
+async function iniciarSesionApp(){
+  mostrarPantalla('pantalla-cargando');
+  $('header-app').style.display = 'none';
+
+  const { data: authData } = await sb.auth.getUser();
+  const authUser = authData?.user;
+  if(!authUser){ mostrarPantalla('pantalla-login'); return; }
+
+  const { data: usuarioRow, error: errUsuario } = await sb.from('usuarios').select('*').eq('auth_id', authUser.id).maybeSingle();
+  if(errUsuario || !usuarioRow){
+    await sb.auth.signOut();
+    return mostrarError('Tu cuenta no tiene acceso configurado en el sistema. Contacta al administrador.');
+  }
+  state.usuario = usuarioRow;
+
+  const { data: asignaciones } = await sb.from('usuario_asignaciones')
+    .select('*, roles(nombre)').eq('usuario_id', usuarioRow.id).eq('activo', true);
+  if(!asignaciones || asignaciones.length === 0){
+    await sb.auth.signOut();
+    return mostrarError('Tu usuario no tiene ninguna asignación activa. Contacta al administrador.');
+  }
+  const asignacion = asignaciones[0];
+  state.rol = asignacion.roles?.nombre || '';
+  if(!ROLES_PERMITIDOS.includes(state.rol)){
+    await sb.auth.signOut();
+    return mostrarError(`Tu rol (${state.rol || 'sin rol'}) no tiene acceso a Admin Kositas. Usa el Punto de Venta.`);
+  }
+  const esSuperAdmin = !asignacion.empresa_id;
+
+  const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true);
+  const empresa = esSuperAdmin ? empresas[0] : empresas.find(e=>e.id === asignacion.empresa_id);
+  if(!empresa){ return mostrarError('No se encontró una empresa activa para tu cuenta.'); }
+  state.empresaId = empresa.id;
+  state.empresaNombre = empresa.nombre_comercial;
+
+  const { data: almacenes } = await sb.from('almacenes').select('*').eq('activo', true);
+  state.almacenId = almacenes?.[0]?.id || null;
+
+  $('hdr-empresa').textContent = state.empresaNombre;
+  $('hdr-info').textContent = `${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
+  $('header-app').style.display = 'flex';
+
+  await cargarCatalogosBase();
+  await cargarProductos();
+  renderListasPrecio();
+  renderReporteChecks();
+  mostrarPantalla('pantalla-admin');
+}
+
+function mostrarError(msg){
+  mostrarPantalla('pantalla-login');
+  $('login-error').innerHTML = `<div class="msg-error">${msg}</div>`;
+}
+
+// ---------- TABS ----------
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('activo'));
+    document.querySelectorAll('.tab-panel').forEach(p=>p.style.display='none');
+    btn.classList.add('activo');
+    $(btn.dataset.tab).style.display='block';
+  });
+});
+
+// ---------- CATÁLOGOS BASE ----------
+async function cargarCatalogosBase(){
+  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}] = await Promise.all([
+    sb.from('impuestos').select('*').order('nombre'),
+    sb.from('categorias').select('*').order('nombre'),
+    sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
+    sb.from('unidades_medida').select('*').order('descripcion'),
+    sb.from('listas_precio').select('*').order('nombre'),
+  ]);
+  state.impuestos = impuestos || [];
+  state.categorias = categorias || [];
+  state.lineas = lineas || [];
+  state.unidades = unidades || [];
+  state.listasPrecio = listas || [];
+
+  llenarSelect('prod-categoria', state.categorias, c=>c.id, c=>c.nombre);
+  $('prod-categoria').addEventListener('change', ()=>{
+    const lineasFiltradas = state.lineas.filter(l=>l.categoria_id === $('prod-categoria').value);
+    llenarSelect('prod-linea', lineasFiltradas, l=>l.id, l=>l.nombre);
+  });
+  $('prod-categoria').dispatchEvent(new Event('change'));
+  llenarSelect('prod-unidad', state.unidades, u=>u.id, u=>`${u.descripcion} (${u.clave})`);
+}
+function llenarSelect(id, items, valFn, textFn){
+  $(id).innerHTML = items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
+}
+
+// ---------- CATÁLOGO DE PRODUCTOS ----------
+async function cargarProductos(){
+  const { data, error } = await sb.from('variantes').select(`
+    id, nombre_variante, activo,
+    producto:productos(id, nombre, marca, activo, costo_ultima_compra, linea_articulo_id, unidad_medida_id,
+      clave_prod_serv_sat, inventariable, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+    precios:variante_precios(precio, lista_precio_id),
+    stock:existencias(cantidad, minimo, maximo, almacen_id),
+    codigos:codigos_barra(codigo)
+  `);
+  if(error){ console.error(error); return; }
+  state.productos = (data||[]).map(v=>{
+    const existenciaAlmacen = (v.stock||[]).find(s=>s.almacen_id===state.almacenId) || v.stock?.[0];
+    return {
+      varianteId: v.id, nombreVariante: v.nombre_variante, activoVariante: v.activo,
+      productoId: v.producto.id, nombre: v.producto.nombre, marca: v.producto.marca || '',
+      activo: v.producto.activo, costo: v.producto.costo_ultima_compra,
+      lineaArticuloId: v.producto.linea_articulo_id, unidadMedidaId: v.producto.unidad_medida_id,
+      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable,
+      impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
+        impuestoId: pi.impuesto_id, nombre: pi.impuestos?.nombre || 'Impuesto', tasa: Number(pi.impuestos?.tasa)||0,
+      })),
+      precios: (v.precios||[]).map(p=>({ listaPrecioId: p.lista_precio_id, precio: Number(p.precio) })),
+      stock: existenciaAlmacen?.cantidad ?? 0, minimo: existenciaAlmacen?.minimo ?? 0, maximo: existenciaAlmacen?.maximo ?? 0,
+      codigo: v.codigos?.[0]?.codigo || '',
+    };
+  });
+  renderCatalogo();
+  renderReporte();
+}
+$('cat-buscar').addEventListener('input', renderCatalogo);
+
+function renderCatalogo(){
+  const filtro = $('cat-buscar').value.trim().toLowerCase();
+  const listaPublica = state.listasPrecio.find(l=>l.nombre.toLowerCase().includes('público') || l.nombre.toLowerCase().includes('publico'));
+  const items = state.productos.filter(p=>{
+    if(!filtro) return true;
+    return p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || p.codigo.includes(filtro);
+  }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+
+  $('cat-vacio').style.display = items.length ? 'none' : 'block';
+  $('cat-tabla-body').innerHTML = items.map(p=>{
+    const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id) : null;
+    const bajoMinimo = p.inventariable && Number(p.stock) <= Number(p.minimo) && Number(p.maximo) > 0;
+    const estadoTag = !p.activo ? '<span class="tag tag-off">Inactivo</span>' : (bajoMinimo ? '<span class="tag tag-bajo">Bajo mínimo</span>' : '<span class="tag tag-ok">Activo</span>');
+    const impuestosTxt = p.impuestos.map(i=>i.nombre).join(', ') || '—';
+    return `<tr class="fila-clic" data-variante="${p.varianteId}">
+      <td>${p.nombre}${p.codigo?` <span class="nota">(${p.codigo})</span>`:''}</td>
+      <td>${p.marca||'—'}</td>
+      <td class="num">${p.costo!=null ? money(p.costo) : '—'}</td>
+      <td class="num">${precioPub ? money(precioPub.precio) : '—'}</td>
+      <td class="num">${p.inventariable ? p.stock : '—'}</td>
+      <td class="num">${p.inventariable ? `${p.minimo} / ${p.maximo}` : '—'}</td>
+      <td>${impuestosTxt}</td>
+      <td>${estadoTag}</td>
+    </tr>`;
+  }).join('');
+  $('cat-tabla-body').querySelectorAll('tr').forEach(tr=>{
+    tr.addEventListener('click', ()=>abrirProducto(tr.dataset.variante));
+  });
+}
+
+// ---------- MODAL PRODUCTO ----------
+$('btn-nuevo-producto').addEventListener('click', ()=>abrirProducto(null));
+
+function abrirProducto(varianteId){
+  state.varianteEditId = varianteId;
+  const p = varianteId ? state.productos.find(x=>x.varianteId===varianteId) : null;
+  state.productoEditId = p ? p.productoId : null;
+  $('prod-error').innerHTML = '';
+  $('producto-titulo').textContent = p ? 'Editar producto' : 'Nuevo producto';
+  $('prod-nombre').value = p?.nombre || '';
+  $('prod-marca').value = p?.marca || '';
+  $('prod-codigo').value = p?.codigo || '';
+  $('prod-clave-sat').value = p?.claveSat || '';
+  $('prod-minimo').value = p?.minimo ?? 0;
+  $('prod-maximo').value = p?.maximo ?? 0;
+  $('prod-inventariable').checked = p ? !!p.inventariable : true;
+  $('prod-activo').checked = p ? !!p.activo : true;
+  $('prod-cant-inicial-campo').style.display = p ? 'none' : 'block';
+  $('prod-cant-inicial').value = 0;
+
+  if(p){
+    $('prod-categoria').value = state.lineas.find(l=>l.id===p.lineaArticuloId)?.categoria_id || state.categorias[0]?.id || '';
+    $('prod-categoria').dispatchEvent(new Event('change'));
+    $('prod-linea').value = p.lineaArticuloId || '';
+    $('prod-unidad').value = p.unidadMedidaId || '';
+  } else {
+    $('prod-categoria').selectedIndex = 0;
+    $('prod-categoria').dispatchEvent(new Event('change'));
+  }
+
+  const impuestoIdsSeleccionados = new Set((p?.impuestos||[]).map(i=>i.impuestoId));
+  $('prod-impuestos').innerHTML = state.impuestos.map(imp=>`
+    <label class="chip-impuesto"><input type="checkbox" class="chk-impuesto" value="${imp.id}" ${impuestoIdsSeleccionados.has(imp.id)?'checked':''}> ${imp.nombre}</label>
+  `).join('');
+  $('prod-impuestos').querySelectorAll('.chk-impuesto').forEach(chk=>chk.addEventListener('change', recalcularPreciosModal));
+
+  $('prod-costo').value = p?.costo != null ? money(Number(p.costo)) : '';
+
+  renderPreciosModal(p);
+  $('modal-producto').classList.add('activo');
+  $('prod-nombre').focus();
+}
+
+function tasaTotalSeleccionada(){
+  return Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked'))
+    .reduce((s,chk)=>{
+      const imp = state.impuestos.find(i=>i.id===chk.value);
+      return s + (imp ? Number(imp.tasa)||0 : 0);
+    }, 0);
+}
+
+function renderPreciosModal(p){
+  const cont = $('prod-precios');
+  const listasActivas = state.listasPrecio.filter(l=>l.activo);
+  cont.innerHTML = listasActivas.map(lista=>{
+    const precioExistente = p?.precios?.find(pr=>pr.listaPrecioId===lista.id)?.precio;
+    if(lista.modo_calculo === 'porcentaje_sobre_costo'){
+      return `<div class="lista-precio-campo" data-lista="${lista.id}" data-modo="porcentaje">
+        <div class="titulo">${lista.nombre} — costo + ${lista.porcentaje_margen||0}%</div>
+        <div class="precio-calculado" id="precio-calc-${lista.id}">—</div>
+        <p class="nota" style="margin:0;">Se calcula solo a partir del costo de última compra. No se edita a mano.</p>
+      </div>`;
+    }
+    return `<div class="lista-precio-campo" data-lista="${lista.id}" data-modo="directo">
+      <div class="titulo">${lista.nombre}</div>
+      <div class="par">
+        <div><label>Precio sin impuestos</label><input type="text" inputmode="decimal" class="precio-sin" data-lista="${lista.id}" value="${precioExistente!=null?precioExistente.toFixed(2):''}"></div>
+        <div><label>Precio con impuestos</label><input type="text" inputmode="decimal" class="precio-con" data-lista="${lista.id}"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  cont.querySelectorAll('.precio-sin').forEach(el=>{
+    attachMoneyInput(el);
+    const conEl = cont.querySelector(`.precio-con[data-lista="${el.dataset.lista}"]`);
+    attachMoneyInput(conEl);
+    const sync = ()=>{
+      const sin = parseMoney(el.value); if(isNaN(sin)) return;
+      conEl.value = redondear2(sin * (1+tasaTotalSeleccionada())).toFixed(2);
+    };
+    el.addEventListener('input', sync);
+    sync();
+  });
+  cont.querySelectorAll('.precio-con').forEach(el=>{
+    el.addEventListener('input', ()=>{
+      const con = parseMoney(el.value); if(isNaN(con)) return;
+      const sinEl = cont.querySelector(`.precio-sin[data-lista="${el.dataset.lista}"]`);
+      const tasa = tasaTotalSeleccionada();
+      sinEl.value = redondear2(con / (1+tasa)).toFixed(2);
+    });
+  });
+  recalcularPreciosModal();
+}
+
+function recalcularPreciosModal(){
+  const tasa = tasaTotalSeleccionada();
+  document.querySelectorAll('#prod-precios .precio-sin').forEach(el=>{
+    const conEl = document.querySelector(`#prod-precios .precio-con[data-lista="${el.dataset.lista}"]`);
+    const sin = parseMoney(el.value);
+    if(!isNaN(sin) && conEl){ conEl.value = money(redondear2(sin * (1+tasa))); }
+  });
+  const costo = parseMoney($('prod-costo').value);
+  document.querySelectorAll('#prod-precios [data-modo="porcentaje"]').forEach(div=>{
+    const listaId = div.dataset.lista;
+    const lista = state.listasPrecio.find(l=>l.id===listaId);
+    const calcEl = $(`precio-calc-${listaId}`);
+    if(isNaN(costo)){ calcEl.textContent = 'Sin costo capturado'; return; }
+    calcEl.textContent = money(redondear2(costo * (1 + (lista?.porcentaje_margen||0)/100)));
+  });
+}
+
+$('prod-cancelar').addEventListener('click', ()=>{ $('modal-producto').classList.remove('activo'); });
+$('prod-guardar').addEventListener('click', async ()=>{
+  if($('prod-guardar').disabled) return;
+  $('prod-guardar').disabled = true;
+  $('prod-error').innerHTML = '';
+
+  const nombre = $('prod-nombre').value.trim();
+  if(!nombre){ $('prod-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; $('prod-guardar').disabled=false; return; }
+
+  const impuestoIds = Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(chk=>chk.value);
+  const preciosDirectos = Array.from(document.querySelectorAll('#prod-precios .precio-sin')).map(el=>({
+    lista_precio_id: el.dataset.lista, precio: parseMoney(el.value)||0,
+  }));
+
+  const payload = {
+    producto_id: state.productoEditId, variante_id: state.varianteEditId,
+    empresa_id: state.empresaId, nombre, marca: $('prod-marca').value.trim(),
+    linea_articulo_id: $('prod-linea').value, unidad_medida_id: $('prod-unidad').value,
+    inventariable: $('prod-inventariable').checked, clave_prod_serv_sat: $('prod-clave-sat').value.trim(),
+    costo_ultima_compra: parseMoney($('prod-costo').value), activo: $('prod-activo').checked,
+    nombre_variante: 'Único', impuesto_ids: impuestoIds, precios_directos: preciosDirectos,
+    almacen_id: state.almacenId, minimo: $('prod-minimo').value, maximo: $('prod-maximo').value,
+    cantidad_inicial: $('prod-cant-inicial').value, codigo_barra: $('prod-codigo').value.trim(),
+  };
+
+  const { error } = await sb.rpc('guardar_producto', { p: payload });
+  if(error){
+    $('prod-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('prod-guardar').disabled = false;
+    return;
+  }
+  $('modal-producto').classList.remove('activo');
+  $('prod-guardar').disabled = false;
+  await cargarProductos();
+});
+
+// ---------- LISTAS DE PRECIO ----------
+function renderListasPrecio(){
+  $('listas-tabla-body').innerHTML = state.listasPrecio.map(l=>`
+    <tr class="fila-clic" data-lista="${l.id}">
+      <td>${l.nombre}</td>
+      <td>${l.modo_calculo === 'porcentaje_sobre_costo' ? 'Costo + %' : 'Directo'}</td>
+      <td class="num">${l.modo_calculo === 'porcentaje_sobre_costo' ? (l.porcentaje_margen ?? 0) + '%' : '—'}</td>
+      <td>${l.activo ? '<span class="tag tag-ok">Activa</span>' : '<span class="tag tag-off">Inactiva</span>'}</td>
+      <td></td>
+    </tr>`).join('');
+  $('listas-tabla-body').querySelectorAll('tr').forEach(tr=>{
+    tr.addEventListener('click', ()=>abrirLista(tr.dataset.lista));
+  });
+}
+
+$('btn-nueva-lista').addEventListener('click', ()=>abrirLista(null));
+$('lista-modo').addEventListener('change', ()=>{
+  $('lista-porcentaje-campo').style.display = $('lista-modo').value === 'porcentaje_sobre_costo' ? 'block' : 'none';
+});
+
+function abrirLista(listaId){
+  state.listaEditId = listaId;
+  const l = listaId ? state.listasPrecio.find(x=>x.id===listaId) : null;
+  $('lista-error').innerHTML = '';
+  $('lista-titulo').textContent = l ? 'Editar lista de precio' : 'Nueva lista de precio';
+  $('lista-nombre').value = l?.nombre || '';
+  $('lista-modo').value = l?.modo_calculo || 'directo';
+  $('lista-modo').dispatchEvent(new Event('change'));
+  $('lista-porcentaje').value = l?.porcentaje_margen ?? '';
+  $('lista-activo').checked = l ? !!l.activo : true;
+  $('lista-recalcular-cont').style.display = (l && l.modo_calculo==='porcentaje_sobre_costo') ? 'block' : 'none';
+  $('modal-lista').classList.add('activo');
+  $('lista-nombre').focus();
+}
+
+$('lista-cancelar').addEventListener('click', ()=>{ $('modal-lista').classList.remove('activo'); });
+$('lista-guardar').addEventListener('click', async ()=>{
+  if($('lista-guardar').disabled) return;
+  $('lista-guardar').disabled = true;
+  $('lista-error').innerHTML = '';
+  const nombre = $('lista-nombre').value.trim();
+  if(!nombre){ $('lista-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; $('lista-guardar').disabled=false; return; }
+  const modo = $('lista-modo').value;
+  const registro = {
+    empresa_id: state.empresaId, nombre, modo_calculo: modo,
+    porcentaje_margen: modo==='porcentaje_sobre_costo' ? (parseFloat($('lista-porcentaje').value)||0) : null,
+    activo: $('lista-activo').checked,
+  };
+  let error;
+  if(state.listaEditId){
+    ({ error } = await sb.from('listas_precio').update(registro).eq('id', state.listaEditId));
+  } else {
+    ({ error } = await sb.from('listas_precio').insert(registro));
+  }
+  if(error){
+    $('lista-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('lista-guardar').disabled = false;
+    return;
+  }
+  $('modal-lista').classList.remove('activo');
+  $('lista-guardar').disabled = false;
+  await cargarCatalogosBase();
+  renderListasPrecio();
+  renderReporteChecks();
+  await cargarProductos();
+});
+
+$('lista-recalcular').addEventListener('click', async ()=>{
+  if(!state.listaEditId) return;
+  $('lista-recalcular').disabled = true;
+  const { data, error } = await sb.rpc('recalcular_precios_lista', { p_lista_precio_id: state.listaEditId });
+  $('lista-recalcular').disabled = false;
+  if(error){ $('lista-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  $('lista-error').innerHTML = `<div class="msg-ok">Se recalcularon ${data} precios.</div>`;
+  await cargarProductos();
+});
+
+// ---------- REPORTE DE LISTA DE PRECIOS ----------
+function renderReporteChecks(){
+  $('reporte-checks').innerHTML = state.listasPrecio.filter(l=>l.activo).map(l=>`
+    <label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;">
+      <input type="checkbox" class="chk-reporte-lista" value="${l.id}" style="width:auto;" checked> ${l.nombre}
+    </label>`).join('');
+  $('reporte-checks').querySelectorAll('.chk-reporte-lista').forEach(chk=>chk.addEventListener('change', renderReporte));
+}
+
+function renderReporte(){
+  const listaIds = Array.from(document.querySelectorAll('.chk-reporte-lista:checked')).map(chk=>chk.value);
+  const listas = state.listasPrecio.filter(l=>listaIds.includes(l.id));
+  $('reporte-encabezado').innerHTML = '<th>Producto</th>' + listas.map(l=>`<th class="num">${l.nombre}</th>`).join('');
+  const productosOrdenados = [...state.productos].sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  $('reporte-tabla-body').innerHTML = productosOrdenados.map(p=>{
+    const celdas = listas.map(l=>{
+      const precio = p.precios.find(pr=>pr.listaPrecioId===l.id);
+      return `<td class="num">${precio ? money(precio.precio) : '—'}</td>`;
+    }).join('');
+    return `<tr><td>${p.nombre}${p.marca?` <span class="nota">(${p.marca})</span>`:''}</td>${celdas}</tr>`;
+  }).join('');
+}
+
+// ---------- ARRANQUE ----------
+(async ()=>{
+  const { data } = await sb.auth.getSession();
+  if(data?.session){ await iniciarSesionApp(); }
+})();
+</script>
+</body>
+</html>
