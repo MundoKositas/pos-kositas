@@ -94,7 +94,7 @@
 
 <!-- LOGIN -->
 <div class="pantalla activa" id="pantalla-login">
-  <div class="card centrado">
+  <div class="card centrado" id="card-login">
     <h1>POS Kositas</h1>
     <div class="campo">
       <label>Correo</label>
@@ -117,7 +117,7 @@
 
 <!-- SELECCIÓN DE SUCURSAL / CAJA (solo si aplica) -->
 <div class="pantalla" id="pantalla-seleccion">
-  <div class="card centrado">
+  <div class="card centrado" id="card-seleccion">
     <h1>Selecciona tu caja</h1>
     <div class="campo">
       <label>Sucursal</label>
@@ -133,7 +133,7 @@
 
 <!-- ABRIR CAJA -->
 <div class="pantalla" id="pantalla-abrir-caja">
-  <div class="card centrado">
+  <div class="card centrado" id="card-abrir-caja">
     <h1>Abrir caja</h1>
     <p style="color:var(--gris);font-size:.9rem;" id="abrir-caja-info"></p>
     <div class="campo">
@@ -171,7 +171,7 @@
         <h2>Cliente</h2>
         <select id="sel-cliente"></select>
       </div>
-      <div class="card" style="margin-top:14px;">
+      <div class="card" style="margin-top:14px;" id="card-cobro">
         <h2>Cobro</h2>
         <div class="totales">
           <div class="linea"><span>Subtotal</span><span id="tot-subtotal">$0.00</span></div>
@@ -258,7 +258,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.0.006';
+const APP_VERSION = '1.0.007';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -322,9 +322,39 @@ function mostrarPantalla(id){
 }
 $('version-tag').textContent = 'v' + APP_VERSION;
 
+// ---------- NAVEGACIÓN POR TECLADO (para no depender del mouse) ----------
+// En cada contenedor: Enter en un campo mueve el foco al siguiente campo visible;
+// Enter en el ÚLTIMO campo ejecuta el botón principal de esa pantalla/modal (si está habilitado).
+// Se usa event delegation (el listener va en el contenedor, no en cada campo), así que
+// funciona incluso con campos que se crean dinámicamente (ej. las líneas de forma de pago).
+function habilitarEnterSecuencial(container, boton){
+  if(!container) return;
+  container.addEventListener('keydown', e=>{
+    if(e.key !== 'Enter') return;
+    const campos = Array.from(container.querySelectorAll('input, select'))
+      .filter(el=>!el.disabled && el.offsetParent!==null); // solo campos visibles y habilitados
+    const idx = campos.indexOf(e.target);
+    if(idx === -1) return; // el Enter no vino de un campo de este contenedor (ej. ya tiene su propio manejo, como buscar-input)
+    e.preventDefault();
+    const siguiente = campos[idx+1];
+    if(siguiente){
+      siguiente.focus();
+      if(siguiente.select) siguiente.select();
+    } else if(boton && !boton.disabled){
+      boton.click();
+    }
+  });
+}
+
+habilitarEnterSecuencial($('card-login'), $('btn-login'));
+habilitarEnterSecuencial($('card-seleccion'), $('btn-continuar-seleccion'));
+habilitarEnterSecuencial($('card-abrir-caja'), $('btn-abrir-caja'));
+habilitarEnterSecuencial($('card-cobro'), $('btn-cobrar'));
+habilitarEnterSecuencial($('modal-movimiento'), $('mov-confirmar'));
+habilitarEnterSecuencial($('modal-cerrar-caja'), $('cierre-confirmar'));
+
 // ---------- LOGIN ----------
 $('btn-login').addEventListener('click', hacerLogin);
-$('login-password').addEventListener('keydown', e=>{ if(e.key==='Enter') hacerLogin(); });
 
 async function hacerLogin(){
   $('login-error').innerHTML = '';
@@ -450,6 +480,7 @@ async function seleccionarSucursalCaja(sucursal, caja){
   } else {
     $('abrir-caja-info').textContent = `${state.empresaNombre} · ${sucursal.nombre} · ${caja.nombre}`;
     mostrarPantalla('pantalla-abrir-caja');
+    $('fondo-inicial').focus();
   }
 }
 
@@ -479,6 +510,7 @@ async function entrarAlPOS(){
   await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago()]);
   reiniciarVenta();
   mostrarPantalla('pantalla-pos');
+  $('buscar-input').focus();
 }
 
 async function cargarCatalogo(){
@@ -677,6 +709,8 @@ $('btn-agregar-pago').addEventListener('click', ()=>{
   const restante = Math.max(0, total - pagado);
   state.pagos.push({ formaPagoId: disponibles[0].id, monto: restante.toFixed(2), referencia:'' });
   renderPagos();
+  const ultimoCampo = document.querySelector(`.pago-linea:last-child .pago-recibido, .pago-linea:last-child .pago-monto`);
+  if(ultimoCampo){ ultimoCampo.focus(); ultimoCampo.select(); }
 });
 
 function renderPagos(){
@@ -803,11 +837,12 @@ function reiniciarVenta(){
   $('buscar-input').value='';
   renderResultados('');
   $('cobro-error').innerHTML='';
+  $('buscar-input').focus();
 }
 
 // ---------- MOVIMIENTO DE CAJA ----------
 attachMoneyInput($('mov-monto'));
-$('btn-movimiento-caja').addEventListener('click', ()=>{ $('mov-confirmar').disabled=false; $('modal-movimiento').classList.add('activo'); });
+$('btn-movimiento-caja').addEventListener('click', ()=>{ $('mov-confirmar').disabled=false; $('modal-movimiento').classList.add('activo'); $('mov-monto').focus(); });
 $('mov-cancelar').addEventListener('click', ()=>{ $('modal-movimiento').classList.remove('activo'); });
 $('mov-confirmar').addEventListener('click', async ()=>{
   if($('mov-confirmar').disabled) return; // evita doble registro por doble clic
@@ -892,6 +927,7 @@ $('btn-cerrar-caja').addEventListener('click', async ()=>{
   $('modal-cerrar-caja').classList.add('activo');
   const resumen = await calcularResumenCierre();
   renderResumenCierre(resumen);
+  $('cierre-efectivo').focus();
 });
 $('cierre-cancelar').addEventListener('click', ()=>{ $('modal-cerrar-caja').classList.remove('activo'); });
 $('cierre-confirmar').addEventListener('click', async ()=>{
@@ -944,7 +980,7 @@ $('resultado-cierre-ok').addEventListener('click', async ()=>{
 (async function arrancar(){
   const { data } = await sb.auth.getSession();
   if(data?.session){ await iniciarSesionApp(); }
-  else { mostrarPantalla('pantalla-login'); }
+  else { mostrarPantalla('pantalla-login'); $('login-email').focus(); }
 })();
 </script>
 </body>
