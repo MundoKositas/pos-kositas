@@ -54,9 +54,10 @@
   .totales .total-final{font-size:1.3rem;font-weight:700;border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;}
   .pago-linea{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed var(--borde);}
   .pago-linea .pago-forma{flex:1 1 140px;}
-  .pago-linea .pago-monto{flex:1 1 130px;min-width:120px;}
+  .pago-linea .pago-monto, .pago-linea .pago-recibido{flex:1 1 130px;min-width:120px;}
   .pago-linea .pago-referencia{flex:1 1 100%;}
   .pago-linea .quitar{flex:0 0 auto;}
+  .pago-linea .pago-nota{flex:1 1 100%;font-size:.78rem;color:var(--gris);}
   .modal-fondo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:50;padding:16px;}
   .modal-fondo.activo{display:flex;}
   .modal{background:#fff;border-radius:10px;padding:22px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto;}
@@ -601,7 +602,29 @@ function faltaAutorizacion(){
   });
 }
 
+// Para pagos en efectivo: si el cajero captura "Recibió", el monto que realmente se aplica
+// a la venta se limita a lo que falte por cobrar — el resto es cambio, nunca se registra como pago.
+function sincronizarPagos(){
+  const { total } = calcularTotales();
+  let acumulado = 0;
+  state.pagos.forEach(p=>{
+    const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
+    const esEfectivo = forma?.nombre === 'Efectivo';
+    if(esEfectivo && p.recibido !== undefined){
+      const recibido = parseMoney(p.recibido)||0;
+      const restanteAntes = Math.max(0, total - acumulado);
+      const aplicado = Math.min(recibido, restanteAntes);
+      p.monto = aplicado.toFixed(2);
+      p.cambio = Math.max(0, recibido - aplicado);
+    } else {
+      p.cambio = 0;
+    }
+    acumulado += parseMoney(p.monto)||0;
+  });
+}
+
 function recalcularTotales(){
+  sincronizarPagos();
   const { subtotal, impuesto, total } = calcularTotales();
   $('tot-subtotal').textContent = money(subtotal);
   $('tot-impuesto').textContent = money(impuesto);
@@ -611,6 +634,13 @@ function recalcularTotales(){
   const restante = total - pagado;
   $('restante-label').textContent = restante > 0 ? 'Restante' : 'Cambio';
   $('tot-restante').textContent = money(Math.abs(restante));
+  state.pagos.forEach((p,i)=>{
+    const nota = document.querySelector(`.pago-nota[data-idx="${i}"]`);
+    if(!nota) return;
+    nota.textContent = p.cambio > 0.001
+      ? `Aplicado a la venta: ${money(p.monto)} · Cambio a dar: ${money(p.cambio)}`
+      : '';
+  });
   const faltaAuth = faltaAutorizacion();
   $('pago-aviso').textContent = faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '';
   $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth;
@@ -630,22 +660,35 @@ function renderPagos(){
   cont.innerHTML = state.pagos.map((p,i)=>{
     const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
     const requiereAuth = !!forma?.requiere_autorizacion;
+    const esEfectivo = forma?.nombre === 'Efectivo';
     return `
     <div class="pago-linea">
       <select data-idx="${i}" class="pago-forma">${state.formasPago.map(f=>`<option value="${f.id}" ${f.id===p.formaPagoId?'selected':''}>${f.nombre}</option>`).join('')}</select>
-      <input type="text" inputmode="decimal" class="pago-monto money-input" data-idx="${i}" value="${p.monto}">
+      ${esEfectivo
+        ? `<input type="text" inputmode="decimal" class="pago-recibido money-input" data-idx="${i}" placeholder="Recibió" value="${p.recibido!==undefined?p.recibido:p.monto}">`
+        : `<input type="text" inputmode="decimal" class="pago-monto money-input" data-idx="${i}" value="${p.monto}">`}
       <button class="quitar" data-idx="${i}">✕</button>
+      ${esEfectivo ? `<div class="pago-nota" data-idx="${i}"></div>` : ''}
       ${requiereAuth ? `<input type="text" class="pago-referencia" data-idx="${i}" placeholder="No. de autorización" value="${p.referencia||''}">` : ''}
     </div>`;
   }).join('');
   cont.querySelectorAll('.pago-forma').forEach(sel=>sel.addEventListener('change', ()=>{
-    state.pagos[Number(sel.dataset.idx)].formaPagoId = sel.value;
+    const i = Number(sel.dataset.idx);
+    state.pagos[i].formaPagoId = sel.value;
+    state.pagos[i].recibido = undefined;
     renderPagos();
   }));
   cont.querySelectorAll('.pago-monto').forEach(inp=>{
     attachMoneyInput(inp);
     inp.addEventListener('input', ()=>{
       state.pagos[Number(inp.dataset.idx)].monto = inp.value;
+      recalcularTotales();
+    });
+  });
+  cont.querySelectorAll('.pago-recibido').forEach(inp=>{
+    attachMoneyInput(inp);
+    inp.addEventListener('input', ()=>{
+      state.pagos[Number(inp.dataset.idx)].recibido = inp.value;
       recalcularTotales();
     });
   });
@@ -725,20 +768,31 @@ function reiniciarVenta(){
 
 // ---------- MOVIMIENTO DE CAJA ----------
 attachMoneyInput($('mov-monto'));
-$('btn-movimiento-caja').addEventListener('click', ()=>{ $('modal-movimiento').classList.add('activo'); });
+$('btn-movimiento-caja').addEventListener('click', ()=>{ $('mov-confirmar').disabled=false; $('modal-movimiento').classList.add('activo'); });
 $('mov-cancelar').addEventListener('click', ()=>{ $('modal-movimiento').classList.remove('activo'); });
 $('mov-confirmar').addEventListener('click', async ()=>{
+  if($('mov-confirmar').disabled) return; // evita doble registro por doble clic
+  $('mov-confirmar').disabled = true;
   $('mov-error').innerHTML='';
   const tipo = $('mov-tipo').value;
   const monto = moneyInputValue($('mov-monto'));
   const motivo = $('mov-motivo').value.trim();
-  if(monto<=0 || !motivo){ $('mov-error').innerHTML='<div class="msg-error">Captura un monto y motivo válidos.</div>'; return; }
+  if(monto<=0 || !motivo){
+    $('mov-error').innerHTML='<div class="msg-error">Captura un monto y motivo válidos.</div>';
+    $('mov-confirmar').disabled = false;
+    return;
+  }
   const { error } = await sb.from('caja_movimientos').insert({
     sesion_caja_id: state.sesionCaja.id, tipo, monto, motivo, usuario_id: state.usuario.id
   });
-  if(error){ $('mov-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  if(error){
+    $('mov-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('mov-confirmar').disabled = false;
+    return;
+  }
   $('modal-movimiento').classList.remove('activo');
   $('mov-monto').value=''; $('mov-motivo').value='';
+  $('mov-confirmar').disabled = false;
 });
 
 // ---------- CERRAR CAJA ----------
@@ -746,35 +800,46 @@ attachMoneyInput($('cierre-efectivo'));
 
 async function calcularResumenCierre(){
   const sesion = state.sesionCaja;
-  const formaEfectivo = state.formasPago.find(f=>f.nombre==='Efectivo');
-  let ventasEfectivo = 0;
-  if(formaEfectivo){
-    const { data: ventasSesion } = await sb.from('ventas').select('id').eq('sesion_caja_id', sesion.id);
-    const ventaIds = (ventasSesion||[]).map(v=>v.id);
-    if(ventaIds.length){
-      const { data: pagos } = await sb.from('venta_pagos').select('monto, forma_pago_id').in('venta_id', ventaIds).eq('forma_pago_id', formaEfectivo.id);
-      ventasEfectivo = (pagos||[]).reduce((s,p)=>s+Number(p.monto),0);
-    }
+  const { data: ventasSesion } = await sb.from('ventas').select('id, tipo_venta, total').eq('sesion_caja_id', sesion.id);
+  const ventaIds = (ventasSesion||[]).map(v=>v.id);
+  const ventasCredito = (ventasSesion||[]).filter(v=>v.tipo_venta==='credito').reduce((s,v)=>s+Number(v.total),0);
+
+  const desglose = {}; // { 'Efectivo': 123.45, 'Tarjeta de crédito': 0, ... }
+  state.formasPago.forEach(f=>{ desglose[f.nombre] = 0; });
+  if(ventaIds.length){
+    const { data: pagos } = await sb.from('venta_pagos').select('monto, forma_pago:formas_pago(nombre)').in('venta_id', ventaIds);
+    (pagos||[]).forEach(p=>{
+      const nombre = p.forma_pago?.nombre || 'Otro';
+      desglose[nombre] = (desglose[nombre]||0) + Number(p.monto);
+    });
   }
+  const ventasEfectivo = desglose['Efectivo'] || 0;
+
   const { data: movs } = await sb.from('caja_movimientos').select('tipo, monto').eq('sesion_caja_id', sesion.id);
   const entradas = (movs||[]).filter(m=>m.tipo==='entrada').reduce((s,m)=>s+Number(m.monto),0);
   const salidas = (movs||[]).filter(m=>m.tipo==='salida').reduce((s,m)=>s+Number(m.monto),0);
   const fondoInicial = Number(sesion.fondo_inicial);
   const esperado = fondoInicial + ventasEfectivo + entradas - salidas;
-  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado };
+  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose };
 }
 
 function renderResumenCierre(r){
+  const otrasFormas = Object.entries(r.desglose).filter(([nombre])=>nombre!=='Efectivo');
+  const filasOtras = otrasFormas.map(([nombre,total])=>`<div class="linea"><span>${nombre}</span><span>${money(total)}</span></div>`).join('');
   $('cierre-resumen').innerHTML = `
     <div class="linea"><span>Fondo inicial</span><span>${money(r.fondoInicial)}</span></div>
     <div class="linea"><span>+ Ventas en efectivo</span><span>${money(r.ventasEfectivo)}</span></div>
     <div class="linea"><span>+ Entradas de caja</span><span>${money(r.entradas)}</span></div>
     <div class="linea"><span>− Salidas de caja</span><span>${money(r.salidas)}</span></div>
-    <div class="linea total-final"><span>Efectivo esperado</span><span>${money(r.esperado)}</span></div>
+    <div class="linea total-final"><span>Efectivo esperado (a contar)</span><span>${money(r.esperado)}</span></div>
+    <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión (no se cuentan en caja física):</p>
+    ${filasOtras}
+    <div class="linea"><span>Ventas a crédito</span><span>${money(r.ventasCredito)}</span></div>
   `;
 }
 
 $('btn-cerrar-caja').addEventListener('click', async ()=>{
+  $('cierre-confirmar').disabled = false;
   $('cierre-resumen').innerHTML = 'Calculando…';
   $('modal-cerrar-caja').classList.add('activo');
   const resumen = await calcularResumenCierre();
@@ -782,15 +847,27 @@ $('btn-cerrar-caja').addEventListener('click', async ()=>{
 });
 $('cierre-cancelar').addEventListener('click', ()=>{ $('modal-cerrar-caja').classList.remove('activo'); });
 $('cierre-confirmar').addEventListener('click', async ()=>{
+  if($('cierre-confirmar').disabled) return; // evita cerrar dos veces por doble clic
+  $('cierre-confirmar').disabled = true;
   $('cierre-error').innerHTML='';
   const efectivo = moneyInputValue($('cierre-efectivo'));
-  if(efectivo<0){ $('cierre-error').innerHTML='<div class="msg-error">Captura el efectivo contado.</div>'; return; }
+  if(efectivo<0){
+    $('cierre-error').innerHTML='<div class="msg-error">Captura el efectivo contado.</div>';
+    $('cierre-confirmar').disabled = false;
+    return;
+  }
   const obs = $('cierre-obs').value.trim();
   const { data, error } = await sb.rpc('cerrar_sesion_caja', {
     p_sesion_id: state.sesionCaja.id, p_efectivo_contado: efectivo, p_observaciones: obs || null
   });
-  if(error){ $('cierre-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  if(error){
+    $('cierre-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('cierre-confirmar').disabled = false;
+    return;
+  }
   const r = data[0];
+  const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
+  const filasOtras = otrasFormas.map(d=>`<div class="linea"><span>${d.forma_pago}</span><span>${money(d.total)}</span></div>`).join('');
   $('modal-cerrar-caja').classList.remove('activo');
   $('resultado-cierre-body').innerHTML = `
     <div class="linea"><span>Fondo inicial</span><span>${money(r.fondo_inicial)}</span></div>
@@ -800,6 +877,9 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     <div class="linea"><span>Efectivo esperado</span><span>${money(r.efectivo_esperado)}</span></div>
     <div class="linea"><span>Efectivo contado</span><span>${money(r.efectivo_contado)}</span></div>
     <div class="linea total-final"><span>Diferencia</span><span>${money(r.diferencia)}</span></div>
+    <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión:</p>
+    ${filasOtras || '<p class="nota">(ninguna)</p>'}
+    <div class="linea"><span>Ventas a crédito</span><span>${money(r.ventas_credito)}</span></div>
   `;
   $('modal-resultado-cierre').classList.add('activo');
 });
