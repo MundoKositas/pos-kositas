@@ -81,9 +81,12 @@
 <body>
 
 <header id="header-app" style="display:none;">
-  <div>
-    <div class="marca" id="hdr-empresa">Mundo Kositas</div>
-    <div class="info" id="hdr-info"></div>
+  <div class="fila" style="align-items:center;gap:10px;">
+    <img id="hdr-logo" alt="" style="display:none;height:60px;width:auto;max-width:200px;object-fit:contain;">
+    <div>
+      <div class="marca" id="hdr-empresa">Mundo Kositas</div>
+      <div class="info" id="hdr-info"></div>
+    </div>
   </div>
   <div class="acciones">
     <button class="btn-secundario" id="btn-movimiento-caja">Movimiento de caja</button>
@@ -261,7 +264,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.1.001';
+const APP_VERSION = '1.1.003';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -576,6 +579,12 @@ async function entrarAlPOS(){
   $('header-app').style.display = 'flex';
   $('hdr-empresa').textContent = state.empresaNombre;
   $('hdr-info').textContent = `${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
+  if(state.logoUrl){
+    $('hdr-logo').src = state.logoUrl;
+    $('hdr-logo').style.display = 'block';
+  } else {
+    $('hdr-logo').style.display = 'none';
+  }
   $('nota-impuestos').textContent = state.desglosarImpuestos
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
     : 'Precios mostrados con IVA incluido.';

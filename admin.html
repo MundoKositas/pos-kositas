@@ -86,7 +86,7 @@
 
 <header id="header-app" style="display:none;">
   <div class="fila" style="align-items:center;gap:10px;">
-    <img id="hdr-logo" alt="" style="display:none;height:34px;width:34px;object-fit:contain;border-radius:6px;">
+    <img id="hdr-logo" alt="" style="display:none;height:60px;width:auto;max-width:200px;object-fit:contain;">
     <div>
       <div class="marca" id="hdr-empresa">Mundo Kositas</div>
       <div class="info" id="hdr-info"></div>
@@ -433,7 +433,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.5.001';
+const APP_VERSION = '1.5.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
