@@ -175,7 +175,7 @@
         <h2>Cobro</h2>
         <div class="totales">
           <div class="linea"><span>Subtotal</span><span id="tot-subtotal">$0.00</span></div>
-          <div class="linea"><span>Impuestos</span><span id="tot-impuesto">$0.00</span></div>
+          <div id="tot-impuestos-lista"></div>
           <div class="linea total-final"><span>Total</span><span id="tot-total">$0.00</span></div>
         </div>
         <div id="pagos-lista" style="margin-top:14px;"></div>
@@ -258,7 +258,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.0.007';
+const APP_VERSION = '1.0.008';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -303,17 +303,21 @@ const state = {
   catalogo: [],
   clientes: [], clienteId: null,
   formasPago: [],
-  carrito: [], // {varianteId, nombre, precio, cantidad, tasaImpuesto, impuestoId, stock, codigo}
+  carrito: [], // {varianteId, nombre, precio, cantidad, impuestos:[{impuestoId,nombre,tasa}], stock, codigo}
   pagos: [], // {formaPagoId, monto, referencia}
 };
 
+function tasaTotal(item){
+  return (item.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0), 0);
+}
+
 function precioMostrar(item){
   // Respeta empresas.desglosar_impuestos_ticket: si se desglosa el impuesto en el ticket,
-  // el precio mostrado en búsqueda/carrito es el precio base (sin IVA). Si no se desglosa,
-  // se muestra el precio final (con IVA incluido).
+  // el precio mostrado en búsqueda/carrito es el precio base (sin impuestos). Si no se desglosa,
+  // se muestra el precio final (con todos los impuestos del producto incluidos).
   const base = Number(item.precio) || 0;
   if(state.desglosarImpuestos) return base;
-  return base * (1 + (Number(item.tasaImpuesto)||0));
+  return base * (1 + tasaTotal(item));
 }
 
 function mostrarPantalla(id){
@@ -527,15 +531,18 @@ async function cargarCatalogo(){
     .map(v=>{
       const precioRow = (v.precios||[]).find(p=>p.lista_precio_id === state.listaPrecioId);
       const stockRow = (v.stock||[]).find(e=>e.almacen_id === state.almacenId);
-      const impRow = (v.producto.producto_impuestos||[])[0];
       return {
         varianteId: v.id,
         nombre: v.producto.nombre + (v.nombre_variante && v.nombre_variante !== 'Único' ? ' - ' + v.nombre_variante : ''),
         precio: precioRow ? Number(precioRow.precio) : null,
         stock: stockRow ? Number(stockRow.cantidad) : 0,
         codigos: (v.codigos||[]).map(c=>c.codigo),
-        impuestoId: impRow ? impRow.impuesto_id : null,
-        tasaImpuesto: impRow && impRow.impuestos ? Number(impRow.impuestos.tasa) : 0,
+        // Un producto puede llevar 0, 1 o varios impuestos a la vez (ej. IVA + IEPS).
+        impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
+          impuestoId: pi.impuesto_id,
+          nombre: pi.impuestos?.nombre || 'Impuesto',
+          tasa: Number(pi.impuestos?.tasa) || 0,
+        })),
       };
     })
     .filter(p=>p.precio !== null);
@@ -594,7 +601,7 @@ function agregarAlCarrito(producto, codigoEscaneado){
   else {
     state.carrito.push({
       varianteId: producto.varianteId, nombre: producto.nombre, precio: producto.precio,
-      cantidad: 1, tasaImpuesto: producto.tasaImpuesto, impuestoId: producto.impuestoId,
+      cantidad: 1, impuestos: producto.impuestos,
       stock: producto.stock, codigo: codigoEscaneado || null,
     });
   }
@@ -627,14 +634,24 @@ function renderCarrito(){
 }
 
 function calcularTotales(){
-  let subtotal = 0, impuesto = 0;
+  // El desglose de impuestos es dinámico: solo aparecen los impuestos que de verdad
+  // traen los productos del carrito (según el catálogo), no una lista fija en el código.
+  // Así, si el catálogo de impuestos cambia (nueva tasa, nuevo impuesto), el cobro se
+  // ajusta solo, sin tocar el sistema.
+  let subtotal = 0;
+  const desglose = {}; // { impuesto_id: {nombre, tasa, monto} }
   for(const l of state.carrito){
-    const lineaSub = l.precio * l.cantidad;
-    subtotal += lineaSub;
-    impuesto += lineaSub * (l.tasaImpuesto||0);
+    const lineaBase = l.precio * l.cantidad;
+    subtotal += lineaBase;
+    (l.impuestos||[]).forEach(imp=>{
+      const monto = lineaBase * (imp.tasa||0);
+      if(!desglose[imp.impuestoId]) desglose[imp.impuestoId] = { nombre: imp.nombre, tasa: imp.tasa, monto: 0 };
+      desglose[imp.impuestoId].monto += monto;
+    });
   }
+  const impuesto = Object.values(desglose).reduce((s,d)=>s+d.monto, 0);
   const total = subtotal + impuesto;
-  return { subtotal, impuesto, total };
+  return { subtotal, impuesto, desglose, total };
 }
 
 function faltaAutorizacion(){
@@ -667,9 +684,11 @@ function sincronizarPagos(){
 
 function recalcularTotales(){
   sincronizarPagos();
-  const { subtotal, impuesto, total } = calcularTotales();
+  const { subtotal, desglose, total } = calcularTotales();
   $('tot-subtotal').textContent = money(subtotal);
-  $('tot-impuesto').textContent = money(impuesto);
+  $('tot-impuestos-lista').innerHTML = Object.values(desglose).map(d=>
+    `<div class="linea"><span>${d.nombre}</span><span>${money(d.monto)}</span></div>`
+  ).join('');
   $('tot-total').textContent = money(total);
   const pagado = state.pagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);
   $('tot-pagado').textContent = money(pagado);
@@ -765,7 +784,7 @@ function renderPagos(){
 $('btn-cobrar').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
   $('btn-cobrar').disabled = true;
-  const { subtotal, impuesto, total } = calcularTotales();
+  const { subtotal, impuesto, desglose, total } = calcularTotales();
 
   const payloadVenta = {
     empresa_id: state.empresaId, sucursal_id: state.sucursalId, caja_id: state.cajaId,
@@ -773,9 +792,12 @@ $('btn-cobrar').addEventListener('click', async ()=>{
     lista_precio_id: state.listaPrecioId, periodo_operacion_id: state.periodoOperacionId,
     tipo_venta: 'contado', subtotal, descuento_total: 0, impuesto_total: impuesto, total,
   };
+  // Cada línea manda su propio arreglo de impuestos (0 a N), tal como estén configurados
+  // para ese producto en el catálogo — nunca un solo impuesto fijo por línea.
   const payloadDetalle = state.carrito.map(l=>({
     variante_id: l.varianteId, codigo_escaneado: l.codigo, cantidad: l.cantidad,
-    precio_unitario: l.precio, descuento_unitario: 0, impuesto_id: l.impuestoId, tasa_impuesto_aplicada: l.tasaImpuesto,
+    precio_unitario: l.precio, descuento_unitario: 0,
+    impuestos: (l.impuestos||[]).map(i=>({ impuesto_id: i.impuestoId, tasa: i.tasa })),
   }));
   const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
 
@@ -788,11 +810,11 @@ $('btn-cobrar').addEventListener('click', async ()=>{
     $('btn-cobrar').disabled = false;
     return;
   }
-  mostrarTicket(ventaId, payloadVenta);
+  mostrarTicket(ventaId, payloadVenta, desglose);
   await cargarCatalogo(); // refrescar stock
 });
 
-function mostrarTicket(ventaId, venta){
+function mostrarTicket(ventaId, venta, desglose){
   const cliente = state.clientes.find(c=>c.id===state.clienteId);
   const fecha = new Date().toLocaleString('es-MX');
   const filasItems = state.carrito.map(l=>`
@@ -813,7 +835,7 @@ function mostrarTicket(ventaId, venta){
     <table><tbody>${filasItems}</tbody></table>
     <div class="totales">
       <div class="linea"><span>Subtotal</span><span>${money(venta.subtotal)}</span></div>
-      <div class="linea"><span>Impuestos</span><span>${money(venta.impuesto_total)}</span></div>
+      ${Object.values(desglose||{}).map(d=>`<div class="linea"><span>${d.nombre}</span><span>${money(d.monto)}</span></div>`).join('')}
       <div class="linea total-final"><span>Total</span><span>${money(venta.total)}</span></div>
     </div>
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Forma de pago:</p>
