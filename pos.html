@@ -404,7 +404,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.3.001';
+const APP_VERSION = '1.3.002';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -866,7 +866,29 @@ $('sel-lista-precio').addEventListener('change', ()=>{
 });
 
 // ---------- Descuento a toda la venta (ticket) ----------
+// Un descuento "a toda la venta" y un descuento puesto solo a un artículo son mutuamente excluyentes
+// (a petición de Adrián, para no mezclar los dos y que el importe final sea confuso): mientras algún
+// artículo tenga su propio descuento (descuentoOrigen==='linea'), no se puede aplicar el de ticket, y
+// mientras el descuento de ticket esté activo (descuentoOrigen==='ticket' en las líneas), no se puede
+// editar el descuento de un artículo en lo individual — primero hay que quitar el que esté activo.
+function lineaConDescuentoIndividual(){
+  return state.carrito.find(l=>l.descuentoOrigen==='linea');
+}
 $('btn-descuento-ticket').addEventListener('click', async ()=>{
+  // Si ya hay un descuento puesto solo a un artículo, no se pide PIN todavía (no tendría caso) —
+  // se abre el modal directo mostrando por qué está bloqueado, para que se resuelva desde ahí.
+  const conflicto = lineaConDescuentoIndividual();
+  if(conflicto){
+    // Se deshabilitan "Aplicar" y "Quitar" — "Quitar" borraría el descuento del artículo en conflicto
+    // sin querer (afecta TODAS las líneas), y aquí no hay ningún descuento de ticket que quitar todavía.
+    $('desc-ticket-tipo').value = 'porcentaje';
+    $('desc-ticket-valor').value = '';
+    $('desc-ticket-error').innerHTML = `<div class="msg-error">"${conflicto.nombre}" ya tiene un descuento propio — quítalo desde su ícono ✎ "Editar artículo" antes de aplicar un descuento a toda la venta.</div>`;
+    $('desc-ticket-aplicar').disabled = true;
+    $('desc-ticket-quitar').disabled = true;
+    $('modal-descuento-ticket').classList.add('activo');
+    return;
+  }
   if(!tienePermiso('pos.aplicar_descuento') && !state.descuentoTicketAutorizadoPor){
     const resultado = await pedirAutorizacionSupervisor('pos.aplicar_descuento', 'aplicar un descuento a toda la venta');
     if(!resultado) return;
@@ -876,13 +898,15 @@ $('btn-descuento-ticket').addEventListener('click', async ()=>{
   $('desc-ticket-error').innerHTML = '';
   $('desc-ticket-tipo').value = 'porcentaje';
   $('desc-ticket-valor').value = '';
+  $('desc-ticket-aplicar').disabled = false;
+  $('desc-ticket-quitar').disabled = false;
   $('modal-descuento-ticket').classList.add('activo');
   $('desc-ticket-valor').focus();
 });
 $('desc-ticket-cancelar').addEventListener('click', ()=>{ $('modal-descuento-ticket').classList.remove('activo'); });
 $('desc-ticket-quitar').addEventListener('click', ()=>{
   if(!state.carrito.length){ $('modal-descuento-ticket').classList.remove('activo'); return; }
-  state.carrito.forEach(l=>{ l.descuentoTipo = null; l.descuentoValor = 0; l.autorizaciones.descuento = null; });
+  state.carrito.forEach(l=>{ l.descuentoTipo = null; l.descuentoValor = 0; l.descuentoOrigen = null; l.autorizaciones.descuento = null; });
   $('modal-descuento-ticket').classList.remove('activo');
   renderCarrito();
 });
@@ -892,11 +916,16 @@ $('desc-ticket-aplicar').addEventListener('click', ()=>{
   if(!(valor > 0)){ $('desc-ticket-error').innerHTML = '<div class="msg-error">Captura un valor mayor a 0 (o usa "Quitar descuento").</div>'; return; }
   if(tipo === 'porcentaje' && valor > 100){ $('desc-ticket-error').innerHTML = '<div class="msg-error">Un descuento por porcentaje no puede ser mayor a 100%.</div>'; return; }
   if(!state.carrito.length){ $('desc-ticket-error').innerHTML = '<div class="msg-error">Todavía no hay artículos en el carrito.</div>'; return; }
+  const conflicto = lineaConDescuentoIndividual();
+  if(conflicto){
+    $('desc-ticket-error').innerHTML = `<div class="msg-error">"${conflicto.nombre}" ya tiene un descuento propio — quítalo antes de aplicar un descuento a toda la venta.</div>`;
+    return;
+  }
   // "Autorizado por" a nivel ticket: si el descuento vino de un candado abierto con PIN, se marca esa
   // autorización en CADA línea (para la bitácora), aunque quien aplicó a fin de cuentas fue el mismo
   // supervisor una sola vez, no uno por artículo.
   state.carrito.forEach(l=>{
-    l.descuentoTipo = tipo; l.descuentoValor = valor;
+    l.descuentoTipo = tipo; l.descuentoValor = valor; l.descuentoOrigen = 'ticket';
     l.autorizaciones.descuento = state.descuentoTicketAutorizadoPor;
   });
   $('modal-descuento-ticket').classList.remove('activo');
@@ -920,10 +949,18 @@ function abrirEditarLinea(idx){
 
   $('el-desc-tipo').value = l.descuentoTipo || '';
   $('el-desc-valor').value = l.descuentoTipo ? l.descuentoValor : '';
-  const puedeDesc = tienePermiso('pos.aplicar_descuento') || !!l.autorizaciones.descuento;
+  // Si hay un descuento a TODA la venta activo (l.descuentoOrigen==='ticket', el mismo en todas las
+  // líneas), no se deja editar el descuento de este artículo en lo individual — son mutuamente
+  // excluyentes (ver también btn-descuento-ticket/desc-ticket-aplicar). Hay que quitar primero el
+  // descuento de toda la venta desde ese botón.
+  const bloqueadoPorTicket = l.descuentoOrigen === 'ticket';
+  const puedeDesc = !bloqueadoPorTicket && (tienePermiso('pos.aplicar_descuento') || !!l.autorizaciones.descuento);
   $('el-desc-tipo').disabled = !puedeDesc;
   $('el-desc-valor').disabled = !puedeDesc;
-  $('el-desc-autorizar').style.display = puedeDesc ? 'none' : 'inline-block';
+  $('el-desc-autorizar').style.display = (puedeDesc || bloqueadoPorTicket) ? 'none' : 'inline-block';
+  if(bloqueadoPorTicket){
+    $('el-error').innerHTML = '<div class="msg-error">Este artículo tiene el descuento de "toda la venta" aplicado — quítalo con el botón "% Descuento a toda la venta" para poder ponerle un descuento propio.</div>';
+  }
 
   $('el-precio-manual').value = (l.precioManual !== null && l.precioManual !== undefined) ? l.precioManual : '';
   const puedePrecio = tienePermiso('pos.editar_precio_manual') || !!l.autorizaciones.precioManual;
@@ -967,6 +1004,7 @@ $('el-aplicar').addEventListener('click', ()=>{
     }
     l.descuentoTipo = tipo;
     l.descuentoValor = tipo ? valor : 0;
+    l.descuentoOrigen = tipo ? 'linea' : null;
     if(!tipo) l.autorizaciones.descuento = null; // se quitó el descuento; una próxima vez se vuelve a pedir autorización
   }
   if(!$('el-precio-manual').disabled){
@@ -1160,8 +1198,11 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
       stock: producto.stock, codigo: codigoEscaneado || null,
       // Descuento/precio manual de esta línea (null = no aplica) y quién autorizó cada uno de los 3
       // cambios (null = el propio cajero ya tenía el privilegio, no necesitó autorización) — ver
-      // modal-editar-linea y la bitácora de auditoría al cobrar.
-      descuentoTipo: null, descuentoValor: 0, precioManual: null,
+      // modal-editar-linea y la bitácora de auditoría al cobrar. descuentoOrigen distingue si el
+      // descuento de esta línea viene de "toda la venta" o se puso solo para este artículo — un
+      // descuento por ticket y uno por artículo son mutuamente excluyentes, ver desc-ticket-aplicar/
+      // abrirEditarLinea más abajo (a petición de Adrián, para no mezclar los dos tipos sin querer).
+      descuentoTipo: null, descuentoValor: 0, descuentoOrigen: null, precioManual: null,
       autorizaciones: { listaPrecio: null, descuento: null, precioManual: null },
     });
   }
@@ -1186,8 +1227,9 @@ function hayLineaSinPrecio(){
 function notaLineaEditada(l){
   const partes = [];
   if(l.listaPrecioId) partes.push(`lista: ${nombreLista(l.listaPrecioId)}`);
-  if(l.descuentoTipo === 'porcentaje') partes.push(`desc. ${Number(l.descuentoValor)||0}%`);
-  else if(l.descuentoTipo === 'fijo') partes.push(`desc. ${money(l.descuentoValor)}`);
+  const sufijoDesc = l.descuentoOrigen === 'ticket' ? ' (toda la venta)' : '';
+  if(l.descuentoTipo === 'porcentaje') partes.push(`desc. ${Number(l.descuentoValor)||0}%${sufijoDesc}`);
+  else if(l.descuentoTipo === 'fijo') partes.push(`desc. ${money(l.descuentoValor)}${sufijoDesc}`);
   if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') partes.push('precio manual');
   return partes.length ? `<div class="nota" style="margin:2px 0 0;">${partes.join(' · ')}</div>` : '';
 }
