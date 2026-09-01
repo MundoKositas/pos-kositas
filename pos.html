@@ -310,7 +310,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.004';
+const APP_VERSION = '1.2.005';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1436,10 +1436,9 @@ $('rep-volver').addEventListener('click', ()=>{ mostrarPantalla('pantalla-pos');
 
 // Texto legible de los filtros de categoría/línea activos en la pestaña Reportes (ej. "Categoría:
 // Botanas · Línea: Fritura"), o null si no hay ninguno — se usa para dejar constancia en el
-// encabezado de ambas secciones del reporte exportado (PDF y Excel) de qué filtro se aplicó,
-// porque el resumen de impuestos/venta (sección 1) NUNCA se filtra aunque haya categoría/línea
-// elegida, y sin esta nota no queda claro por qué el listado de productos (sección 2) trae menos
-// artículos que el total de la sección 1.
+// encabezado de ambas secciones del reporte exportado (PDF y Excel) de qué filtro se aplicó: tanto
+// el resumen de impuestos/venta (sección 1) como el listado de productos (sección 2) respetan el
+// filtro elegido.
 function textoFiltroReporte(){
   const catId = $('rep-filtro-categoria').value;
   const linId = $('rep-filtro-linea').value;
@@ -1455,9 +1454,11 @@ function textoFiltroReporte(){
   return partes.length ? partes.join(' · ') : null;
 }
 
-// El resumen (venta sin impuestos + desglose de impuestos + total general) SIEMPRE se calcula sin
-// filtrar por categoría/línea — así coincide con el total real de los cortes del periodo, tal como
-// pidió Adrián. La categoría/línea elegidas solo filtran qué productos entran en la hoja/página 2.
+// El resumen (venta sin impuestos + desglose de impuestos + total general) y el listado de productos
+// respetan ambos la categoría/línea elegidas en los filtros — cuando no hay ningún filtro activo, el
+// resumen coincide exacto con el total real de los cortes del periodo (se calcula directo de las
+// ventas); con un filtro activo, se recalcula a nivel de renglón vendido para reflejar solo lo
+// filtrado, igual que el listado de productos de abajo.
 async function obtenerReporteVentasPeriodo(){
   const desde = $('rep-fecha-desde').value;
   const hasta = $('rep-fecha-hasta').value;
@@ -1478,11 +1479,11 @@ function renderResumenReporteVentas(reporte){
   ).join('');
   const filtroTexto = textoFiltroReporte();
   $('rep-resumen').innerHTML = `
+    <p class="nota" style="margin-bottom:10px;">Filtros aplicados: ${filtroTexto || 'ninguno (todas las categorías y líneas)'}</p>
     <div class="linea"><span>Venta total sin impuestos</span><span>${money(reporte.venta_sin_impuestos)}</span></div>
     ${impuestosHtml}
     <div class="linea total-final"><span>Total general</span><span>${money(reporte.total_general)}</span></div>
-    ${filtroTexto ? `<p class="nota" style="margin-top:10px;">Este resumen es del periodo completo, SIN el filtro (${filtroTexto}) — para que cuadre con los cortes de caja reales. El filtro solo aplica al listado de productos de abajo.</p>` : ''}
-    <p class="nota" style="margin-top:10px;">${(reporte.productos||[]).length} producto${(reporte.productos||[]).length===1?'':'s'} distinto${(reporte.productos||[]).length===1?'':'s'} en el listado filtrado — el detalle completo, agrupado por categoría y línea con subtotales, va en el archivo exportado.</p>
+    <p class="nota" style="margin-top:10px;">${(reporte.productos||[]).length} producto${(reporte.productos||[]).length===1?'':'s'} distinto${(reporte.productos||[]).length===1?'':'s'} en el listado — el detalle completo, agrupado por categoría y línea con subtotales, va en el archivo exportado.</p>
   `;
 }
 async function exportarReporteVentasPDF(reporte){
@@ -1493,7 +1494,6 @@ async function exportarReporteVentasPDF(reporte){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait' });
   const margenTexto = logoDataUrl ? 34 : 14;
-  const anchoUtil = doc.internal.pageSize.getWidth() - margenTexto - 14;
   if(logoDataUrl){
     try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si falla, sin interrumpir la exportación */ }
   }
@@ -1503,23 +1503,13 @@ async function exportarReporteVentasPDF(reporte){
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(`Del ${desde} al ${hasta} — Generado: ${generado}`, margenTexto, 22);
-  // Nota de filtro en la sección 1 (Resumen): el resumen de abajo SIEMPRE es del periodo completo,
-  // sin el filtro de categoría/línea (para que cuadre con los cortes de caja) — si hay un filtro
-  // activo, se deja constancia aquí de que existe y de que solo aplica a la sección 2 (productos).
+  // Filtros aplicados en la sección 1 (Resumen) — el resumen ya refleja la categoría/línea elegida,
+  // igual que el listado de productos de la página 2, así que se deja constancia de cuál filtro es.
   let y = 22;
-  if(filtroTexto){
-    y += 5;
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8);
-    const lineasNota = doc.splitTextToSize(
-      `Nota: este resumen es del periodo completo, SIN el filtro (${filtroTexto}) — es el total real, para que cuadre con los cortes de caja. El filtro solo aplica al listado de productos de la página 2.`,
-      anchoUtil
-    );
-    doc.text(lineasNota, margenTexto, y);
-    y += lineasNota.length * 3.5;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-  }
+  y += 5;
+  doc.setFontSize(9);
+  doc.text(`Filtros: ${filtroTexto || 'ninguno (todas las categorías y líneas)'}`, margenTexto, y);
+  doc.setFontSize(10);
   doc.setLineWidth(0.6); // línea marcada bajo el título
   doc.line(14, y + 3, doc.internal.pageSize.getWidth() - 14, y + 3);
   const filasResumen = [
@@ -1551,14 +1541,13 @@ function exportarReporteVentasExcel(reporte){
   const filtroTexto = textoFiltroReporte();
   const wb = XLSX.utils.book_new();
 
-  // "Filtro" queda documentado aquí para que quede claro que el resumen de abajo NO lo aplica —
-  // es del periodo completo, para cuadrar con los cortes de caja. Solo la hoja "Productos vendidos"
-  // sí lo aplica.
+  // El "Filtro" aplica tanto a este resumen como a la hoja "Productos vendidos" — se deja
+  // documentado aquí cuál filtro está activo (o "Ninguno" si es el periodo completo).
   const filasResumen = [
     ['Reporte de ventas', state.empresaNombre || ''],
     ['Periodo', `${desde} a ${hasta}`],
     ['Generado', new Date().toLocaleString('es-MX')],
-    ['Filtro (NO aplica a este resumen, solo a la hoja "Productos vendidos")', filtroTexto || 'Ninguno'],
+    ['Filtro', filtroTexto || 'Ninguno'],
     [],
     ['Venta total sin impuestos', Number(reporte.venta_sin_impuestos)||0],
     ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, Number(i.monto)||0]),
