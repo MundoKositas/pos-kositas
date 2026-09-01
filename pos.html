@@ -310,7 +310,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.005';
+const APP_VERSION = '1.2.006';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -661,7 +661,7 @@ async function cargarCatalogo(){
     producto:productos(id, nombre, marca, activo, empresa_id, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id),
     stock:existencias(cantidad, almacen_id),
-    codigos:codigos_barra(codigo)
+    codigos:codigos_barra(codigo, tipo, factor_unidades_base)
   `);
   if(error){ console.error(error); return; }
   state.catalogo = (data||[])
@@ -674,7 +674,13 @@ async function cargarCatalogo(){
         nombre: v.producto.nombre + (v.nombre_variante && v.nombre_variante !== 'Único' ? ' - ' + v.nombre_variante : ''),
         precio: precioRow ? Number(precioRow.precio) : null,
         stock: stockRow ? Number(stockRow.cantidad) : 0,
-        codigos: (v.codigos||[]).map(c=>c.codigo),
+        // Un código tipo "empaque" representa una caja/paquete con varias piezas — al escanearlo
+        // hay que agregar factor_unidades_base piezas, no 1 (ej. una caja de 12). "individual" (o
+        // sin factor capturado) siempre agrega 1 pieza por escaneo, igual que antes.
+        codigos: (v.codigos||[]).map(c=>({
+          codigo: c.codigo,
+          factor: (c.tipo === 'empaque' && Number(c.factor_unidades_base) > 0) ? Number(c.factor_unidades_base) : 1,
+        })),
         // Un producto puede llevar 0, 1 o varios impuestos a la vez (ej. IVA + IEPS).
         impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
           impuestoId: pi.impuesto_id,
@@ -728,8 +734,12 @@ buscarInput.addEventListener('keydown', e=>{
   if(e.key !== 'Enter') return;
   const q = buscarInput.value.trim();
   if(!q) return;
-  const porCodigo = state.catalogo.find(p=>p.codigos.includes(q));
-  if(porCodigo){ agregarAlCarrito(porCodigo, q); buscarInput.value=''; renderResultados(''); return; }
+  const porCodigo = state.catalogo.find(p=>p.codigos.some(c=>c.codigo===q));
+  if(porCodigo){
+    const codigoInfo = porCodigo.codigos.find(c=>c.codigo===q);
+    agregarAlCarrito(porCodigo, q, codigoInfo.factor);
+    buscarInput.value=''; renderResultados(''); return;
+  }
   const coincidencias = state.catalogo.filter(p=>p.nombre.toLowerCase().includes(q.toLowerCase()));
   if(coincidencias.length === 1){ agregarAlCarrito(coincidencias[0]); buscarInput.value=''; renderResultados(''); }
 });
@@ -738,7 +748,7 @@ function renderResultados(q){
   const cont = $('resultados-busqueda');
   if(!q){ cont.innerHTML=''; return; }
   const qLower = q.toLowerCase();
-  const resultados = state.catalogo.filter(p=>p.nombre.toLowerCase().includes(qLower) || p.codigos.includes(q)).slice(0,15);
+  const resultados = state.catalogo.filter(p=>p.nombre.toLowerCase().includes(qLower) || p.codigos.some(c=>c.codigo===q)).slice(0,15);
   cont.innerHTML = resultados.map((p,i)=>`
     <div class="resultado-item" data-idx="${i}">
       <span>${p.nombre}</span>
@@ -752,13 +762,17 @@ function renderResultados(q){
   });
 }
 
-function agregarAlCarrito(producto, codigoEscaneado){
+// cantidadAgregar: piezas a agregar por este escaneo/selección — 1 en el caso normal (búsqueda por
+// nombre, o código "individual"), o factor_unidades_base cuando se escaneó un código tipo "empaque"
+// (ej. una caja de 12 piezas agrega 12, no 1).
+function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
+  const cantidad = (Number(cantidadAgregar) > 1) ? Number(cantidadAgregar) : 1;
   const existente = state.carrito.find(l=>l.varianteId===producto.varianteId);
-  if(existente){ existente.cantidad += 1; }
+  if(existente){ existente.cantidad += cantidad; }
   else {
     state.carrito.push({
       varianteId: producto.varianteId, nombre: producto.nombre, precio: producto.precio,
-      cantidad: 1, impuestos: producto.impuestos,
+      cantidad, impuestos: producto.impuestos,
       stock: producto.stock, codigo: codigoEscaneado || null,
     });
   }
