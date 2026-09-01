@@ -313,7 +313,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.007';
+const APP_VERSION = '1.2.008';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1075,6 +1075,149 @@ function agregarTablaProductosPDF(doc, startY, encabezados, filas, tipos){
   return doc.lastAutoTable.finalY;
 }
 
+// ---------- SECCIÓN: formas de pago, créditos y movimientos de efectivo (para validar junto con el corte) ----------
+// A partir de reporte.pagos_detalle / reporte.creditos_detalle / reporte.movimientos (que ahora
+// regresa el RPC reporte_ventas), separa los pagos por forma de pago conocida. A propósito esto NO
+// se ve afectado por el filtro de categoría/línea del Reporte de ventas: una forma de pago o un
+// movimiento de caja corresponde a un ticket/sesión completa, no a productos individuales.
+function clasificarPagosDetalle(pagosDetalle){
+  const porForma = {};
+  (pagosDetalle||[]).forEach(p=>{
+    const nombre = p.forma_pago || 'Otra forma de pago';
+    if(!porForma[nombre]) porForma[nombre] = [];
+    porForma[nombre].push(p);
+  });
+  const conocidas = ['Efectivo', 'Tarjeta de crédito', 'Tarjeta de débito'];
+  const otras = [];
+  Object.keys(porForma).forEach(nombre=>{
+    if(!conocidas.includes(nombre)) otras.push(...porForma[nombre]);
+  });
+  const subtotal = (filas)=> filas.reduce((s,f)=>s+Number(f.monto||0), 0);
+  const tomar = (nombre)=> porForma[nombre] || [];
+  return {
+    efectivo: { filas: tomar('Efectivo'), subtotal: subtotal(tomar('Efectivo')) },
+    tarjetaCredito: { filas: tomar('Tarjeta de crédito'), subtotal: subtotal(tomar('Tarjeta de crédito')) },
+    tarjetaDebito: { filas: tomar('Tarjeta de débito'), subtotal: subtotal(tomar('Tarjeta de débito')) },
+    otras: { filas: otras, subtotal: subtotal(otras) },
+  };
+}
+function clasificarMovimientos(movimientos){
+  const entradas = (movimientos||[]).filter(m=>m.tipo==='entrada');
+  const salidas = (movimientos||[]).filter(m=>m.tipo==='salida');
+  const subtotal = (filas)=> filas.reduce((s,f)=>s+Number(f.monto||0), 0);
+  return {
+    entradas: { filas: entradas, subtotal: subtotal(entradas) },
+    salidas: { filas: salidas, subtotal: subtotal(salidas) },
+  };
+}
+// Bloque en pantalla (dentro de un contenedor .totales) para un grupo con subtotal — usado para
+// mostrar las entradas/salidas de efectivo itemizadas (concepto + importe) en las pantallas de
+// cierre de caja, pedido por Adrián.
+function htmlGrupoConSubtotal(titulo, filas, subtotal, renderFila){
+  if(!filas.length){
+    return `<p class="nota" style="margin-top:10px;"><strong>${titulo}:</strong> sin movimientos en esta sesión.</p>`;
+  }
+  return `
+    <p class="nota" style="margin-top:10px;margin-bottom:2px;"><strong>${titulo}</strong></p>
+    ${filas.map(renderFila).join('')}
+    <div class="linea" style="font-weight:600;"><span>Subtotal ${titulo.toLowerCase()}</span><span>${money(subtotal)}</span></div>
+  `;
+}
+// Agrega al doc de jsPDF (ya creado) una página nueva con el detalle de formas de pago —
+// documentos que el supervisor debe validar junto con el corte (vouchers de tarjeta, tickets
+// firmados de crédito) — y los movimientos de efectivo, itemizados con subtotal por grupo. Pensada
+// para ir ENTRE el resumen de venta y el listado de productos, tal como lo pidió Adrián.
+// `incluirEfectivo` se usa en el Reporte de ventas (que no muestra el efectivo en ningún otro
+// lado); se omite en el PDF de Cierre de caja, donde el efectivo ya está en "Datos del cierre".
+function agregarPaginaPagosMovimientosPDF(doc, reporte, { titulo, subtitulo, filtroTexto, incluirEfectivo }){
+  const pagos = clasificarPagosDetalle(reporte.pagos_detalle);
+  const creditos = reporte.creditos_detalle || [];
+  const subtotalCreditos = creditos.reduce((s,c)=>s+Number(c.monto||0), 0);
+  const movs = clasificarMovimientos(reporte.movimientos);
+
+  doc.addPage();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text(titulo, 14, 16);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(subtitulo, 14, 22);
+  let y = 22;
+  if(filtroTexto !== undefined){
+    y += 5;
+    doc.text(`Filtros: ${filtroTexto || 'ninguno (todas las categorías y líneas)'}`, 14, y);
+    y += 5;
+    doc.setFontSize(7.5);
+    const anchoUtil = doc.internal.pageSize.getWidth() - 28;
+    const lineasNota = doc.splitTextToSize('Nota: las formas de pago y los movimientos de efectivo de esta página NO se ven afectados por el filtro de categoría/línea (corresponden a tickets completos, no a productos individuales).', anchoUtil);
+    doc.text(lineasNota, 14, y);
+    y += lineasNota.length * 3.2;
+    doc.setFontSize(9);
+  }
+  doc.setLineWidth(0.6);
+  doc.line(14, y + 3, doc.internal.pageSize.getWidth() - 14, y + 3);
+  let startY = y + 8;
+
+  const tablaGrupo = (tituloGrupo, encabezados, filasMostrar, subtotalValor, notaComprobanteTexto) => {
+    if(!filasMostrar.length){
+      doc.setFont('helvetica','bold'); doc.setFontSize(9);
+      doc.text(tituloGrupo, 14, startY);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+      doc.text('(sin movimientos en este periodo)', 14, startY + 5);
+      startY += 13;
+      return;
+    }
+    const cuerpo = [...filasMostrar];
+    if(subtotalValor !== null){
+      const filaSub = new Array(encabezados.length).fill('');
+      filaSub[0] = `Subtotal ${tituloGrupo.toLowerCase()}`;
+      filaSub[encabezados.length-1] = money(subtotalValor);
+      cuerpo.push(filaSub);
+    }
+    doc.autoTable({
+      head: [
+        [{ content: notaComprobanteTexto ? `${tituloGrupo} — ${notaComprobanteTexto}` : tituloGrupo, colSpan: encabezados.length, styles:{fontStyle:'bold'} }],
+        encabezados,
+      ],
+      body: cuerpo, startY,
+      theme: 'plain', styles: { fontSize: 8.5 }, headStyles: { fontStyle: 'bold' },
+      columnStyles: { [encabezados.length-1]: { halign: 'right' } },
+      didParseCell: (data)=>{ if(subtotalValor !== null && data.row.index === cuerpo.length-1){ data.cell.styles.fontStyle='bold'; } },
+      didDrawCell: (data)=>{ if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); } },
+    });
+    startY = doc.lastAutoTable.finalY + 8;
+  };
+
+  if(incluirEfectivo){
+    doc.autoTable({
+      head: [[{content:'Efectivo', colSpan:2, styles:{fontStyle:'bold'}}], ['Concepto','Importe']],
+      body: [['Total cobrado en efectivo', money(pagos.efectivo.subtotal)]],
+      startY, theme:'plain', styles:{fontSize:8.5}, headStyles:{fontStyle:'bold'},
+      columnStyles:{1:{halign:'right'}},
+      didDrawCell:(data)=>{ if(data.section==='head'){ dibujarLineaEncabezado(doc,data.cell); } },
+    });
+    startY = doc.lastAutoTable.finalY + 8;
+  }
+  tablaGrupo('Cobros con tarjeta de crédito', ['Folio','Autorización','Importe'],
+    pagos.tarjetaCredito.filas.map(p=>[p.folio, p.referencia||'(sin autorización)', money(p.monto)]),
+    pagos.tarjetaCredito.subtotal, 'validar contra los vouchers de la terminal');
+  tablaGrupo('Cobros con tarjeta de débito', ['Folio','Autorización','Importe'],
+    pagos.tarjetaDebito.filas.map(p=>[p.folio, p.referencia||'(sin autorización)', money(p.monto)]),
+    pagos.tarjetaDebito.subtotal, 'validar contra los vouchers de la terminal');
+  tablaGrupo('Otras formas de pago', ['Forma de pago','Folio','Referencia','Importe'],
+    pagos.otras.filas.map(p=>[p.forma_pago, p.folio, p.referencia||'', money(p.monto)]),
+    pagos.otras.subtotal, 'validar contra su comprobante correspondiente');
+  tablaGrupo('Ventas a crédito', ['Folio','Cliente','Importe'],
+    creditos.map(c=>[c.folio, c.cliente, money(c.monto)]),
+    subtotalCreditos, 'validar contra los tickets/pagarés firmados por el cliente');
+  tablaGrupo('Entradas de efectivo', ['Concepto','Importe'],
+    movs.entradas.filas.map(m=>[m.motivo||'(sin concepto)', money(m.monto)]),
+    movs.entradas.subtotal, null);
+  tablaGrupo('Salidas de efectivo', ['Concepto','Importe'],
+    movs.salidas.filas.map(m=>[m.motivo||'(sin concepto)', money(m.monto)]),
+    movs.salidas.subtotal, null);
+}
+
 function calcularTotales(){
   // El desglose de impuestos es dinámico: solo aparecen los impuestos que de verdad
   // traen los productos del carrito (según el catálogo), no una lista fija en el código.
@@ -1360,12 +1503,12 @@ async function calcularResumenCierre(){
   }
   const ventasEfectivo = desglose['Efectivo'] || 0;
 
-  const { data: movs } = await sb.from('caja_movimientos').select('tipo, monto').eq('sesion_caja_id', sesion.id);
+  const { data: movs } = await sb.from('caja_movimientos').select('tipo, monto, motivo').eq('sesion_caja_id', sesion.id);
   const entradas = (movs||[]).filter(m=>m.tipo==='entrada').reduce((s,m)=>s+Number(m.monto),0);
   const salidas = (movs||[]).filter(m=>m.tipo==='salida').reduce((s,m)=>s+Number(m.monto),0);
   const fondoInicial = Number(sesion.fondo_inicial);
   const esperado = fondoInicial + ventasEfectivo + entradas - salidas;
-  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose };
+  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose, movimientos: movs||[] };
 }
 
 function notaComprobante(nombre){
@@ -1389,18 +1532,23 @@ function renderResumenCierre(r){
     <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión (no se cuentan en caja física, pero deben cuadrar con sus comprobantes):</p>
     ${filasOtras}
     <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventasCredito)}</span></div>
+    ${htmlGrupoConSubtotal('Entradas de efectivo', clasificarMovimientos(r.movimientos).entradas.filas, clasificarMovimientos(r.movimientos).entradas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
+    ${htmlGrupoConSubtotal('Salidas de efectivo', clasificarMovimientos(r.movimientos).salidas.filas, clasificarMovimientos(r.movimientos).salidas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
   `;
 }
 
 // Genera y descarga automáticamente el PDF del cierre de esta sesión: página 1 con los mismos datos
 // del cierre que ya se muestran en el modal "Caja cerrada" + el resumen de venta con impuestos
-// (que debe cuadrar con el total del corte); página 2 con el listado de productos vendidos en esa
-// sesión, agrupado por Categoría → Línea con subtotales. Si el reporte de ventas falla por cualquier
-// motivo, no se interrumpe el cierre de caja — solo se omite el PDF y se avisa en consola.
-async function generarReportePDFCierre(r){
+// (que debe cuadrar con el total del corte); página 2 (nueva) con las formas de pago, ventas a
+// crédito y movimientos de efectivo, itemizados, para que el supervisor los valide junto con el
+// corte; página 3 con el listado de productos vendidos en esa sesión, agrupado por Categoría →
+// Línea con subtotales. `reporte` es el resultado ya obtenido del RPC reporte_ventas para esta
+// sesión (se reutiliza el que ya se pidió para pantalla, en vez de volver a consultarlo) — si viene
+// vacío (porque esa consulta falló), no se interrumpe el cierre de caja: solo se omite el PDF y se
+// avisa en consola.
+async function generarReportePDFCierre(r, reporte){
   try{
-    const { data: reporte, error } = await sb.rpc('reporte_ventas', { p_sesion_caja_id: state.sesionCaja.id });
-    if(error) throw error;
+    if(!reporte) throw new Error('No se pudo obtener el detalle de ventas de la sesión para el PDF.');
     const logoDataUrl = await logoComoDataUrl();
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait' });
@@ -1450,6 +1598,12 @@ async function generarReportePDFCierre(r){
       didDrawCell: (data)=>{ if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); } },
     });
 
+    agregarPaginaPagosMovimientosPDF(doc, reporte, {
+      titulo: 'Formas de pago y movimientos de efectivo',
+      subtitulo: `${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} · ${new Date().toLocaleString('es-MX')}`,
+      incluirEfectivo: false, // el efectivo ya está en "Datos del cierre" de la página 1
+    });
+
     doc.addPage();
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
@@ -1496,12 +1650,21 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     return;
   }
   const r = data[0];
-  generarReportePDFCierre(r); // descarga automática del PDF del cierre — no bloquea el resto del flujo si falla
+  // Se pide una sola vez el detalle completo de la sesión (formas de pago, créditos y movimientos
+  // itemizados) — se usa tanto para completar esta pantalla de resultado como para la nueva página
+  // del PDF de cierre. Si falla, el cierre ya quedó registrado; solo se omiten esos extras.
+  let reporteSesion = null;
+  try{
+    const resp = await sb.rpc('reporte_ventas', { p_sesion_caja_id: state.sesionCaja.id });
+    if(!resp.error) reporteSesion = resp.data;
+  } catch(err){ /* se ignora: el cierre ya se registró, solo se omite el detalle adicional */ }
+  generarReportePDFCierre(r, reporteSesion); // descarga automática del PDF del cierre — no bloquea el resto del flujo si falla
   const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
   const filasOtras = otrasFormas.map(d=>{
     const nota = notaComprobante(d.forma_pago);
     return `<div class="linea"><span>${d.forma_pago}${nota?` <span class="nota">(${nota})</span>`:''}</span><span>${money(d.total)}</span></div>`;
   }).join('');
+  const movsSesion = clasificarMovimientos(reporteSesion ? reporteSesion.movimientos : []);
   $('modal-cerrar-caja').classList.remove('activo');
   $('resultado-cierre-body').innerHTML = `
     <div class="linea"><span>Fondo inicial</span><span>${money(r.fondo_inicial)}</span></div>
@@ -1514,6 +1677,8 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     <p class="nota" style="margin-top:12px;">Otras formas de pago de esta sesión:</p>
     ${filasOtras || '<p class="nota">(ninguna)</p>'}
     <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventas_credito)}</span></div>
+    ${htmlGrupoConSubtotal('Entradas de efectivo', movsSesion.entradas.filas, movsSesion.entradas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
+    ${htmlGrupoConSubtotal('Salidas de efectivo', movsSesion.salidas.filas, movsSesion.salidas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
   `;
   $('modal-resultado-cierre').classList.add('activo');
   $('resultado-cierre-ok').focus();
@@ -1625,6 +1790,14 @@ async function exportarReporteVentasPDF(reporte){
     didParseCell: (data)=>{ if(data.row.index === filasResumen.length-1){ data.cell.styles.fontStyle='bold'; } },
     didDrawCell: (data)=>{ if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); } },
   });
+
+  agregarPaginaPagosMovimientosPDF(doc, reporte, {
+    titulo: 'Formas de pago y movimientos de efectivo',
+    subtitulo: `Del ${desde} al ${hasta} — Generado: ${generado}`,
+    filtroTexto,
+    incluirEfectivo: true, // este reporte no muestra el efectivo en ningún otro lado
+  });
+
   doc.addPage();
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
@@ -1636,6 +1809,71 @@ async function exportarReporteVentasPDF(reporte){
   const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
   agregarTablaProductosPDF(doc, 32, encabezados, filas, tipos);
   doc.save(`reporte_ventas_${desde}_a_${hasta}.pdf`);
+}
+// Construye la hoja "Formas de pago" (equivalente en Excel a la página nueva del PDF): formas de
+// pago itemizadas, ventas a crédito y movimientos de efectivo, cada grupo con su subtotal. Igual
+// que en el PDF, esta hoja NO se ve afectada por el filtro de categoría/línea.
+function hojaFormasPagoMovimientos(reporte, { desde, hasta, filtroTexto, incluirEfectivo }){
+  const pagos = clasificarPagosDetalle(reporte.pagos_detalle);
+  const creditos = reporte.creditos_detalle || [];
+  const subtotalCreditos = creditos.reduce((s,c)=>s+Number(c.monto||0),0);
+  const movs = clasificarMovimientos(reporte.movimientos);
+  const filas = [
+    ['Formas de pago y movimientos de efectivo'],
+    [`Del ${desde} al ${hasta}`, `Generado: ${new Date().toLocaleString('es-MX')}`],
+  ];
+  if(filtroTexto !== undefined){
+    filas.push([`Filtros: ${filtroTexto || 'ninguno (todas las categorías y líneas)'}`]);
+    filas.push(['Nota: esta hoja no se ve afectada por el filtro de categoría/línea (las formas de pago y los movimientos corresponden a tickets/sesión completos, no a productos individuales).']);
+  }
+  filas.push([]);
+  const celdasMoneda = []; // {r, c} para aplicar formato de moneda al final
+
+  const agregarGrupo = (titulo, encabezados, filasGrupo, subtotalValor) => {
+    filas.push([titulo]);
+    if(!filasGrupo.length){
+      filas.push(['(sin movimientos en este periodo)']);
+      filas.push([]);
+      return;
+    }
+    filas.push(encabezados);
+    const startRow = filas.length;
+    filasGrupo.forEach((fila, i)=>{
+      filas.push(fila);
+      celdasMoneda.push({ r: startRow + i, c: encabezados.length - 1 });
+    });
+    if(subtotalValor !== null){
+      const filaSub = new Array(encabezados.length).fill('');
+      filaSub[0] = `Subtotal ${titulo.toLowerCase()}`;
+      filaSub[encabezados.length-1] = Number(subtotalValor)||0;
+      filas.push(filaSub);
+      celdasMoneda.push({ r: filas.length-1, c: encabezados.length-1 });
+    }
+    filas.push([]);
+  };
+
+  if(incluirEfectivo){
+    agregarGrupo('Efectivo', ['Concepto','Importe'], [['Total cobrado en efectivo', Number(pagos.efectivo.subtotal)||0]], null);
+  }
+  agregarGrupo('Cobros con tarjeta de crédito — validar contra los vouchers de la terminal', ['Folio','Autorización','Importe'],
+    pagos.tarjetaCredito.filas.map(p=>[p.folio, p.referencia||'(sin autorización)', Number(p.monto)||0]), pagos.tarjetaCredito.subtotal);
+  agregarGrupo('Cobros con tarjeta de débito — validar contra los vouchers de la terminal', ['Folio','Autorización','Importe'],
+    pagos.tarjetaDebito.filas.map(p=>[p.folio, p.referencia||'(sin autorización)', Number(p.monto)||0]), pagos.tarjetaDebito.subtotal);
+  agregarGrupo('Otras formas de pago — validar contra su comprobante correspondiente', ['Forma de pago','Folio','Referencia','Importe'],
+    pagos.otras.filas.map(p=>[p.forma_pago, p.folio, p.referencia||'', Number(p.monto)||0]), pagos.otras.subtotal);
+  agregarGrupo('Ventas a crédito — validar contra los tickets/pagarés firmados por el cliente', ['Folio','Cliente','Importe'],
+    creditos.map(c=>[c.folio, c.cliente, Number(c.monto)||0]), subtotalCreditos);
+  agregarGrupo('Entradas de efectivo', ['Concepto','Importe'],
+    movs.entradas.filas.map(m=>[m.motivo||'(sin concepto)', Number(m.monto)||0]), movs.entradas.subtotal);
+  agregarGrupo('Salidas de efectivo', ['Concepto','Importe'],
+    movs.salidas.filas.map(m=>[m.motivo||'(sin concepto)', Number(m.monto)||0]), movs.salidas.subtotal);
+
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  celdasMoneda.forEach(({r,c})=>{
+    const celda = ws[XLSX.utils.encode_cell({r,c})];
+    if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
+  });
+  return ws;
 }
 function exportarReporteVentasExcel(reporte){
   const desde = $('rep-fecha-desde').value, hasta = $('rep-fecha-hasta').value;
@@ -1661,6 +1899,9 @@ function exportarReporteVentasExcel(reporte){
     if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
   }
   XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+
+  const wsPagos = hojaFormasPagoMovimientos(reporte, { desde, hasta, filtroTexto, incluirEfectivo: true });
+  XLSX.utils.book_append_sheet(wb, wsPagos, 'Formas de pago');
 
   const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
   const filasEncabezadoProd = [
