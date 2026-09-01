@@ -449,11 +449,23 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.6.001';
+const APP_VERSION = '1.6.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+// Fecha LOCAL (no UTC) en formato YYYY-MM-DD. Date#toISOString() siempre convierte a UTC antes de
+// cortar la fecha, lo que puede regresar el día equivocado para usuarios al oeste de UTC ya entrada
+// la noche (ej. Durango a las 7pm ya cae en el día siguiente en UTC) — usar esta función en vez de
+// `new Date().toISOString().slice(0,10)` para cualquier fecha "de hoy" de negocio (nombres de
+// archivo exportado, rangos de fecha por default, etc.).
+function fechaLocalISO(d){
+  const fecha = d || new Date();
+  const y = fecha.getFullYear();
+  const m = String(fecha.getMonth()+1).padStart(2,'0');
+  const dia = String(fecha.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dia}`;
+}
 
 // Redondeo especial SOLO para el precio CON IMPUESTOS calculado por % sobre costo (regla confirmada
 // por Adrián, por efecto de monedas fraccionarias): .00 se queda, .01-.50 sube a .50, .51-.99 sube
@@ -1015,6 +1027,8 @@ function agruparPorCategoriaLinea(filas){
 // regresa el arreglo de celdas de una fila de producto (numCols celdas, col 0 = texto); columnasSuma
 // son los índices (>=1) de las columnas numéricas que se acumulan para subtotales/total. Regresa
 // {filas, tipos} — tipos[i] describe cada fila para que el exportador la formatee (colores/negritas).
+// Deja un renglón en blanco (tipo 'espacio') después de cada Subtotal línea y cada Subtotal
+// categoría, para que el reporte impreso se lea con aire entre grupos (pedido por Adrián).
 function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols){
   const filas = []; const tipos = [];
   const totalGeneral = new Array(numCols-1).fill(0);
@@ -1033,11 +1047,13 @@ function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols
       filaSub[0] = `Subtotal línea "${l.linea}"`;
       columnasSuma.forEach(i=>{ filaSub[i] = redondear2(subtotalLinea[i-1]); subtotalCategoria[i-1] += subtotalLinea[i-1]; });
       filas.push(filaSub); tipos.push('subtotal');
+      filas.push(new Array(numCols).fill('')); tipos.push('espacio');
     });
     const filaSubCat = new Array(numCols).fill('');
     filaSubCat[0] = `Subtotal categoría "${g.categoria}"`;
     columnasSuma.forEach(i=>{ filaSubCat[i] = redondear2(subtotalCategoria[i-1]); totalGeneral[i-1] += subtotalCategoria[i-1]; });
     filas.push(filaSubCat); tipos.push('subtotalCategoria');
+    filas.push(new Array(numCols).fill('')); tipos.push('espacio');
   });
   const filaTotal = new Array(numCols).fill('');
   filaTotal[0] = 'TOTAL GENERAL';
@@ -1069,23 +1085,35 @@ function exportarExcelAgrupado(nombreArchivo, hojaNombre, encabezados, filas, ti
   XLSX.utils.book_append_sheet(wb, ws, hojaNombre);
   XLSX.writeFile(wb, nombreArchivo);
 }
-// Exporta a PDF una tabla agrupada — filas de grupo con colSpan a todo el ancho, subtotales/total
-// resaltados con negritas y fondo gris, columnas de dinero formateadas y alineadas a la derecha.
+// Exporta a PDF una tabla agrupada — pensado para impresión: SIN sombreados/fondos de color en el
+// cuerpo (solo la franja del encabezado de columnas los conserva), título en negritas con una línea
+// marcada debajo, renglones de Categoría/Línea en negritas con una línea más delgada, y subtotales/
+// total en negritas de letra únicamente. Renglones tipo 'espacio' quedan en blanco (aire entre grupos).
 async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados, filas, tipos, columnasMoneda){
   const logoDataUrl = await logoComoDataUrl();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: encabezados.length > 5 ? 'landscape' : 'portrait' });
   const margenTexto = logoDataUrl ? 34 : 14;
+  const anchoPagina = doc.internal.pageSize.getWidth();
   if(logoDataUrl){
     try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si el formato falla, sin interrumpir la exportación */ }
   }
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.text(titulo, margenTexto, 16);
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(subtitulo, margenTexto, 22);
+  doc.setLineWidth(0.6); // línea marcada bajo el título
+  doc.line(14, 25, anchoPagina - 14, 25);
   const cuerpo = filas.map((fila, i)=>{
+    if(tipos[i]==='espacio'){
+      return [{ content: '', colSpan: encabezados.length, styles: { minCellHeight: 3, lineWidth: 0 } }];
+    }
     if(tipos[i]==='grupo' || tipos[i]==='subgrupo'){
-      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', fillColor: tipos[i]==='grupo' ? [211,225,244] : [232,238,247] } }];
+      // Categoría (grupo) con línea ligeramente más marcada que Línea (subgrupo), ambas más
+      // delgadas que la del título — sin fondo de color.
+      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', lineWidth: tipos[i]==='grupo' ? 0.35 : 0.15, lineColor: [0,0,0] } }];
     }
     return fila.map((v,c)=> columnasMoneda.includes(c) ? (v===''? '' : money(v)) : v);
   });
@@ -1096,9 +1124,7 @@ async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados
     styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
     didParseCell: (data)=>{
       const tipo = tipos[data.row.index];
-      if(tipo === 'subtotal'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[245,245,245]; }
-      else if(tipo === 'subtotalCategoria'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[226,226,226]; }
-      else if(tipo === 'total'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[200,213,232]; }
+      if(tipo === 'subtotal' || tipo === 'subtotalCategoria' || tipo === 'total'){ data.cell.styles.fontStyle='bold'; }
     },
   });
   doc.save(nombreArchivo);
@@ -1140,7 +1166,7 @@ function datosReporteExistencias(){
 }
 $('cat-exportar-existencias').addEventListener('click', async ()=>{
   const { encabezados, filas, tipos, conImpuestos } = datosReporteExistencias();
-  const fecha = new Date().toISOString().slice(0,10);
+  const fecha = fechaLocalISO();
   const formato = $('cat-formato-exportar').value;
   // columnasMoneda: solo las columnas de dinero real (Costo, Precio público, Total costo) — Stock
   // es una cantidad, no un importe, así que no se formatea como moneda.
@@ -1159,6 +1185,9 @@ $('cat-exportar-existencias').addEventListener('click', async ()=>{
 // ---------- REPORTE DE RESURTIDO (Catálogo) ----------
 // Productos filtrados en Catálogo cuyo stock está en o por debajo de su punto de reorden (mismo
 // criterio que la etiqueta "Bajo mínimo" que ya se muestra en la tabla), agrupados igual que Existencias.
+// A petición de Adrián, el resurtido se calcula con DOS bases: cuánto se necesita para llegar al
+// punto de reorden, y cuánto para llegar al stock máximo — cada una con su columna de cantidad y su
+// columna de total ($), ambas usando el mismo costo unitario.
 function datosReporteResurtido(){
   const conImpuestos = $('cat-con-impuestos').checked;
   const items = itemsFiltradosCatalogo().filter(p=>p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo));
@@ -1167,38 +1196,48 @@ function datosReporteResurtido(){
     const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
     const tasa = tasaTotalProducto(p);
     const costo = p.costo!=null ? (conImpuestos ? redondear2(p.costo*(1+tasa)) : Number(p.costo)) : 0;
-    const totalResurtido = redondear2((Number(p.minimo) - Number(p.stock)) * costo);
+    const cantidadReorden = Math.max(0, Number(p.minimo) - Number(p.stock));
+    const totalReorden = redondear2(cantidadReorden * costo);
+    const cantidadMaximo = Math.max(0, Number(p.maximo) - Number(p.stock));
+    const totalMaximo = redondear2(cantidadMaximo * costo);
     return {
       lineaNombre: linea?.nombre, categoriaNombre: categoria?.nombre,
       producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, marca: p.marca || '—',
-      stock: Number(p.stock), puntoReorden: Number(p.minimo), costo, totalResurtido,
+      stock: Number(p.stock), puntoReorden: Number(p.minimo), costo,
+      cantidadReorden, totalReorden, cantidadMaximo, totalMaximo,
     };
   });
   const grupos = agruparPorCategoriaLinea(filas);
-  const encabezados = ['Producto', 'Marca', 'Stock', 'Punto de reorden', `Costo (${conImpuestos?'con':'sin'} imp.)`, 'Total resurtido'];
-  // columnasSuma: Stock (2), Punto de reorden (3) y Total resurtido (5) se suman en subtotales —
-  // Costo (4) es unitario, no se suma.
+  const encabezados = [
+    'Producto', 'Marca', 'Stock', 'Punto de reorden', `Costo (${conImpuestos?'con':'sin'} imp.)`,
+    'Cantidad a punto de reorden', 'Total resurtido (punto de reorden)',
+    'Cantidad a stock máximo', 'Total resurtido (stock máximo)',
+  ];
+  // columnasSuma: Stock (2), Punto de reorden (3) y las 4 columnas de cantidad/total (5-8) se suman
+  // en subtotales — Costo (4) es unitario, no se suma.
   const { filas: filasTabla, tipos } = filasAgrupadasConSubtotales(
     grupos,
-    f=>[f.producto, f.marca, f.stock, f.puntoReorden, f.costo, f.totalResurtido],
-    [2, 3, 5],
-    6
+    f=>[f.producto, f.marca, f.stock, f.puntoReorden, f.costo, f.cantidadReorden, f.totalReorden, f.cantidadMaximo, f.totalMaximo],
+    [2, 3, 5, 6, 7, 8],
+    9
   );
   return { encabezados, filas: filasTabla, tipos, conImpuestos };
 }
 $('cat-exportar-resurtido').addEventListener('click', async ()=>{
   const { encabezados, filas, tipos, conImpuestos } = datosReporteResurtido();
-  const fecha = new Date().toISOString().slice(0,10);
+  const fecha = fechaLocalISO();
   const formato = $('cat-formato-exportar').value;
+  // columnasMoneda: Costo (4) y los dos totales en $ (6, 8) — las columnas de "Cantidad" (5, 7) son
+  // piezas, no dinero, así que no llevan formato de moneda.
   if(formato === 'pdf'){
     await exportarPDFAgrupado(
       `reporte_resurtido_${fecha}.pdf`,
       `Reporte de resurtido — ${state.empresaNombre || ''}`,
       `Generado: ${new Date().toLocaleString('es-MX')} — Costo ${conImpuestos?'con':'sin'} impuestos`,
-      encabezados, filas, tipos, [4, 5]
+      encabezados, filas, tipos, [4, 6, 8]
     );
   } else {
-    exportarExcelAgrupado(`reporte_resurtido_${fecha}.xlsx`, 'Resurtido', encabezados, filas, tipos, [4,5]);
+    exportarExcelAgrupado(`reporte_resurtido_${fecha}.xlsx`, 'Resurtido', encabezados, filas, tipos, [4, 6, 8]);
   }
 });
 
@@ -1336,8 +1375,8 @@ function abrirProducto(varianteId){
   $('kardex-titulo').textContent = p ? `Kardex — ${p.nombre} — entradas y salidas` : 'Kardex — entradas y salidas';
   const hoy = new Date();
   const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-  $('kardex-desde').value = primerDiaMes.toISOString().slice(0,10);
-  $('kardex-hasta').value = hoy.toISOString().slice(0,10);
+  $('kardex-desde').value = fechaLocalISO(primerDiaMes);
+  $('kardex-hasta').value = fechaLocalISO(hoy);
   $('kardex-tabla-body').innerHTML = '';
   $('kardex-vacio').style.display = 'none';
   irAPanelDatos();
@@ -2051,7 +2090,7 @@ function exportarReporteExcel(){
   }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Reporte de precios');
-  const fecha = new Date().toISOString().slice(0,10);
+  const fecha = fechaLocalISO();
   XLSX.writeFile(wb, `reporte_precios_${fecha}.xlsx`);
 }
 async function exportarReportePDF(){
@@ -2076,7 +2115,7 @@ async function exportarReportePDF(){
     head: [encabezados], body: cuerpo, startY: 28,
     styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
   });
-  const fecha = new Date().toISOString().slice(0,10);
+  const fecha = fechaLocalISO();
   doc.save(`reporte_precios_${fecha}.pdf`);
 }
 

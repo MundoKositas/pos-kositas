@@ -310,11 +310,24 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.001';
+const APP_VERSION = '1.2.002';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
+// Fecha LOCAL (no UTC) en formato YYYY-MM-DD. Date#toISOString() siempre convierte a UTC antes de
+// cortar la fecha, lo que puede regresar el día equivocado para usuarios al oeste de UTC ya entrada
+// la noche (ej. Durango a las 7pm ya cae en el día siguiente en UTC) — corrige el bug reportado por
+// Adrián donde el POS decía "no hay periodo de operación abierto para hoy" estando aún en el día
+// anterior en su reloj. Úsese en vez de `new Date().toISOString().slice(0,10)` para cualquier fecha
+// "de hoy" de negocio.
+function fechaLocalISO(d){
+  const fecha = d || new Date();
+  const y = fecha.getFullYear();
+  const m = String(fecha.getMonth()+1).padStart(2,'0');
+  const dia = String(fecha.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dia}`;
+}
 
 // ---------- Formato de campos de dinero ($, miles, alineado a la derecha) ----------
 function parseMoney(str){
@@ -589,8 +602,8 @@ async function seleccionarSucursalCaja(sucursal, caja){
 
   const { data: periodo } = await sb.from('periodos_operacion')
     .select('*').eq('empresa_id', state.empresaId).eq('estado_ventas','abierto')
-    .lte('fecha_inicial', new Date().toISOString().slice(0,10))
-    .gte('fecha_final', new Date().toISOString().slice(0,10)).maybeSingle();
+    .lte('fecha_inicial', fechaLocalISO())
+    .gte('fecha_final', fechaLocalISO()).maybeSingle();
   if(!periodo){ mostrarError('No hay un periodo de operación abierto para hoy. Contacta al administrador.'); return; }
   state.periodoOperacionId = periodo.id;
 
@@ -801,6 +814,8 @@ function agruparPorCategoriaLinea(filas){
     })),
   }));
 }
+// Deja un renglón en blanco (tipo 'espacio') después de cada Subtotal línea y cada Subtotal
+// categoría, para que el reporte impreso se lea con aire entre grupos (pedido por Adrián).
 function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols){
   const filas = []; const tipos = [];
   const totalGeneral = new Array(numCols-1).fill(0);
@@ -819,11 +834,13 @@ function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols
       filaSub[0] = `Subtotal línea "${l.linea}"`;
       columnasSuma.forEach(i=>{ filaSub[i] = redondear2(subtotalLinea[i-1]); subtotalCategoria[i-1] += subtotalLinea[i-1]; });
       filas.push(filaSub); tipos.push('subtotal');
+      filas.push(new Array(numCols).fill('')); tipos.push('espacio');
     });
     const filaSubCat = new Array(numCols).fill('');
     filaSubCat[0] = `Subtotal categoría "${g.categoria}"`;
     columnasSuma.forEach(i=>{ filaSubCat[i] = redondear2(subtotalCategoria[i-1]); totalGeneral[i-1] += subtotalCategoria[i-1]; });
     filas.push(filaSubCat); tipos.push('subtotalCategoria');
+    filas.push(new Array(numCols).fill('')); tipos.push('espacio');
   });
   const filaTotal = new Array(numCols).fill('');
   filaTotal[0] = 'TOTAL GENERAL';
@@ -867,9 +884,10 @@ function tablaProductosVendidos(productosApi){
     8
   );
   // Margen de los renglones de subtotal/categoría/total: se recalcula de Utilidad/Venta de ESE
-  // mismo renglón (nunca se promedian los % de cada producto individual, sería incorrecto).
+  // mismo renglón (nunca se promedian los % de cada producto individual, sería incorrecto). Los
+  // renglones 'grupo'/'subgrupo'/'espacio' se dejan tal cual (sin "%" suelto en la columna Margen).
   filasTabla.forEach((fila, i)=>{
-    if(tipos[i] !== 'producto'){
+    if(tipos[i]==='subtotal' || tipos[i]==='subtotalCategoria' || tipos[i]==='total'){
       const venta = Number(fila[3])||0, utilidad = Number(fila[6])||0;
       fila[7] = venta > 0 ? `${redondear2((utilidad/venta)*100).toFixed(2)}%` : '—';
     }
@@ -892,13 +910,18 @@ async function logoComoDataUrl(){
     });
   } catch(err){ return null; }
 }
-// Agrega al doc de jsPDF (ya creado) la tabla agrupada de productos, con colSpan en los renglones de
-// grupo y negritas/fondo gris en subtotales y total. Regresa la posición Y final de la tabla.
+// Agrega al doc de jsPDF (ya creado) la tabla agrupada de productos — pensado para impresión: SIN
+// sombreados/fondos de color en el cuerpo, renglones de Categoría/Línea en negritas con una línea
+// delgada, subtotales/total en negritas de letra únicamente, y renglones 'espacio' en blanco.
+// Regresa la posición Y final de la tabla.
 function agregarTablaProductosPDF(doc, startY, encabezados, filas, tipos){
   const columnasMoneda = [2, 3, 4, 5, 6]; // Precio público, Venta, Costo unitario, Costo, Utilidad (Unidades y Margen no llevan "$")
   const cuerpo = filas.map((fila, i)=>{
+    if(tipos[i]==='espacio'){
+      return [{ content: '', colSpan: encabezados.length, styles: { minCellHeight: 3, lineWidth: 0 } }];
+    }
     if(tipos[i]==='grupo' || tipos[i]==='subgrupo'){
-      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', fillColor: tipos[i]==='grupo' ? [200,225,210] : [222,236,226] } }];
+      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', lineWidth: tipos[i]==='grupo' ? 0.35 : 0.15, lineColor: [0,0,0] } }];
     }
     return fila.map((v,c)=> columnasMoneda.includes(c) ? (v===''? '' : money(v)) : v);
   });
@@ -910,9 +933,7 @@ function agregarTablaProductosPDF(doc, startY, encabezados, filas, tipos){
     styles: { fontSize: 8 }, headStyles: { fillColor: [47, 125, 79] }, columnStyles,
     didParseCell: (data)=>{
       const tipo = tipos[data.row.index];
-      if(tipo === 'subtotal'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[245,245,245]; }
-      else if(tipo === 'subtotalCategoria'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[226,226,226]; }
-      else if(tipo === 'total'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[190,215,198]; }
+      if(tipo === 'subtotal' || tipo === 'subtotalCategoria' || tipo === 'total'){ data.cell.styles.fontStyle='bold'; }
     },
   });
   return doc.lastAutoTable.finalY;
@@ -1248,10 +1269,14 @@ async function generarReportePDFCierre(r){
     if(logoDataUrl){
       try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si falla, sin interrumpir la exportación */ }
     }
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.text(`Cierre de caja — ${state.empresaNombre || ''}`, margenTexto, 16);
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.text(`${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} · ${new Date().toLocaleString('es-MX')}`, margenTexto, 22);
+    doc.setLineWidth(0.6); // línea marcada bajo el título
+    doc.line(14, 25, doc.internal.pageSize.getWidth() - 14, 25);
 
     const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
     const filasDatosCierre = [
@@ -1281,16 +1306,18 @@ async function generarReportePDFCierre(r){
       head: [['Resumen de venta', '']], body: filasResumenVenta, startY: doc.lastAutoTable.finalY + 8,
       styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
       columnStyles: { 1: { halign:'right' } },
-      didParseCell: (data)=>{ if(data.row.index === filasResumenVenta.length-1){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[220,232,224]; } },
+      didParseCell: (data)=>{ if(data.row.index === filasResumenVenta.length-1){ data.cell.styles.fontStyle='bold'; } },
     });
 
     doc.addPage();
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.text('Productos vendidos en esta sesión', 14, 16);
+    doc.setFont('helvetica', 'normal');
     const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
     agregarTablaProductosPDF(doc, 22, encabezados, filas, tipos);
 
-    const fecha = new Date().toISOString().slice(0,10);
+    const fecha = fechaLocalISO();
     doc.save(`cierre_caja_${fecha}_${(state.cajaNombre||'').replace(/[^a-zA-Z0-9]/g,'_')}.pdf`);
   } catch(err){
     console.error('No se pudo generar el PDF del cierre de caja:', err);
@@ -1356,7 +1383,7 @@ $('resultado-cierre-ok').addEventListener('click', async ()=>{
 
 // ---------- PESTAÑA REPORTES (reporte de ventas acumulado, con filtros) ----------
 $('btn-reportes').addEventListener('click', ()=>{
-  const hoy = new Date().toISOString().slice(0,10);
+  const hoy = fechaLocalISO();
   if(!$('rep-fecha-desde').value) $('rep-fecha-desde').value = hoy;
   if(!$('rep-fecha-hasta').value) $('rep-fecha-hasta').value = hoy;
   $('rep-resumen').innerHTML = '';
@@ -1402,10 +1429,14 @@ async function exportarReporteVentasPDF(reporte){
   if(logoDataUrl){
     try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si falla, sin interrumpir la exportación */ }
   }
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.text(`Reporte de ventas — ${state.empresaNombre || ''}`, margenTexto, 16);
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(`Del ${desde} al ${hasta} — Generado: ${new Date().toLocaleString('es-MX')}`, margenTexto, 22);
+  doc.setLineWidth(0.6); // línea marcada bajo el título
+  doc.line(14, 25, doc.internal.pageSize.getWidth() - 14, 25);
   const filasResumen = [
     ['Venta total sin impuestos', money(reporte.venta_sin_impuestos)],
     ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, money(i.monto)]),
@@ -1415,11 +1446,13 @@ async function exportarReporteVentasPDF(reporte){
     head: [['Resumen de venta acumulado', '']], body: filasResumen, startY: 28,
     styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
     columnStyles: { 1: { halign:'right' } },
-    didParseCell: (data)=>{ if(data.row.index === filasResumen.length-1){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[220,232,224]; } },
+    didParseCell: (data)=>{ if(data.row.index === filasResumen.length-1){ data.cell.styles.fontStyle='bold'; } },
   });
   doc.addPage();
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.text('Productos vendidos en el periodo filtrado', 14, 16);
+  doc.setFont('helvetica', 'normal');
   const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
   agregarTablaProductosPDF(doc, 22, encabezados, filas, tipos);
   doc.save(`reporte_ventas_${desde}_a_${hasta}.pdf`);
