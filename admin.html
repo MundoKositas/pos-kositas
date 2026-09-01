@@ -95,7 +95,7 @@
     </div>
   </div>
   <div class="acciones">
-    <button class="btn-gris" id="btn-config-empresa">Logotipo</button>
+    <button class="btn-gris" id="btn-config-empresa">Configuración de empresa</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
 </header>
@@ -363,11 +363,14 @@
   </div>
 </div>
 
-<!-- MODAL: logotipo de la empresa (aparece en el ticket del POS, el encabezado de admin.html,
-     el Reporte de precios en PDF y las pantallas de login de ambas apps) -->
+<!-- MODAL: configuración de empresa — logotipo (aparece en el ticket del POS, el encabezado de
+     admin.html, el Reporte de precios en PDF y las pantallas de login de ambas apps) y desglose de
+     impuestos (controla cómo se ven los precios en el Punto de Venta y en el ticket) -->
 <div class="modal-fondo" id="modal-empresa-config">
   <div class="modal" id="card-empresa-config">
-    <h2 style="margin-top:0;">Logotipo de la empresa</h2>
+    <h2 style="margin-top:0;">Configuración de empresa</h2>
+
+    <h3 style="margin-bottom:4px;">Logotipo</h3>
     <p class="nota">Se usa en el ticket del Punto de Venta, aquí en el encabezado, en el Reporte de precios exportado a PDF, y en las pantallas de inicio de sesión de ambas aplicaciones.</p>
     <div style="text-align:center;margin:14px 0;">
       <img id="empresa-logo-preview" alt="" style="display:none;max-height:120px;max-width:100%;object-fit:contain;">
@@ -376,6 +379,14 @@
     <div class="campo"><label>Subir / reemplazar logotipo</label><input type="file" id="empresa-logo-archivo" accept="image/*"></div>
     <p class="nota">Cualquier imagen sirve (PNG, JPG, etc.) — se ajusta automáticamente al formato correcto.</p>
     <div id="empresa-logo-estado"></div>
+
+    <h3 style="margin-bottom:4px;border-top:1px solid var(--borde);padding-top:14px;">Impuestos en el Punto de Venta</h3>
+    <label style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="empresa-desglosar-impuestos" style="width:auto;"> Desglosar impuestos (precios sin IVA/IEPS, el impuesto se muestra aparte en el total)
+    </label>
+    <p class="nota" id="empresa-desglosar-impuestos-nota">Aplica a la búsqueda, el carrito, el cobro y el ticket del Punto de Venta (`pos.html`) — no afecta los precios que ves aquí en Admin, que tienen su propio interruptor "con impuestos" en Catálogo y Reporte de precios.</p>
+    <div id="empresa-desglosar-impuestos-estado"></div>
+
     <button class="btn-gris" style="width:100%;margin-top:14px;" id="empresa-config-cerrar">Cerrar</button>
   </div>
 </div>
@@ -449,7 +460,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.6.004';
+const APP_VERSION = '1.6.005';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -578,7 +589,7 @@ const state = {
   catalogoOrden: [], indiceCatalogo: -1,
   formSnapshot: '', marcas: [],
   catalogoPagina: 1, catalogoPorPagina: 50,
-  logoUrl: '',
+  logoUrl: '', desglosarImpuestos: true,
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -645,9 +656,29 @@ $('btn-config-empresa').addEventListener('click', ()=>{
     $('empresa-logo-vacio').style.display = 'block';
   }
   $('empresa-logo-archivo').value = '';
+  $('empresa-desglosar-impuestos').checked = state.desglosarImpuestos;
+  $('empresa-desglosar-impuestos-estado').innerHTML = '';
   $('modal-empresa-config').classList.add('activo');
 });
 $('empresa-config-cerrar').addEventListener('click', ()=>{ $('modal-empresa-config').classList.remove('activo'); });
+
+// ---------- DESGLOSE DE IMPUESTOS EN EL POS (empresas.desglosar_impuestos_ticket) ----------
+// Controla cómo `pos.html` muestra los precios en la búsqueda, el carrito, el cobro y el ticket —
+// marcado: precios sin IVA/IEPS, con el impuesto desglosado aparte en el total; desmarcado: precios
+// ya con el impuesto incluido. Antes de esta pantalla, este valor solo se podía cambiar con SQL
+// directo — Adrián reportó que no encontraba dónde configurarlo ni confirmar que sí aplicaba.
+$('empresa-desglosar-impuestos').addEventListener('change', async ()=>{
+  const nuevoValor = $('empresa-desglosar-impuestos').checked;
+  $('empresa-desglosar-impuestos-estado').innerHTML = '<p class="nota">Guardando…</p>';
+  const { error } = await sb.from('empresas').update({ desglosar_impuestos_ticket: nuevoValor }).eq('id', state.empresaId);
+  if(error){
+    $('empresa-desglosar-impuestos').checked = !nuevoValor; // revierte el checkbox si no se pudo guardar
+    $('empresa-desglosar-impuestos-estado').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  state.desglosarImpuestos = nuevoValor;
+  $('empresa-desglosar-impuestos-estado').innerHTML = '<p class="nota">Guardado — se aplica la próxima vez que se abra o se recargue el Punto de Venta.</p>';
+});
 
 function convertirImagenAPng(archivo){
   return new Promise((resolve, reject)=>{
@@ -731,6 +762,7 @@ async function iniciarSesionApp(){
   state.empresaId = empresa.id;
   state.empresaNombre = empresa.nombre_comercial;
   state.logoUrl = empresa.logo_url || '';
+  state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
 
   const { data: almacenes } = await sb.from('almacenes').select('*').eq('activo', true);
   state.almacenId = almacenes?.[0]?.id || null;

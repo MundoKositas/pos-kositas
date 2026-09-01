@@ -195,7 +195,7 @@
       <div class="card" style="margin-top:14px;" id="card-cobro">
         <h2>Cobro</h2>
         <div class="totales">
-          <div class="linea"><span>Subtotal</span><span id="tot-subtotal">$0.00</span></div>
+          <div class="linea" id="fila-tot-subtotal"><span>Subtotal</span><span id="tot-subtotal">$0.00</span></div>
           <div id="tot-impuestos-lista"></div>
           <div class="linea total-final"><span>Total</span><span id="tot-total">$0.00</span></div>
         </div>
@@ -404,7 +404,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.3.002';
+const APP_VERSION = '1.3.003';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1650,7 +1650,14 @@ function sincronizarPagos(){
 function recalcularTotales(){
   sincronizarPagos();
   const { subtotal, desglose, total } = calcularTotales();
+  // empresas.desglosar_impuestos_ticket controla esto también en la pantalla de Cobro (antes solo
+  // cambiaba el precio mostrado por artículo): si NO se desglosa, aquí solo se ve el Total final —
+  // Subtotal e Impuestos se ocultan, porque los precios de artículo ya los traen incluidos y
+  // mostrarlos aparte sería inconsistente con "IVA incluido". Configurable en Admin → Configuración
+  // de empresa.
+  $('fila-tot-subtotal').style.display = state.desglosarImpuestos ? 'flex' : 'none';
   $('tot-subtotal').textContent = money(subtotal);
+  $('tot-impuestos-lista').style.display = state.desglosarImpuestos ? '' : 'none';
   $('tot-impuestos-lista').innerHTML = Object.values(desglose).map(d=>
     `<div class="linea"><span>${d.nombre}</span><span>${money(d.monto)}</span></div>`
   ).join('');
@@ -1865,9 +1872,11 @@ function mostrarTicket(ventaId, venta, desglose){
     <p>Cliente: ${cliente?.nombre || 'Público en general'}<br>Atendió: ${state.usuario.nombre}</p>
     <table><tbody>${filasItems}</tbody></table>
     <div class="totales">
+      ${state.desglosarImpuestos ? `
       <div class="linea"><span>Subtotal</span><span>${money(venta.subtotal)}</span></div>
       ${Object.values(desglose||{}).map(d=>`<div class="linea"><span>${d.nombre}</span><span>${money(d.monto)}</span></div>`).join('')}
-      <div class="linea total-final"><span>Total</span><span>${money(venta.total)}</span></div>
+      ` : ''}
+      <div class="linea total-final"><span>Total${state.desglosarImpuestos ? '' : ' (impuestos incluidos)'}</span><span>${money(venta.total)}</span></div>
     </div>
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Forma de pago:</p>
     <div class="totales" style="margin-top:0;">
