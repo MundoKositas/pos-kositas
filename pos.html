@@ -97,6 +97,7 @@
     <button class="btn-secundario" id="btn-movimiento-caja">Movimiento de caja</button>
     <button class="btn-secundario" id="btn-actualizar-catalogo">Actualizar catálogo</button>
     <button class="btn-secundario" id="btn-reportes">Reportes</button>
+    <button class="btn-gris" id="btn-mi-pin" style="display:none;">PIN de supervisor</button>
     <button class="btn-peligro" id="btn-cerrar-caja">Cerrar caja</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
@@ -170,7 +171,7 @@
         <p class="nota" id="nota-impuestos"></p>
         <div class="tabla-scroll">
           <table>
-            <thead><tr><th>Producto</th><th class="num">Cant.</th><th>Lista</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
             <tbody id="carrito-body"></tbody>
           </table>
         </div>
@@ -182,8 +183,14 @@
         <h2>Cliente</h2>
         <select id="sel-cliente"></select>
         <p class="nota" style="margin:10px 0 4px;">Lista de precios del ticket</p>
-        <select id="sel-lista-precio"></select>
-        <p class="nota" style="margin-top:4px;">Aplica a todo el ticket, salvo los artículos a los que ya les cambiaste la lista uno por uno en el carrito.</p>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select id="sel-lista-precio" style="flex:1;"></select>
+          <button class="btn-gris" id="btn-autorizar-lista-ticket" style="display:none;white-space:nowrap;">🔒 Autorizar</button>
+        </div>
+        <p class="nota" style="margin-top:4px;">Aplica a todo el ticket, salvo los artículos a los que ya les cambiaste la lista o el precio en el carrito.</p>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+          <button class="btn-secundario" id="btn-descuento-ticket" style="flex:1;">% Descuento a toda la venta</button>
+        </div>
       </div>
       <div class="card" style="margin-top:14px;" id="card-cobro">
         <h2>Cobro</h2>
@@ -291,6 +298,90 @@
   </div>
 </div>
 
+<!-- MODAL: autorización de supervisor (PIN) -->
+<div class="modal-fondo" id="modal-autorizacion">
+  <div class="modal">
+    <h2 id="auth-pin-titulo">Autorización de supervisor</h2>
+    <p class="nota">Pide al supervisor que capture su PIN para autorizar este cambio. El cajero no necesita cerrar su sesión.</p>
+    <div class="campo"><label>PIN del supervisor</label><input type="password" inputmode="numeric" id="auth-pin" maxlength="6" autocomplete="off"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="auth-pin-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="auth-pin-confirmar">Autorizar</button>
+    </div>
+    <div id="auth-pin-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: descuento a toda la venta -->
+<div class="modal-fondo" id="modal-descuento-ticket">
+  <div class="modal">
+    <h2>Descuento a toda la venta</h2>
+    <p class="nota">Se aplica a todos los artículos del carrito (los que ya tengan su propio descuento o precio manual se pueden ajustar después uno por uno).</p>
+    <div class="campo">
+      <label>Tipo</label>
+      <select id="desc-ticket-tipo"><option value="porcentaje">Porcentaje (%)</option><option value="fijo">Monto fijo por artículo ($)</option></select>
+    </div>
+    <div class="campo"><label>Valor</label><input type="text" inputmode="decimal" id="desc-ticket-valor"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="desc-ticket-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="desc-ticket-quitar">Quitar descuento</button>
+      <button class="btn-primario" style="flex:1;" id="desc-ticket-aplicar">Aplicar</button>
+    </div>
+    <div id="desc-ticket-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: editar línea del carrito (lista de precio, descuento, precio manual) -->
+<div class="modal-fondo" id="modal-editar-linea">
+  <div class="modal">
+    <h2 id="editar-linea-titulo">Editar artículo</h2>
+
+    <p class="nota" style="margin-bottom:4px;"><strong>Lista de precios de este artículo</strong></p>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+      <select id="el-lista" style="flex:1;"></select>
+      <button class="btn-gris" id="el-lista-autorizar" style="display:none;white-space:nowrap;">🔒 Autorizar</button>
+    </div>
+
+    <p class="nota" style="margin-bottom:4px;"><strong>Descuento</strong></p>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+      <select id="el-desc-tipo" style="flex:1;">
+        <option value="">Sin descuento</option>
+        <option value="porcentaje">Porcentaje (%)</option>
+        <option value="fijo">Monto fijo ($)</option>
+      </select>
+      <input type="text" inputmode="decimal" id="el-desc-valor" placeholder="Valor" style="flex:1;">
+      <button class="btn-gris" id="el-desc-autorizar" style="display:none;white-space:nowrap;">🔒 Autorizar</button>
+    </div>
+
+    <p class="nota" style="margin-bottom:4px;"><strong>Precio manual</strong> <span class="nota">(ej. mercancía dañada)</span></p>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input type="text" inputmode="decimal" id="el-precio-manual" placeholder="Dejar vacío para usar el precio de lista" style="flex:1;">
+      <button class="btn-gris" id="el-precio-autorizar" style="display:none;white-space:nowrap;">🔒 Autorizar</button>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="el-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="el-aplicar">Aplicar</button>
+    </div>
+    <div id="el-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: mi PIN de supervisor -->
+<div class="modal-fondo" id="modal-mi-pin">
+  <div class="modal">
+    <h2 id="mi-pin-titulo">Crear mi PIN de supervisor</h2>
+    <p class="nota">Este PIN (4 a 6 dígitos) lo usarán los cajeros para pedirte autorización en el mostrador, sin que tengas que iniciar sesión tú. Es independiente de tu contraseña.</p>
+    <div class="campo"><label>Nuevo PIN</label><input type="password" inputmode="numeric" id="mi-pin-nuevo" maxlength="6" autocomplete="off"></div>
+    <div class="campo"><label>Confirmar PIN</label><input type="password" inputmode="numeric" id="mi-pin-confirmar" maxlength="6" autocomplete="off"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="mi-pin-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="mi-pin-guardar">Guardar</button>
+    </div>
+    <div id="mi-pin-error"></div>
+  </div>
+</div>
+
 <!-- MODAL: ticket -->
 <div class="modal-fondo" id="modal-ticket">
   <div class="modal">
@@ -313,7 +404,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.008';
+const APP_VERSION = '1.3.001';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -378,8 +469,18 @@ const state = {
   // carrito: cada línea trae preciosPorLista (copia del mapa del producto) y listaPrecioId — null
   // significa "usa la lista del ticket" (state.listaPrecioId); un valor propio significa que esa
   // línea quedó fijada a una lista distinta y ya no sigue los cambios de la lista del ticket.
-  carrito: [], // {varianteId, nombre, precio, preciosPorLista, listaPrecioId, cantidad, impuestos, stock, codigo}
+  // carrito: cada línea, además de lo de arriba, trae descuentoTipo ('porcentaje'|'fijo'|null),
+  // descuentoValor, precioManual (null = no aplica) y autorizaciones ({listaPrecio, descuento,
+  // precioManual}, cada una null o {usuarioId, nombre} de qué supervisor la autorizó vía PIN).
+  carrito: [], // {varianteId, nombre, precio, preciosPorLista, listaPrecioId, cantidad, impuestos, stock, codigo, descuentoTipo, descuentoValor, precioManual, autorizaciones}
   pagos: [], // {formaPagoId, monto, referencia}
+  // permisosPos: códigos de permisos del módulo 'pos' que ya tiene el usuario que entró (Super Admin
+  // los tiene todos) — ver mis_permisos_pos(). listaPrecioAutorizadaPor/descuentoTicketAutorizadoPor
+  // quedan null hasta que un supervisor autorice ese cambio A NIVEL TICKET vía PIN (ver
+  // pedirAutorizacionSupervisor); se resetean en cada venta nueva (reiniciarVenta).
+  permisosPos: [],
+  listaPrecioAutorizadaPor: null,
+  descuentoTicketAutorizadoPor: null,
 };
 
 // Ruta fija del logotipo dentro del bucket público "empresa" (mismo mecanismo que admin.html) — se
@@ -394,11 +495,28 @@ function tasaTotal(item){
   return (item.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0), 0);
 }
 
+// Precio base de una línea del carrito, YA con el descuento o el precio manual aplicados (si los
+// tiene) — para un producto de catálogo plano (sin estos campos) regresa item.precio tal cual, sin
+// cambio de comportamiento. El precio manual manda sobre cualquier descuento (no se combinan).
+function precioBaseEfectivo(item){
+  if(item.precioManual !== null && item.precioManual !== undefined && item.precioManual !== ''){
+    return Number(item.precioManual) || 0;
+  }
+  const base = Number(item.precio) || 0;
+  if(item.descuentoTipo === 'porcentaje'){
+    return redondear2(base * (1 - (Number(item.descuentoValor)||0)/100));
+  }
+  if(item.descuentoTipo === 'fijo'){
+    return redondear2(Math.max(0, base - (Number(item.descuentoValor)||0)));
+  }
+  return base;
+}
 function precioMostrar(item){
   // Respeta empresas.desglosar_impuestos_ticket: si se desglosa el impuesto en el ticket,
-  // el precio mostrado en búsqueda/carrito es el precio base (sin impuestos). Si no se desglosa,
-  // se muestra el precio final (con todos los impuestos del producto incluidos).
-  const base = Number(item.precio) || 0;
+  // el precio mostrado en búsqueda/carrito es el precio base (sin impuestos, ya con descuento o
+  // precio manual aplicado si la línea los tiene). Si no se desglosa, se muestra el precio final
+  // (con todos los impuestos del producto incluidos).
+  const base = precioBaseEfectivo(item);
   if(state.desglosarImpuestos) return base;
   return base * (1 + tasaTotal(item));
 }
@@ -659,7 +777,8 @@ async function entrarAlPOS(){
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
     : 'Precios mostrados con IVA incluido.';
 
-  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio()]);
+  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
+  actualizarBloqueosPermisos();
   reiniciarVenta();
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
@@ -671,6 +790,70 @@ async function cargarListasPrecio(){
   llenarSelect('sel-lista-precio', state.listasPrecio, l=>l.id, l=>l.nombre);
   $('sel-lista-precio').value = state.listaPrecioId;
 }
+
+// ---------- PERMISOS DEL MÓDULO POS Y AUTORIZACIÓN DE SUPERVISOR CON PIN ----------
+// mis_permisos_pos() regresa los códigos de permiso que ya tiene el usuario que entró (Super Admin
+// los tiene todos). Cambiar de lista de precios, aplicar descuentos y editar el precio manual están
+// bloqueados por default para quien no tenga el permiso correspondiente — Adrián decidió que, hoy,
+// solo Gerente/Admin de Empresa (y Super Admin) los tienen; ver migración 053.
+async function cargarPermisosPos(){
+  const { data, error } = await sb.rpc('mis_permisos_pos');
+  state.permisosPos = error ? [] : (data || []);
+}
+function tienePermiso(codigo){ return state.permisosPos.includes(codigo); }
+
+// Refleja en pantalla, de una vez, qué controles están bloqueados para el usuario actual (candado +
+// botón "Autorizar") — se llama al entrar y cada vez que una autorización de supervisor cambia algo.
+function actualizarBloqueosPermisos(){
+  $('btn-mi-pin').style.display = state.permisosPos.length ? 'inline-block' : 'none';
+  const puedeListaTicket = tienePermiso('pos.cambiar_lista_precio') || !!state.listaPrecioAutorizadaPor;
+  $('sel-lista-precio').disabled = !puedeListaTicket;
+  $('btn-autorizar-lista-ticket').style.display = puedeListaTicket ? 'none' : 'inline-block';
+  const puedeDescTicket = tienePermiso('pos.aplicar_descuento') || !!state.descuentoTicketAutorizadoPor;
+  $('btn-descuento-ticket').textContent = puedeDescTicket ? '% Descuento a toda la venta' : '🔒 Descuento a toda la venta';
+}
+
+// Abre el modal de PIN y regresa una Promise: {usuarioId, nombre} del supervisor si el PIN fue
+// correcto y ese supervisor sí tiene el permiso pedido, o null si el cajero canceló. Nunca cierra la
+// sesión del cajero — el supervisor solo autoriza, no inicia sesión.
+function pedirAutorizacionSupervisor(codigoPermiso, etiqueta){
+  return new Promise((resolve)=>{
+    $('auth-pin').value = '';
+    $('auth-pin-error').innerHTML = '';
+    $('auth-pin-titulo').textContent = `Autorización de supervisor — ${etiqueta}`;
+    $('modal-autorizacion').classList.add('activo');
+    setTimeout(()=>$('auth-pin').focus(), 0);
+    const limpiar = ()=>{
+      $('modal-autorizacion').classList.remove('activo');
+      $('auth-pin-confirmar').onclick = null;
+      $('auth-pin-cancelar').onclick = null;
+      $('auth-pin').onkeydown = null;
+    };
+    const intentar = async ()=>{
+      const pin = $('auth-pin').value.trim();
+      if(!pin){ $('auth-pin-error').innerHTML = '<div class="msg-error">Captura el PIN.</div>'; return; }
+      $('auth-pin-confirmar').disabled = true;
+      const { data, error } = await sb.rpc('autorizar_supervisor_pin', { p_codigo_permiso: codigoPermiso, p_pin: pin });
+      $('auth-pin-confirmar').disabled = false;
+      if(error || !data || data.length !== 1){
+        $('auth-pin-error').innerHTML = '<div class="msg-error">PIN incorrecto, o ese supervisor no tiene autorización para esto.</div>';
+        $('auth-pin').value=''; $('auth-pin').focus();
+        return;
+      }
+      limpiar();
+      resolve({ usuarioId: data[0].usuario_id, nombre: data[0].nombre });
+    };
+    $('auth-pin-cancelar').onclick = ()=>{ limpiar(); resolve(null); };
+    $('auth-pin-confirmar').onclick = intentar;
+    $('auth-pin').onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); intentar(); } };
+  });
+}
+
+$('btn-autorizar-lista-ticket').addEventListener('click', async ()=>{
+  const resultado = await pedirAutorizacionSupervisor('pos.cambiar_lista_precio', 'cambiar la lista de precios del ticket');
+  if(resultado){ state.listaPrecioAutorizadaPor = resultado; actualizarBloqueosPermisos(); $('sel-lista-precio').focus(); }
+});
+
 // Cambiar la lista de precios del TICKET: re-cotiza el catálogo completo (para que la búsqueda ya
 // muestre los precios de la nueva lista) y re-cotiza cada línea del carrito que NO tenga su propia
 // lista fijada (linea.listaPrecioId === null) — las líneas que sí tienen una lista propia (cambiadas
@@ -680,6 +863,154 @@ $('sel-lista-precio').addEventListener('change', ()=>{
   recalcularPreciosCatalogo();
   renderResultados(buscarInput.value.trim());
   renderCarrito();
+});
+
+// ---------- Descuento a toda la venta (ticket) ----------
+$('btn-descuento-ticket').addEventListener('click', async ()=>{
+  if(!tienePermiso('pos.aplicar_descuento') && !state.descuentoTicketAutorizadoPor){
+    const resultado = await pedirAutorizacionSupervisor('pos.aplicar_descuento', 'aplicar un descuento a toda la venta');
+    if(!resultado) return;
+    state.descuentoTicketAutorizadoPor = resultado;
+    actualizarBloqueosPermisos();
+  }
+  $('desc-ticket-error').innerHTML = '';
+  $('desc-ticket-tipo').value = 'porcentaje';
+  $('desc-ticket-valor').value = '';
+  $('modal-descuento-ticket').classList.add('activo');
+  $('desc-ticket-valor').focus();
+});
+$('desc-ticket-cancelar').addEventListener('click', ()=>{ $('modal-descuento-ticket').classList.remove('activo'); });
+$('desc-ticket-quitar').addEventListener('click', ()=>{
+  if(!state.carrito.length){ $('modal-descuento-ticket').classList.remove('activo'); return; }
+  state.carrito.forEach(l=>{ l.descuentoTipo = null; l.descuentoValor = 0; l.autorizaciones.descuento = null; });
+  $('modal-descuento-ticket').classList.remove('activo');
+  renderCarrito();
+});
+$('desc-ticket-aplicar').addEventListener('click', ()=>{
+  const tipo = $('desc-ticket-tipo').value;
+  const valor = parseMoney($('desc-ticket-valor').value);
+  if(!(valor > 0)){ $('desc-ticket-error').innerHTML = '<div class="msg-error">Captura un valor mayor a 0 (o usa "Quitar descuento").</div>'; return; }
+  if(tipo === 'porcentaje' && valor > 100){ $('desc-ticket-error').innerHTML = '<div class="msg-error">Un descuento por porcentaje no puede ser mayor a 100%.</div>'; return; }
+  if(!state.carrito.length){ $('desc-ticket-error').innerHTML = '<div class="msg-error">Todavía no hay artículos en el carrito.</div>'; return; }
+  // "Autorizado por" a nivel ticket: si el descuento vino de un candado abierto con PIN, se marca esa
+  // autorización en CADA línea (para la bitácora), aunque quien aplicó a fin de cuentas fue el mismo
+  // supervisor una sola vez, no uno por artículo.
+  state.carrito.forEach(l=>{
+    l.descuentoTipo = tipo; l.descuentoValor = valor;
+    l.autorizaciones.descuento = state.descuentoTicketAutorizadoPor;
+  });
+  $('modal-descuento-ticket').classList.remove('activo');
+  renderCarrito();
+});
+
+// ---------- Editar línea del carrito: lista de precio, descuento y precio manual, en un solo modal ----------
+let editarLineaIdx = null;
+function abrirEditarLinea(idx){
+  editarLineaIdx = idx;
+  const l = state.carrito[idx];
+  $('editar-linea-titulo').textContent = `Editar artículo — ${l.nombre}`;
+  $('el-error').innerHTML = '';
+
+  const listasConPrecio = state.listasPrecio.filter(lp => l.preciosPorLista && l.preciosPorLista[lp.id] !== undefined);
+  $('el-lista').innerHTML = `<option value="">(la del ticket: ${nombreLista(state.listaPrecioId)})</option>` +
+    listasConPrecio.map(lp=>`<option value="${lp.id}" ${l.listaPrecioId===lp.id?'selected':''}>${lp.nombre}</option>`).join('');
+  const puedeLista = tienePermiso('pos.cambiar_lista_precio') || !!l.autorizaciones.listaPrecio;
+  $('el-lista').disabled = !puedeLista;
+  $('el-lista-autorizar').style.display = puedeLista ? 'none' : 'inline-block';
+
+  $('el-desc-tipo').value = l.descuentoTipo || '';
+  $('el-desc-valor').value = l.descuentoTipo ? l.descuentoValor : '';
+  const puedeDesc = tienePermiso('pos.aplicar_descuento') || !!l.autorizaciones.descuento;
+  $('el-desc-tipo').disabled = !puedeDesc;
+  $('el-desc-valor').disabled = !puedeDesc;
+  $('el-desc-autorizar').style.display = puedeDesc ? 'none' : 'inline-block';
+
+  $('el-precio-manual').value = (l.precioManual !== null && l.precioManual !== undefined) ? l.precioManual : '';
+  const puedePrecio = tienePermiso('pos.editar_precio_manual') || !!l.autorizaciones.precioManual;
+  $('el-precio-manual').disabled = !puedePrecio;
+  $('el-precio-autorizar').style.display = puedePrecio ? 'none' : 'inline-block';
+
+  $('modal-editar-linea').classList.add('activo');
+}
+$('el-lista-autorizar').addEventListener('click', async ()=>{
+  const l = state.carrito[editarLineaIdx];
+  const resultado = await pedirAutorizacionSupervisor('pos.cambiar_lista_precio', `cambiar la lista de precios de "${l.nombre}"`);
+  if(resultado){ l.autorizaciones.listaPrecio = resultado; abrirEditarLinea(editarLineaIdx); }
+});
+$('el-desc-autorizar').addEventListener('click', async ()=>{
+  const l = state.carrito[editarLineaIdx];
+  const resultado = await pedirAutorizacionSupervisor('pos.aplicar_descuento', `aplicar un descuento a "${l.nombre}"`);
+  if(resultado){ l.autorizaciones.descuento = resultado; abrirEditarLinea(editarLineaIdx); }
+});
+$('el-precio-autorizar').addEventListener('click', async ()=>{
+  const l = state.carrito[editarLineaIdx];
+  const resultado = await pedirAutorizacionSupervisor('pos.editar_precio_manual', `editar el precio manual de "${l.nombre}"`);
+  if(resultado){ l.autorizaciones.precioManual = resultado; abrirEditarLinea(editarLineaIdx); }
+});
+$('el-cancelar').addEventListener('click', ()=>{ $('modal-editar-linea').classList.remove('activo'); });
+$('el-aplicar').addEventListener('click', ()=>{
+  const l = state.carrito[editarLineaIdx];
+  $('el-error').innerHTML = '';
+  if(!$('el-lista').disabled){
+    l.listaPrecioId = $('el-lista').value || null;
+  }
+  if(!$('el-desc-tipo').disabled){
+    const tipo = $('el-desc-tipo').value || null;
+    const valor = parseMoney($('el-desc-valor').value);
+    if(tipo && !(valor > 0)){
+      $('el-error').innerHTML = '<div class="msg-error">Captura un valor de descuento mayor a 0, o deja "Sin descuento".</div>';
+      return;
+    }
+    if(tipo === 'porcentaje' && valor > 100){
+      $('el-error').innerHTML = '<div class="msg-error">Un descuento por porcentaje no puede ser mayor a 100%.</div>';
+      return;
+    }
+    l.descuentoTipo = tipo;
+    l.descuentoValor = tipo ? valor : 0;
+    if(!tipo) l.autorizaciones.descuento = null; // se quitó el descuento; una próxima vez se vuelve a pedir autorización
+  }
+  if(!$('el-precio-manual').disabled){
+    const txt = $('el-precio-manual').value.trim();
+    if(txt && !(parseMoney(txt) > 0)){
+      $('el-error').innerHTML = '<div class="msg-error">El precio manual debe ser mayor a 0, o deja el campo vacío para usar el precio de lista.</div>';
+      return;
+    }
+    l.precioManual = txt ? parseMoney(txt) : null;
+    if(!txt) l.autorizaciones.precioManual = null;
+  }
+  $('modal-editar-linea').classList.remove('activo');
+  renderCarrito();
+});
+
+// ---------- Mi PIN de supervisor ----------
+$('btn-mi-pin').addEventListener('click', async ()=>{
+  const { data } = await sb.rpc('tengo_pin');
+  $('mi-pin-titulo').textContent = data ? 'Cambiar mi PIN de supervisor' : 'Crear mi PIN de supervisor';
+  $('mi-pin-nuevo').value = '';
+  $('mi-pin-confirmar').value = '';
+  $('mi-pin-error').innerHTML = '';
+  $('modal-mi-pin').classList.add('activo');
+  $('mi-pin-nuevo').focus();
+});
+$('mi-pin-cancelar').addEventListener('click', ()=>{ $('modal-mi-pin').classList.remove('activo'); });
+$('mi-pin-guardar').addEventListener('click', async ()=>{
+  $('mi-pin-error').innerHTML = '';
+  const pin = $('mi-pin-nuevo').value.trim();
+  const confirmar = $('mi-pin-confirmar').value.trim();
+  if(!/^[0-9]{4,6}$/.test(pin)){
+    $('mi-pin-error').innerHTML = '<div class="msg-error">El PIN debe tener entre 4 y 6 dígitos numéricos.</div>';
+    return;
+  }
+  if(pin !== confirmar){
+    $('mi-pin-error').innerHTML = '<div class="msg-error">Los dos PIN capturados no coinciden.</div>';
+    return;
+  }
+  const { error } = await sb.rpc('establecer_mi_pin', { p_pin: pin });
+  if(error){
+    $('mi-pin-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  $('modal-mi-pin').classList.remove('activo');
 });
 
 async function cargarCatalogo(){
@@ -827,6 +1158,11 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
       preciosPorLista: producto.preciosPorLista, listaPrecioId: null,
       cantidad, impuestos: producto.impuestos,
       stock: producto.stock, codigo: codigoEscaneado || null,
+      // Descuento/precio manual de esta línea (null = no aplica) y quién autorizó cada uno de los 3
+      // cambios (null = el propio cajero ya tenía el privilegio, no necesitó autorización) — ver
+      // modal-editar-linea y la bitácora de auditoría al cobrar.
+      descuentoTipo: null, descuentoValor: 0, precioManual: null,
+      autorizaciones: { listaPrecio: null, descuento: null, precioManual: null },
     });
   }
   renderCarrito();
@@ -844,6 +1180,17 @@ function hayLineaSinPrecio(){
   return state.carrito.some(l=>precioParaLinea(l) === null);
 }
 
+// Texto corto que resume si una línea trae descuento o precio manual (se muestra debajo del nombre
+// del artículo, ya que la columna "Lista" se quitó — los 3 cambios ahora viven en un solo ícono
+// "✎" que abre el modal "Editar artículo", tal como pidió Adrián para no saturar la tabla).
+function notaLineaEditada(l){
+  const partes = [];
+  if(l.listaPrecioId) partes.push(`lista: ${nombreLista(l.listaPrecioId)}`);
+  if(l.descuentoTipo === 'porcentaje') partes.push(`desc. ${Number(l.descuentoValor)||0}%`);
+  else if(l.descuentoTipo === 'fijo') partes.push(`desc. ${money(l.descuentoValor)}`);
+  if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') partes.push('precio manual');
+  return partes.length ? `<div class="nota" style="margin:2px 0 0;">${partes.join(' · ')}</div>` : '';
+}
 function renderCarrito(){
   const body = $('carrito-body');
   $('carrito-vacio').style.display = state.carrito.length ? 'none' : 'block';
@@ -852,17 +1199,13 @@ function renderCarrito(){
     // por si a esta línea ya se le fijó su propia lista de precios.
     l.precio = precioParaLinea(l);
     const sinPrecio = l.precio === null;
-    const listasConPrecio = state.listasPrecio.filter(lp => l.preciosPorLista && l.preciosPorLista[lp.id] !== undefined);
-    const opcionesLista = `<option value="">(la del ticket: ${nombreLista(state.listaPrecioId)})</option>` +
-      listasConPrecio.map(lp=>`<option value="${lp.id}" ${l.listaPrecioId===lp.id?'selected':''}>${lp.nombre}</option>`).join('');
     return `
     <tr>
-      <td>${l.nombre}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}</td>
+      <td>${l.nombre}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}${notaLineaEditada(l)}</td>
       <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
-      <td><select class="linea-lista" data-idx="${i}" title="Lista de precios de este artículo">${opcionesLista}</select></td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(precioMostrar(l)*l.cantidad)}</td>
-      <td><button class="quitar" data-idx="${i}">Quitar</button></td>
+      <td style="white-space:nowrap;"><button class="btn-gris editar-linea" data-idx="${i}" title="Cambiar lista de precio, descuento o precio manual">✎</button> <button class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`;
   }).join('');
   body.querySelectorAll('.cant-input').forEach(inp=>{
@@ -873,14 +1216,8 @@ function renderCarrito(){
       renderCarrito();
     });
   });
-  // Cambiar la lista de precios de UNA sola línea del carrito — independiente del selector "Lista de
-  // precios del ticket" de arriba; value="" vuelve a seguir esa lista del ticket.
-  body.querySelectorAll('.linea-lista').forEach(sel=>{
-    sel.addEventListener('change', ()=>{
-      const i = Number(sel.dataset.idx);
-      state.carrito[i].listaPrecioId = sel.value || null;
-      renderCarrito();
-    });
+  body.querySelectorAll('.editar-linea').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirEditarLinea(Number(btn.dataset.idx)));
   });
   body.querySelectorAll('.quitar').forEach(btn=>{
     btn.addEventListener('click', ()=>{ state.carrito.splice(Number(btn.dataset.idx),1); renderCarrito(); });
@@ -1226,7 +1563,7 @@ function calcularTotales(){
   let subtotal = 0;
   const desglose = {}; // { impuesto_id: {nombre, tasa, monto} }
   for(const l of state.carrito){
-    const lineaBase = redondear2(l.precio * l.cantidad);
+    const lineaBase = redondear2(precioBaseEfectivo(l) * l.cantidad);
     subtotal += lineaBase;
     (l.impuestos||[]).forEach(imp=>{
       const monto = redondear2(lineaBase * (imp.tasa||0));
@@ -1292,7 +1629,7 @@ function recalcularTotales(){
   const faltaAuth = faltaAutorizacion();
   const sinPrecio = hayLineaSinPrecio();
   $('pago-aviso').textContent = sinPrecio
-    ? 'Hay un artículo sin precio en la lista elegida — cámbiale la lista (columna "Lista" del carrito) o quítalo para poder cobrar.'
+    ? 'Hay un artículo sin precio en la lista elegida — cambia la lista de precios del ticket, o de ese artículo con el ícono ✎, o quítalo para poder cobrar.'
     : (faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '');
   $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth || sinPrecio;
   $('btn-agregar-pago').disabled = (pagado >= total - 0.001 && total > 0) || formasDisponiblesNuevaLinea().length===0;
@@ -1370,24 +1707,74 @@ function renderPagos(){
 }
 
 // ---------- COBRAR ----------
+// precio_unitario/descuento_unitario que se guardan en venta_detalle para una línea: si tiene precio
+// manual, se guarda ese precio directo con descuento 0 (no es un "descuento", es otro precio, ej.
+// mercancía dañada); si tiene un % o monto fijo de descuento, se guarda el precio DE LISTA en
+// precio_unitario y el descuento por unidad aparte en descuento_unitario — así registrar_venta calcula
+// los impuestos sobre el precio ya neto (ver su v_base_linea), y el precio de lista original queda
+// trazable en la base de datos para la bitácora/reportes futuros.
+function datosGuardadoLinea(l){
+  if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== ''){
+    return { precio_unitario: redondear2(Number(l.precioManual)||0), descuento_unitario: 0 };
+  }
+  const precioLista = Number(l.precio) || 0;
+  let descuentoUnitario = 0;
+  if(l.descuentoTipo === 'porcentaje'){
+    // Se topa a 100% por seguridad (nunca un descuento_unitario mayor al precio de lista),
+    // aunque la validación normal ya evita capturar más de 100% al aplicar el descuento.
+    descuentoUnitario = Math.min(redondear2(precioLista * (Number(l.descuentoValor)||0) / 100), precioLista);
+  } else if(l.descuentoTipo === 'fijo'){
+    descuentoUnitario = Math.min(redondear2(Number(l.descuentoValor)||0), precioLista);
+  }
+  return { precio_unitario: precioLista, descuento_unitario: descuentoUnitario };
+}
+
+// Resume, para la bitácora de auditoría, todos los cambios de lista de precio/descuento/precio
+// manual que trae esta venta y quién los autorizó (null = el propio usuario ya tenía el privilegio,
+// no requirió PIN de supervisor). Se guarda UN renglón en "auditoria" por venta (no uno por cambio),
+// ligado a la venta ya registrada — si el cajero abandona la venta sin cobrar, no hay nada que auditar.
+function resumenCambiosVenta(){
+  const cambios = [];
+  if(state.listaPrecioAutorizadaPor){
+    cambios.push({ tipo: 'lista_precio_ticket', lista: nombreLista(state.listaPrecioId), autorizado_por: state.listaPrecioAutorizadaPor });
+  }
+  state.carrito.forEach(l=>{
+    if(l.listaPrecioId){
+      cambios.push({ tipo: 'lista_precio_linea', articulo: l.nombre, lista: nombreLista(l.listaPrecioId), autorizado_por: l.autorizaciones.listaPrecio });
+    }
+    if(l.descuentoTipo){
+      cambios.push({ tipo: 'descuento_linea', articulo: l.nombre, forma: l.descuentoTipo, valor: Number(l.descuentoValor)||0, autorizado_por: l.autorizaciones.descuento });
+    }
+    if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== ''){
+      cambios.push({ tipo: 'precio_manual', articulo: l.nombre, precio: Number(l.precioManual), precio_lista: l.precio, autorizado_por: l.autorizaciones.precioManual });
+    }
+  });
+  return cambios;
+}
+
 $('btn-cobrar').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
   $('btn-cobrar').disabled = true;
   const { subtotal, impuesto, desglose, total } = calcularTotales();
 
+  // Cada línea manda su propio arreglo de impuestos (0 a N), tal como estén configurados
+  // para ese producto en el catálogo — nunca un solo impuesto fijo por línea.
+  const payloadDetalle = state.carrito.map(l=>{
+    const { precio_unitario, descuento_unitario } = datosGuardadoLinea(l);
+    return {
+      variante_id: l.varianteId, codigo_escaneado: l.codigo, cantidad: l.cantidad,
+      precio_unitario, descuento_unitario,
+      impuestos: (l.impuestos||[]).map(i=>({ impuesto_id: i.impuestoId, tasa: i.tasa })),
+    };
+  });
+  const descuentoTotalVenta = redondear2(state.carrito.reduce((s,l,i)=>s + payloadDetalle[i].descuento_unitario * l.cantidad, 0));
+
   const payloadVenta = {
     empresa_id: state.empresaId, sucursal_id: state.sucursalId, caja_id: state.cajaId,
     sesion_caja_id: state.sesionCaja.id, cliente_id: state.clienteId, usuario_id: state.usuario.id,
     lista_precio_id: state.listaPrecioId, periodo_operacion_id: state.periodoOperacionId,
-    tipo_venta: 'contado', subtotal, descuento_total: 0, impuesto_total: impuesto, total,
+    tipo_venta: 'contado', subtotal, descuento_total: descuentoTotalVenta, impuesto_total: impuesto, total,
   };
-  // Cada línea manda su propio arreglo de impuestos (0 a N), tal como estén configurados
-  // para ese producto en el catálogo — nunca un solo impuesto fijo por línea.
-  const payloadDetalle = state.carrito.map(l=>({
-    variante_id: l.varianteId, codigo_escaneado: l.codigo, cantidad: l.cantidad,
-    precio_unitario: l.precio, descuento_unitario: 0,
-    impuestos: (l.impuestos||[]).map(i=>({ impuesto_id: i.impuestoId, tasa: i.tasa })),
-  }));
   const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
 
   const { data: ventaId, error } = await sb.rpc('registrar_venta', {
@@ -1399,6 +1786,17 @@ $('btn-cobrar').addEventListener('click', async ()=>{
     $('btn-cobrar').disabled = false;
     return;
   }
+
+  const cambios = resumenCambiosVenta();
+  if(cambios.length){
+    try{
+      await sb.from('auditoria').insert({
+        empresa_id: state.empresaId, usuario_id: state.usuario.id, tabla: 'ventas',
+        registro_id: ventaId, accion: 'editar', datos_nuevos: { cambios },
+      });
+    } catch(err){ console.error('No se pudo registrar la bitácora de auditoría de esta venta (la venta sí se registró):', err); }
+  }
+
   mostrarTicket(ventaId, payloadVenta, desglose);
   await cargarCatalogo(); // refrescar stock
 });
@@ -1446,6 +1844,12 @@ $('ticket-imprimir').addEventListener('click', ()=> window.print());
 function reiniciarVenta(){
   state.carrito = [];
   state.pagos = [];
+  // Las autorizaciones de supervisor A NIVEL TICKET (lista de precio, descuento a toda la venta)
+  // solo valen para la venta que se acaba de cobrar — la siguiente venta vuelve a pedirlas si el
+  // cajero no tiene el privilegio, aunque el mismo supervisor las haya dado hace un momento.
+  state.listaPrecioAutorizadaPor = null;
+  state.descuentoTicketAutorizadoPor = null;
+  actualizarBloqueosPermisos();
   renderCarrito();
   renderPagos();
   $('buscar-input').value='';
