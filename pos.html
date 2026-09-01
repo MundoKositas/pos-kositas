@@ -310,7 +310,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.002';
+const APP_VERSION = '1.2.004';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -796,6 +796,20 @@ function redondear2(n){
   return Math.round((Number(n)||0) * 100) / 100;
 }
 
+// Traduce un error de Supabase/Postgres a un mensaje que Adrián pueda entender y accionar. En
+// particular, "permission denied for function..." (typeado de RLS, ej. tiene_acceso_empresa) casi
+// siempre significa que la sesión ya expiró — el navegador siguió mandando peticiones pero
+// Supabase ya las trata como si no hubiera nadie conectado (rol "anon"), lo cual choca con las
+// políticas de seguridad de las tablas y sale como un error de Postgres, no como un aviso de
+// sesión vencida. Sin esto, ese mensaje crudo no le dice nada a quien está usando el POS.
+function mensajeErrorAmigable(err){
+  const msg = (err && err.message) || String(err);
+  if(/permission denied|JWT|expired|not authenticated/i.test(msg)){
+    return 'Tu sesión pudo haber expirado. Da clic en "Salir" (arriba a la derecha) y vuelve a entrar, e intenta generar el reporte de nuevo.';
+  }
+  return msg;
+}
+
 // ---------- REPORTES DE VENTAS (cierre de caja y pestaña Reportes) ----------
 // Mismo patrón que admin.html: agrupa Categoría → Línea con subtotal en cada nivel y total general.
 function agruparPorCategoriaLinea(filas){
@@ -910,9 +924,18 @@ async function logoComoDataUrl(){
     });
   } catch(err){ return null; }
 }
+// Dibuja una línea delgada debajo de un renglón de encabezado de columnas (usarse en didDrawCell
+// de doc.autoTable, cuando data.section==='head') — reemplaza el fondo de color que antes
+// distinguía el encabezado, para que ningún reporte lleve sombreado al imprimirse.
+function dibujarLineaEncabezado(doc, cell){
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.4);
+  doc.line(cell.x, cell.y + cell.height, cell.x + cell.width, cell.y + cell.height);
+}
 // Agrega al doc de jsPDF (ya creado) la tabla agrupada de productos — pensado para impresión: SIN
-// sombreados/fondos de color en el cuerpo, renglones de Categoría/Línea en negritas con una línea
-// delgada, subtotales/total en negritas de letra únicamente, y renglones 'espacio' en blanco.
+// sombreados/fondos de color en el cuerpo NI en el encabezado de columnas (que ahora lleva una
+// línea debajo en vez de fondo), renglones de Categoría/Línea en negritas con recuadro delgado,
+// subtotales/total en negritas de letra únicamente, y renglones 'espacio' en blanco.
 // Regresa la posición Y final de la tabla.
 function agregarTablaProductosPDF(doc, startY, encabezados, filas, tipos){
   const columnasMoneda = [2, 3, 4, 5, 6]; // Precio público, Venta, Costo unitario, Costo, Utilidad (Unidades y Margen no llevan "$")
@@ -921,19 +944,34 @@ function agregarTablaProductosPDF(doc, startY, encabezados, filas, tipos){
       return [{ content: '', colSpan: encabezados.length, styles: { minCellHeight: 3, lineWidth: 0 } }];
     }
     if(tipos[i]==='grupo' || tipos[i]==='subgrupo'){
-      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', lineWidth: tipos[i]==='grupo' ? 0.35 : 0.15, lineColor: [0,0,0] } }];
+      // Sin borde automático de autoTable aquí (lineWidth:0) — el recuadro se dibuja completo a
+      // mano en didDrawCell de abajo, porque el borde automático solo pintaba 3 lados (el de
+      // abajo se perdía contra el renglón siguiente, que no tiene borde propio con este tema).
+      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', lineWidth: 0 } }];
     }
     return fila.map((v,c)=> columnasMoneda.includes(c) ? (v===''? '' : money(v)) : v);
   });
   const columnStyles = {};
   columnasMoneda.forEach(c=>{ columnStyles[c] = { halign:'right' }; });
-  columnStyles[7] = { halign:'right' };
+  columnStyles[1] = { halign:'right' }; // Unidades — numérica, sin signo de dinero
+  columnStyles[7] = { halign:'right' }; // Margen %
   doc.autoTable({
     head: [encabezados], body: cuerpo, startY,
-    styles: { fontSize: 8 }, headStyles: { fillColor: [47, 125, 79] }, columnStyles,
+    theme: 'plain', styles: { fontSize: 8 }, headStyles: { fontStyle: 'bold' }, columnStyles,
     didParseCell: (data)=>{
       const tipo = tipos[data.row.index];
       if(tipo === 'subtotal' || tipo === 'subtotalCategoria' || tipo === 'total'){ data.cell.styles.fontStyle='bold'; }
+    },
+    didDrawCell: (data)=>{
+      if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); return; }
+      // Recuadro completo (4 lados) para Categoría/Línea, dibujado a mano con doc.rect() para
+      // garantizar que el lado de abajo también se vea.
+      const tipo = tipos[data.row.index];
+      if(tipo === 'grupo' || tipo === 'subgrupo'){
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(tipo === 'grupo' ? 0.35 : 0.15);
+        doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height);
+      }
     },
   });
   return doc.lastAutoTable.finalY;
@@ -1292,9 +1330,10 @@ async function generarReportePDFCierre(r){
     ];
     doc.autoTable({
       head: [['Datos del cierre', '']], body: filasDatosCierre, startY: 28,
-      styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
+      theme: 'plain', styles: { fontSize: 9 }, headStyles: { fontStyle: 'bold' },
       columnStyles: { 1: { halign:'right' } },
       didParseCell: (data)=>{ if(data.row.index === filasDatosCierre.length-3){ data.cell.styles.fontStyle='bold'; } }, // "Diferencia"
+      didDrawCell: (data)=>{ if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); } },
     });
 
     const filasResumenVenta = [
@@ -1304,9 +1343,10 @@ async function generarReportePDFCierre(r){
     ];
     doc.autoTable({
       head: [['Resumen de venta', '']], body: filasResumenVenta, startY: doc.lastAutoTable.finalY + 8,
-      styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
+      theme: 'plain', styles: { fontSize: 9 }, headStyles: { fontStyle: 'bold' },
       columnStyles: { 1: { halign:'right' } },
       didParseCell: (data)=>{ if(data.row.index === filasResumenVenta.length-1){ data.cell.styles.fontStyle='bold'; } },
+      didDrawCell: (data)=>{ if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); } },
     });
 
     doc.addPage();
@@ -1314,8 +1354,10 @@ async function generarReportePDFCierre(r){
     doc.setFontSize(12);
     doc.text('Productos vendidos en esta sesión', 14, 16);
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`${state.sucursalNombre} · ${state.cajaNombre} · Generado: ${new Date().toLocaleString('es-MX')}`, 14, 22);
     const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
-    agregarTablaProductosPDF(doc, 22, encabezados, filas, tipos);
+    agregarTablaProductosPDF(doc, 27, encabezados, filas, tipos);
 
     const fecha = fechaLocalISO();
     doc.save(`cierre_caja_${fecha}_${(state.cajaNombre||'').replace(/[^a-zA-Z0-9]/g,'_')}.pdf`);
@@ -1392,6 +1434,27 @@ $('btn-reportes').addEventListener('click', ()=>{
 });
 $('rep-volver').addEventListener('click', ()=>{ mostrarPantalla('pantalla-pos'); });
 
+// Texto legible de los filtros de categoría/línea activos en la pestaña Reportes (ej. "Categoría:
+// Botanas · Línea: Fritura"), o null si no hay ninguno — se usa para dejar constancia en el
+// encabezado de ambas secciones del reporte exportado (PDF y Excel) de qué filtro se aplicó,
+// porque el resumen de impuestos/venta (sección 1) NUNCA se filtra aunque haya categoría/línea
+// elegida, y sin esta nota no queda claro por qué el listado de productos (sección 2) trae menos
+// artículos que el total de la sección 1.
+function textoFiltroReporte(){
+  const catId = $('rep-filtro-categoria').value;
+  const linId = $('rep-filtro-linea').value;
+  const partes = [];
+  if(catId){
+    const cat = state.categorias.find(c=>c.id===catId);
+    if(cat) partes.push(`Categoría: ${cat.nombre}`);
+  }
+  if(linId){
+    const lin = state.lineas.find(l=>l.id===linId);
+    if(lin) partes.push(`Línea: ${lin.nombre}`);
+  }
+  return partes.length ? partes.join(' · ') : null;
+}
+
 // El resumen (venta sin impuestos + desglose de impuestos + total general) SIEMPRE se calcula sin
 // filtrar por categoría/línea — así coincide con el total real de los cortes del periodo, tal como
 // pidió Adrián. La categoría/línea elegidas solo filtran qué productos entran en la hoja/página 2.
@@ -1413,19 +1476,24 @@ function renderResumenReporteVentas(reporte){
   const impuestosHtml = (reporte.impuestos||[]).map(i=>
     `<div class="linea"><span>${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)</span><span>${money(i.monto)}</span></div>`
   ).join('');
+  const filtroTexto = textoFiltroReporte();
   $('rep-resumen').innerHTML = `
     <div class="linea"><span>Venta total sin impuestos</span><span>${money(reporte.venta_sin_impuestos)}</span></div>
     ${impuestosHtml}
     <div class="linea total-final"><span>Total general</span><span>${money(reporte.total_general)}</span></div>
+    ${filtroTexto ? `<p class="nota" style="margin-top:10px;">Este resumen es del periodo completo, SIN el filtro (${filtroTexto}) — para que cuadre con los cortes de caja reales. El filtro solo aplica al listado de productos de abajo.</p>` : ''}
     <p class="nota" style="margin-top:10px;">${(reporte.productos||[]).length} producto${(reporte.productos||[]).length===1?'':'s'} distinto${(reporte.productos||[]).length===1?'':'s'} en el listado filtrado — el detalle completo, agrupado por categoría y línea con subtotales, va en el archivo exportado.</p>
   `;
 }
 async function exportarReporteVentasPDF(reporte){
   const desde = $('rep-fecha-desde').value, hasta = $('rep-fecha-hasta').value;
+  const generado = new Date().toLocaleString('es-MX');
+  const filtroTexto = textoFiltroReporte();
   const logoDataUrl = await logoComoDataUrl();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait' });
   const margenTexto = logoDataUrl ? 34 : 14;
+  const anchoUtil = doc.internal.pageSize.getWidth() - margenTexto - 14;
   if(logoDataUrl){
     try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si falla, sin interrumpir la exportación */ }
   }
@@ -1434,36 +1502,63 @@ async function exportarReporteVentasPDF(reporte){
   doc.text(`Reporte de ventas — ${state.empresaNombre || ''}`, margenTexto, 16);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(`Del ${desde} al ${hasta} — Generado: ${new Date().toLocaleString('es-MX')}`, margenTexto, 22);
+  doc.text(`Del ${desde} al ${hasta} — Generado: ${generado}`, margenTexto, 22);
+  // Nota de filtro en la sección 1 (Resumen): el resumen de abajo SIEMPRE es del periodo completo,
+  // sin el filtro de categoría/línea (para que cuadre con los cortes de caja) — si hay un filtro
+  // activo, se deja constancia aquí de que existe y de que solo aplica a la sección 2 (productos).
+  let y = 22;
+  if(filtroTexto){
+    y += 5;
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    const lineasNota = doc.splitTextToSize(
+      `Nota: este resumen es del periodo completo, SIN el filtro (${filtroTexto}) — es el total real, para que cuadre con los cortes de caja. El filtro solo aplica al listado de productos de la página 2.`,
+      anchoUtil
+    );
+    doc.text(lineasNota, margenTexto, y);
+    y += lineasNota.length * 3.5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+  }
   doc.setLineWidth(0.6); // línea marcada bajo el título
-  doc.line(14, 25, doc.internal.pageSize.getWidth() - 14, 25);
+  doc.line(14, y + 3, doc.internal.pageSize.getWidth() - 14, y + 3);
   const filasResumen = [
     ['Venta total sin impuestos', money(reporte.venta_sin_impuestos)],
     ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, money(i.monto)]),
     ['TOTAL GENERAL', money(reporte.total_general)],
   ];
   doc.autoTable({
-    head: [['Resumen de venta acumulado', '']], body: filasResumen, startY: 28,
-    styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
+    head: [['Resumen de venta acumulado', '']], body: filasResumen, startY: y + 6,
+    theme: 'plain', styles: { fontSize: 9 }, headStyles: { fontStyle: 'bold' },
     columnStyles: { 1: { halign:'right' } },
     didParseCell: (data)=>{ if(data.row.index === filasResumen.length-1){ data.cell.styles.fontStyle='bold'; } },
+    didDrawCell: (data)=>{ if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); } },
   });
   doc.addPage();
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.text('Productos vendidos en el periodo filtrado', 14, 16);
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Del ${desde} al ${hasta} — Generado: ${generado}`, 14, 22);
+  doc.text(`Filtros: ${filtroTexto || 'ninguno (todas las categorías y líneas)'}`, 14, 27);
   const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
-  agregarTablaProductosPDF(doc, 22, encabezados, filas, tipos);
+  agregarTablaProductosPDF(doc, 32, encabezados, filas, tipos);
   doc.save(`reporte_ventas_${desde}_a_${hasta}.pdf`);
 }
 function exportarReporteVentasExcel(reporte){
   const desde = $('rep-fecha-desde').value, hasta = $('rep-fecha-hasta').value;
+  const filtroTexto = textoFiltroReporte();
   const wb = XLSX.utils.book_new();
 
+  // "Filtro" queda documentado aquí para que quede claro que el resumen de abajo NO lo aplica —
+  // es del periodo completo, para cuadrar con los cortes de caja. Solo la hoja "Productos vendidos"
+  // sí lo aplica.
   const filasResumen = [
     ['Reporte de ventas', state.empresaNombre || ''],
     ['Periodo', `${desde} a ${hasta}`],
+    ['Generado', new Date().toLocaleString('es-MX')],
+    ['Filtro (NO aplica a este resumen, solo a la hoja "Productos vendidos")', filtroTexto || 'Ninguno'],
     [],
     ['Venta total sin impuestos', Number(reporte.venta_sin_impuestos)||0],
     ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, Number(i.monto)||0]),
@@ -1471,24 +1566,32 @@ function exportarReporteVentasExcel(reporte){
   ];
   const wsResumen = XLSX.utils.aoa_to_sheet(filasResumen);
   const rangoR = XLSX.utils.decode_range(wsResumen['!ref']);
-  for(let f=3; f<=rangoR.e.r; f++){
+  for(let f=5; f<=rangoR.e.r; f++){
     const celda = wsResumen[XLSX.utils.encode_cell({r:f, c:1})];
     if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
   }
   XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
 
   const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
-  const wsProd = XLSX.utils.aoa_to_sheet([encabezados, ...filas]);
+  const filasEncabezadoProd = [
+    ['Productos vendidos en el periodo filtrado'],
+    [`Del ${desde} al ${hasta}`, `Generado: ${new Date().toLocaleString('es-MX')}`],
+    [`Filtros: ${filtroTexto || 'ninguno (todas las categorías y líneas)'}`],
+    [],
+  ];
+  const offset = filasEncabezadoProd.length; // renglones antes del encabezado real de columnas
+  const wsProd = XLSX.utils.aoa_to_sheet([...filasEncabezadoProd, encabezados, ...filas]);
   wsProd['!merges'] = wsProd['!merges'] || [];
+  for(let r=0; r<3; r++){ wsProd['!merges'].push({ s:{r, c:0}, e:{r, c:encabezados.length-1} }); }
   tipos.forEach((tipo, i)=>{
-    const fila = i + 1;
+    const fila = i + offset + 1; // +1 por el encabezado real de columnas (Artículo, Unidades, etc.)
     if(tipo==='grupo' || tipo==='subgrupo'){
       wsProd['!merges'].push({ s:{r:fila, c:0}, e:{r:fila, c:encabezados.length-1} });
     }
   });
   const columnasMoneda = [2, 3, 4, 5, 6]; // Precio público, Venta, Costo unitario, Costo, Utilidad
   const rangoP = XLSX.utils.decode_range(wsProd['!ref']);
-  for(let f=1; f<=rangoP.e.r; f++){
+  for(let f=offset+1; f<=rangoP.e.r; f++){
     columnasMoneda.forEach(c=>{
       const celda = wsProd[XLSX.utils.encode_cell({r:f, c})];
       if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
@@ -1509,7 +1612,7 @@ $('rep-generar').addEventListener('click', async ()=>{
     else exportarReporteVentasExcel(reporte);
   } catch(err){
     $('rep-resumen').innerHTML = '';
-    $('rep-error').innerHTML = `<div class="msg-error">${err.message||err}</div>`;
+    $('rep-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(err)}</div>`;
   }
 });
 

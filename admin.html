@@ -449,7 +449,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.6.002';
+const APP_VERSION = '1.6.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1089,7 +1089,18 @@ function exportarExcelAgrupado(nombreArchivo, hojaNombre, encabezados, filas, ti
 // cuerpo (solo la franja del encabezado de columnas los conserva), título en negritas con una línea
 // marcada debajo, renglones de Categoría/Línea en negritas con una línea más delgada, y subtotales/
 // total en negritas de letra únicamente. Renglones tipo 'espacio' quedan en blanco (aire entre grupos).
-async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados, filas, tipos, columnasMoneda){
+// Dibuja una línea delgada debajo de un renglón de encabezado de columnas (usarse en didDrawCell
+// de doc.autoTable, cuando data.section==='head') — reemplaza el fondo de color que antes
+// distinguía el encabezado, para que ningún reporte lleve sombreado al imprimirse.
+function dibujarLineaEncabezado(doc, cell){
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.4);
+  doc.line(cell.x, cell.y + cell.height, cell.x + cell.width, cell.y + cell.height);
+}
+// columnasDerecha (opcional): además de columnasMoneda (que también controla el formato $), qué
+// columnas alinear a la derecha — para que columnas numéricas SIN signo de dinero (ej. Stock,
+// Cantidad) también queden alineadas a la derecha. Si no se manda, usa columnasMoneda.
+async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados, filas, tipos, columnasMoneda, columnasDerecha){
   const logoDataUrl = await logoComoDataUrl();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: encabezados.length > 5 ? 'landscape' : 'portrait' });
@@ -1111,20 +1122,33 @@ async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados
       return [{ content: '', colSpan: encabezados.length, styles: { minCellHeight: 3, lineWidth: 0 } }];
     }
     if(tipos[i]==='grupo' || tipos[i]==='subgrupo'){
-      // Categoría (grupo) con línea ligeramente más marcada que Línea (subgrupo), ambas más
-      // delgadas que la del título — sin fondo de color.
-      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', lineWidth: tipos[i]==='grupo' ? 0.35 : 0.15, lineColor: [0,0,0] } }];
+      // Sin borde automático de autoTable aquí (lineWidth:0) — el recuadro se dibuja completo a
+      // mano en didDrawCell de abajo, porque el borde automático solo pintaba 3 lados (el de
+      // abajo se perdía contra el renglón siguiente, que no tiene borde propio con este tema).
+      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', lineWidth: 0 } }];
     }
     return fila.map((v,c)=> columnasMoneda.includes(c) ? (v===''? '' : money(v)) : v);
   });
   const columnStyles = {};
-  columnasMoneda.forEach(c=>{ columnStyles[c] = { halign:'right' }; });
+  (columnasDerecha || columnasMoneda).forEach(c=>{ columnStyles[c] = { halign:'right' }; });
   doc.autoTable({
     head: [encabezados], body: cuerpo, startY: 28,
-    styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
+    theme: 'plain', styles: { fontSize: 8 }, headStyles: { fontStyle: 'bold' }, columnStyles,
     didParseCell: (data)=>{
       const tipo = tipos[data.row.index];
       if(tipo === 'subtotal' || tipo === 'subtotalCategoria' || tipo === 'total'){ data.cell.styles.fontStyle='bold'; }
+    },
+    didDrawCell: (data)=>{
+      if(data.section === 'head'){ dibujarLineaEncabezado(doc, data.cell); return; }
+      // Recuadro completo (4 lados) para Categoría/Línea, dibujado a mano con doc.rect() para
+      // garantizar que el lado de abajo también se vea — Categoría con línea un poco más marcada
+      // que Línea, ambas más delgadas que la del título.
+      const tipo = tipos[data.row.index];
+      if(tipo === 'grupo' || tipo === 'subgrupo'){
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(tipo === 'grupo' ? 0.35 : 0.15);
+        doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height);
+      }
     },
   });
   doc.save(nombreArchivo);
@@ -1175,7 +1199,7 @@ $('cat-exportar-existencias').addEventListener('click', async ()=>{
       `reporte_existencias_${fecha}.pdf`,
       `Reporte de existencias — ${state.empresaNombre || ''}`,
       `Generado: ${new Date().toLocaleString('es-MX')} — Costos y precios ${conImpuestos?'con':'sin'} impuestos`,
-      encabezados, filas, tipos, [3, 4, 5]
+      encabezados, filas, tipos, [3, 4, 5], [2, 3, 4, 5]
     );
   } else {
     exportarExcelAgrupado(`reporte_existencias_${fecha}.xlsx`, 'Existencias', encabezados, filas, tipos, [3, 4, 5]);
@@ -1234,7 +1258,7 @@ $('cat-exportar-resurtido').addEventListener('click', async ()=>{
       `reporte_resurtido_${fecha}.pdf`,
       `Reporte de resurtido — ${state.empresaNombre || ''}`,
       `Generado: ${new Date().toLocaleString('es-MX')} — Costo ${conImpuestos?'con':'sin'} impuestos`,
-      encabezados, filas, tipos, [4, 6, 8]
+      encabezados, filas, tipos, [4, 6, 8], [2, 3, 4, 5, 6, 7, 8]
     );
   } else {
     exportarExcelAgrupado(`reporte_resurtido_${fecha}.xlsx`, 'Resurtido', encabezados, filas, tipos, [4, 6, 8]);
