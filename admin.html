@@ -142,13 +142,18 @@
             <label>Línea de artículo</label>
             <select id="cat-filtro-linea"><option value="">Todas</option></select>
           </div>
+          <div class="col" style="min-width:170px;justify-content:flex-end;">
+            <label style="display:inline-flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="cat-con-impuestos" style="width:auto;"> Costos y precios con impuestos
+            </label>
+          </div>
         </div>
         <button class="btn-primario" id="btn-nuevo-producto">+ Nuevo producto</button>
       </div>
       <div class="tabla-scroll" style="margin-top:14px;">
         <table>
           <thead><tr>
-            <th>Producto</th><th>Marca</th><th class="num">Costo</th><th class="num">Precio público</th>
+            <th>Producto</th><th>Marca</th><th class="num" id="cat-th-costo">Costo</th><th class="num" id="cat-th-precio">Precio público</th>
             <th class="num">Stock</th><th class="num">Mín./Máx.</th><th>Impuestos</th><th>Estado</th>
           </tr></thead>
           <tbody id="cat-tabla-body"></tbody>
@@ -167,6 +172,15 @@
           <button type="button" class="btn-gris" id="cat-pagina-anterior">‹ Anterior</button>
           <button type="button" class="btn-gris" id="cat-pagina-siguiente">Siguiente ›</button>
         </div>
+      </div>
+      <div class="fila" style="justify-content:flex-end;align-items:center;gap:8px;margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;">
+        <p class="nota" style="margin:0 auto 0 0;">Reportes de los productos filtrados arriba (respetan la búsqueda, categoría y línea activos):</p>
+        <select id="cat-formato-exportar" style="width:auto;">
+          <option value="excel">Excel</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button type="button" class="btn-gris" id="cat-exportar-existencias">Reporte de existencias</button>
+        <button type="button" class="btn-gris" id="cat-exportar-resurtido">Reporte de resurtido</button>
       </div>
     </div>
   </div>
@@ -435,7 +449,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.5.004';
+const APP_VERSION = '1.6.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -895,15 +909,23 @@ async function cargarProductos(){
 }
 $('cat-buscar').addEventListener('input', ()=>{ state.catalogoPagina = 1; renderCatalogo(); });
 
-// Paginación: pensada para un inventario de miles de productos — el Catálogo completo (filtrado)
-// solo se usa para armar el orden de Anterior/Siguiente de la ficha de producto (state.catalogoOrden);
-// lo que se pinta en la tabla es solo la página actual, tamaño elegible (25/50/100, default 50).
-function renderCatalogo(){
+// Lista de precio "Público general" — se usa en el Catálogo, en ambos reportes nuevos (existencias
+// y resurtido) y en la exportación del Reporte de precios legado, siempre con la misma detección.
+function obtenerListaPublica(){
+  return state.listasPrecio.find(l=>/p[uú]blico/i.test(l.nombre));
+}
+// Tasa total de impuestos de un producto (suma de todos los que tenga asociados) — usada para
+// calcular costo/precio "con impuestos" de forma consistente en Catálogo y en los reportes.
+function tasaTotalProducto(p){
+  return (p.impuestos||[]).reduce((s,i)=>s+i.tasa, 0);
+}
+// Filtro compartido del Catálogo (buscador + categoría + línea) — usado tanto para pintar la tabla
+// en pantalla como para generar los reportes de existencias/resurtido, así siempre coinciden.
+function itemsFiltradosCatalogo(){
   const filtro = $('cat-buscar').value.trim().toLowerCase();
   const filtroCategoria = $('cat-filtro-categoria').value;
   const filtroLinea = $('cat-filtro-linea').value;
-  const listaPublica = state.listasPrecio.find(l=>l.nombre.toLowerCase().includes('público') || l.nombre.toLowerCase().includes('publico'));
-  const items = state.productos.filter(p=>{
+  return state.productos.filter(p=>{
     if(filtro){
       const codigosTxt = p.codigos.map(c=>c.codigo).join(' ').toLowerCase();
       if(!(p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || codigosTxt.includes(filtro))) return false;
@@ -916,6 +938,18 @@ function renderCatalogo(){
     }
     return true;
   }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+}
+$('cat-con-impuestos').addEventListener('change', renderCatalogo);
+
+// Paginación: pensada para un inventario de miles de productos — el Catálogo completo (filtrado)
+// solo se usa para armar el orden de Anterior/Siguiente de la ficha de producto (state.catalogoOrden);
+// lo que se pinta en la tabla es solo la página actual, tamaño elegible (25/50/100, default 50).
+function renderCatalogo(){
+  const listaPublica = obtenerListaPublica();
+  const conImpuestos = $('cat-con-impuestos').checked;
+  $('cat-th-costo').textContent = conImpuestos ? 'Costo (con imp.)' : 'Costo (sin imp.)';
+  $('cat-th-precio').textContent = conImpuestos ? 'Precio público (con imp.)' : 'Precio público (sin imp.)';
+  const items = itemsFiltradosCatalogo();
 
   state.catalogoOrden = items.map(p=>p.varianteId); // para Anterior/Siguiente en el modal de producto (sobre TODO lo filtrado, no solo la página)
 
@@ -934,6 +968,9 @@ function renderCatalogo(){
   $('cat-vacio').style.display = items.length ? 'none' : 'block';
   $('cat-tabla-body').innerHTML = pagina.map(p=>{
     const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id) : null;
+    const tasaProducto = tasaTotalProducto(p);
+    const costoMostrado = p.costo!=null ? (conImpuestos ? redondear2(p.costo*(1+tasaProducto)) : p.costo) : null;
+    const precioMostrado = precioPub ? (conImpuestos ? redondear2(precioPub.precio*(1+tasaProducto)) : precioPub.precio) : null;
     const bajoMinimo = p.inventariable && Number(p.stock) <= Number(p.minimo) && Number(p.maximo) > 0;
     const estadoTag = !p.activo ? '<span class="tag tag-off">Inactivo</span>' : (bajoMinimo ? '<span class="tag tag-bajo">Bajo mínimo</span>' : '<span class="tag tag-ok">Activo</span>');
     const impuestosTxt = p.impuestos.map(i=>i.nombre).join(', ') || '—';
@@ -941,8 +978,8 @@ function renderCatalogo(){
     return `<tr class="fila-clic" data-variante="${p.varianteId}">
       <td>${nombreCelda}</td>
       <td>${p.marca||'—'}</td>
-      <td class="num">${p.costo!=null ? money(p.costo) : '—'}</td>
-      <td class="num">${precioPub ? money(precioPub.precio) : '—'}</td>
+      <td class="num">${costoMostrado!=null ? money(costoMostrado) : '—'}</td>
+      <td class="num">${precioMostrado!=null ? money(precioMostrado) : '—'}</td>
       <td class="num">${p.inventariable ? p.stock : '—'}</td>
       <td class="num">${p.inventariable ? `${p.minimo} / ${p.maximo}` : '—'}</td>
       <td>${impuestosTxt}</td>
@@ -953,6 +990,217 @@ function renderCatalogo(){
     tr.addEventListener('click', ()=>abrirProducto(tr.dataset.variante));
   });
 }
+
+// ---------- REPORTES AGRUPADOS (Categoría → Línea, con subtotales) ----------
+// Reutilizado por el reporte de existencias y el de resurtido — agrupa una lista de filas ya
+// calculadas (cada una con categoriaNombre/lineaNombre) en Categoría → Línea → filas, alfabético.
+function agruparPorCategoriaLinea(filas){
+  const porCategoria = {};
+  filas.forEach(f=>{
+    const cat = f.categoriaNombre || 'Sin categoría';
+    const lin = f.lineaNombre || 'Sin línea';
+    if(!porCategoria[cat]) porCategoria[cat] = {};
+    if(!porCategoria[cat][lin]) porCategoria[cat][lin] = [];
+    porCategoria[cat][lin].push(f);
+  });
+  return Object.keys(porCategoria).sort((a,b)=>a.localeCompare(b)).map(cat=>({
+    categoria: cat,
+    lineas: Object.keys(porCategoria[cat]).sort((a,b)=>a.localeCompare(b)).map(lin=>({
+      linea: lin, filas: porCategoria[cat][lin],
+    })),
+  }));
+}
+// Arma las filas finales (incluyendo renglones de "Categoría:", "Subtotal línea:", "Subtotal
+// categoría:" y "TOTAL GENERAL") a partir de los grupos de agruparPorCategoriaLinea(). filaProducto(f)
+// regresa el arreglo de celdas de una fila de producto (numCols celdas, col 0 = texto); columnasSuma
+// son los índices (>=1) de las columnas numéricas que se acumulan para subtotales/total. Regresa
+// {filas, tipos} — tipos[i] describe cada fila para que el exportador la formatee (colores/negritas).
+function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols){
+  const filas = []; const tipos = [];
+  const totalGeneral = new Array(numCols-1).fill(0);
+  grupos.forEach(g=>{
+    filas.push([`Categoría: ${g.categoria}`, ...new Array(numCols-1).fill('')]); tipos.push('grupo');
+    const subtotalCategoria = new Array(numCols-1).fill(0);
+    g.lineas.forEach(l=>{
+      filas.push([`Línea: ${l.linea}`, ...new Array(numCols-1).fill('')]); tipos.push('subgrupo');
+      const subtotalLinea = new Array(numCols-1).fill(0);
+      l.filas.forEach(f=>{
+        const fila = filaProducto(f);
+        filas.push(fila); tipos.push('producto');
+        columnasSuma.forEach(i=>{ subtotalLinea[i-1] += Number(fila[i])||0; });
+      });
+      const filaSub = new Array(numCols).fill('');
+      filaSub[0] = `Subtotal línea "${l.linea}"`;
+      columnasSuma.forEach(i=>{ filaSub[i] = redondear2(subtotalLinea[i-1]); subtotalCategoria[i-1] += subtotalLinea[i-1]; });
+      filas.push(filaSub); tipos.push('subtotal');
+    });
+    const filaSubCat = new Array(numCols).fill('');
+    filaSubCat[0] = `Subtotal categoría "${g.categoria}"`;
+    columnasSuma.forEach(i=>{ filaSubCat[i] = redondear2(subtotalCategoria[i-1]); totalGeneral[i-1] += subtotalCategoria[i-1]; });
+    filas.push(filaSubCat); tipos.push('subtotalCategoria');
+  });
+  const filaTotal = new Array(numCols).fill('');
+  filaTotal[0] = 'TOTAL GENERAL';
+  columnasSuma.forEach(i=>{ filaTotal[i] = redondear2(totalGeneral[i-1]); });
+  filas.push(filaTotal); tipos.push('total');
+  return { filas, tipos };
+}
+// Exporta a Excel una tabla agrupada — igual que el Reporte de precios, los números se escriben como
+// valor numérico real (con formato de moneda .z) para que Excel los alinee a la derecha solo, y las
+// filas de grupo/subtotal se combinan en una sola celda de texto (merge) para que se lean como título.
+function exportarExcelAgrupado(nombreArchivo, hojaNombre, encabezados, filas, tipos, columnasMoneda){
+  const datos = [encabezados, ...filas];
+  const ws = XLSX.utils.aoa_to_sheet(datos);
+  ws['!merges'] = ws['!merges'] || [];
+  tipos.forEach((tipo, i)=>{
+    const fila = i + 1; // +1 por la fila de encabezados
+    if(tipo==='grupo' || tipo==='subgrupo'){
+      ws['!merges'].push({ s:{r:fila, c:0}, e:{r:fila, c:encabezados.length-1} });
+    }
+  });
+  const rango = XLSX.utils.decode_range(ws['!ref']);
+  for(let f=1; f<=rango.e.r; f++){
+    columnasMoneda.forEach(c=>{
+      const celda = ws[XLSX.utils.encode_cell({r:f, c})];
+      if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
+    });
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, hojaNombre);
+  XLSX.writeFile(wb, nombreArchivo);
+}
+// Exporta a PDF una tabla agrupada — filas de grupo con colSpan a todo el ancho, subtotales/total
+// resaltados con negritas y fondo gris, columnas de dinero formateadas y alineadas a la derecha.
+async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados, filas, tipos, columnasMoneda){
+  const logoDataUrl = await logoComoDataUrl();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: encabezados.length > 5 ? 'landscape' : 'portrait' });
+  const margenTexto = logoDataUrl ? 34 : 14;
+  if(logoDataUrl){
+    try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si el formato falla, sin interrumpir la exportación */ }
+  }
+  doc.setFontSize(14);
+  doc.text(titulo, margenTexto, 16);
+  doc.setFontSize(10);
+  doc.text(subtitulo, margenTexto, 22);
+  const cuerpo = filas.map((fila, i)=>{
+    if(tipos[i]==='grupo' || tipos[i]==='subgrupo'){
+      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', fillColor: tipos[i]==='grupo' ? [211,225,244] : [232,238,247] } }];
+    }
+    return fila.map((v,c)=> columnasMoneda.includes(c) ? (v===''? '' : money(v)) : v);
+  });
+  const columnStyles = {};
+  columnasMoneda.forEach(c=>{ columnStyles[c] = { halign:'right' }; });
+  doc.autoTable({
+    head: [encabezados], body: cuerpo, startY: 28,
+    styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
+    didParseCell: (data)=>{
+      const tipo = tipos[data.row.index];
+      if(tipo === 'subtotal'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[245,245,245]; }
+      else if(tipo === 'subtotalCategoria'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[226,226,226]; }
+      else if(tipo === 'total'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[200,213,232]; }
+    },
+  });
+  doc.save(nombreArchivo);
+}
+
+// ---------- REPORTE DE EXISTENCIAS (Catálogo) ----------
+// Todos los productos filtrados en Catálogo que tengan existencia (stock > 0), agrupados por
+// Categoría → Línea con subtotal en cada nivel y total general. Respeta el checkbox de con/sin
+// impuestos del Catálogo (mismo que se usa para pintar la tabla en pantalla).
+function datosReporteExistencias(){
+  const conImpuestos = $('cat-con-impuestos').checked;
+  const listaPublica = obtenerListaPublica();
+  const items = itemsFiltradosCatalogo().filter(p=>p.inventariable && Number(p.stock) > 0);
+  const filas = items.map(p=>{
+    const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
+    const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
+    const tasa = tasaTotalProducto(p);
+    const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id) : null;
+    const costo = p.costo!=null ? (conImpuestos ? redondear2(p.costo*(1+tasa)) : Number(p.costo)) : 0;
+    const precio = precioPub ? (conImpuestos ? redondear2(precioPub.precio*(1+tasa)) : Number(precioPub.precio)) : 0;
+    return {
+      lineaNombre: linea?.nombre, categoriaNombre: categoria?.nombre,
+      producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, marca: p.marca || '—',
+      stock: Number(p.stock), costo, precio, totalCosto: redondear2(Number(p.stock) * costo),
+    };
+  });
+  const grupos = agruparPorCategoriaLinea(filas);
+  const encabezados = ['Producto', 'Marca', 'Stock', `Costo (${conImpuestos?'con':'sin'} imp.)`, `Precio público (${conImpuestos?'con':'sin'} imp.)`, 'Total costo'];
+  // columnasSuma: Stock (2) y Total costo (5) se suman en los subtotales; Costo y Precio público
+  // (3 y 4) son valores UNITARIOS — sumarlos entre productos distintos no significa nada, se dejan
+  // vacíos en los renglones de subtotal/total (filasAgrupadasConSubtotales solo llena las que se piden aquí).
+  const { filas: filasTabla, tipos } = filasAgrupadasConSubtotales(
+    grupos,
+    f=>[f.producto, f.marca, f.stock, f.costo, f.precio, f.totalCosto],
+    [2, 5],
+    6
+  );
+  return { encabezados, filas: filasTabla, tipos, conImpuestos };
+}
+$('cat-exportar-existencias').addEventListener('click', async ()=>{
+  const { encabezados, filas, tipos, conImpuestos } = datosReporteExistencias();
+  const fecha = new Date().toISOString().slice(0,10);
+  const formato = $('cat-formato-exportar').value;
+  // columnasMoneda: solo las columnas de dinero real (Costo, Precio público, Total costo) — Stock
+  // es una cantidad, no un importe, así que no se formatea como moneda.
+  if(formato === 'pdf'){
+    await exportarPDFAgrupado(
+      `reporte_existencias_${fecha}.pdf`,
+      `Reporte de existencias — ${state.empresaNombre || ''}`,
+      `Generado: ${new Date().toLocaleString('es-MX')} — Costos y precios ${conImpuestos?'con':'sin'} impuestos`,
+      encabezados, filas, tipos, [3, 4, 5]
+    );
+  } else {
+    exportarExcelAgrupado(`reporte_existencias_${fecha}.xlsx`, 'Existencias', encabezados, filas, tipos, [3, 4, 5]);
+  }
+});
+
+// ---------- REPORTE DE RESURTIDO (Catálogo) ----------
+// Productos filtrados en Catálogo cuyo stock está en o por debajo de su punto de reorden (mismo
+// criterio que la etiqueta "Bajo mínimo" que ya se muestra en la tabla), agrupados igual que Existencias.
+function datosReporteResurtido(){
+  const conImpuestos = $('cat-con-impuestos').checked;
+  const items = itemsFiltradosCatalogo().filter(p=>p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo));
+  const filas = items.map(p=>{
+    const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
+    const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
+    const tasa = tasaTotalProducto(p);
+    const costo = p.costo!=null ? (conImpuestos ? redondear2(p.costo*(1+tasa)) : Number(p.costo)) : 0;
+    const totalResurtido = redondear2((Number(p.minimo) - Number(p.stock)) * costo);
+    return {
+      lineaNombre: linea?.nombre, categoriaNombre: categoria?.nombre,
+      producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, marca: p.marca || '—',
+      stock: Number(p.stock), puntoReorden: Number(p.minimo), costo, totalResurtido,
+    };
+  });
+  const grupos = agruparPorCategoriaLinea(filas);
+  const encabezados = ['Producto', 'Marca', 'Stock', 'Punto de reorden', `Costo (${conImpuestos?'con':'sin'} imp.)`, 'Total resurtido'];
+  // columnasSuma: Stock (2), Punto de reorden (3) y Total resurtido (5) se suman en subtotales —
+  // Costo (4) es unitario, no se suma.
+  const { filas: filasTabla, tipos } = filasAgrupadasConSubtotales(
+    grupos,
+    f=>[f.producto, f.marca, f.stock, f.puntoReorden, f.costo, f.totalResurtido],
+    [2, 3, 5],
+    6
+  );
+  return { encabezados, filas: filasTabla, tipos, conImpuestos };
+}
+$('cat-exportar-resurtido').addEventListener('click', async ()=>{
+  const { encabezados, filas, tipos, conImpuestos } = datosReporteResurtido();
+  const fecha = new Date().toISOString().slice(0,10);
+  const formato = $('cat-formato-exportar').value;
+  if(formato === 'pdf'){
+    await exportarPDFAgrupado(
+      `reporte_resurtido_${fecha}.pdf`,
+      `Reporte de resurtido — ${state.empresaNombre || ''}`,
+      `Generado: ${new Date().toLocaleString('es-MX')} — Costo ${conImpuestos?'con':'sin'} impuestos`,
+      encabezados, filas, tipos, [4, 5]
+    );
+  } else {
+    exportarExcelAgrupado(`reporte_resurtido_${fecha}.xlsx`, 'Resurtido', encabezados, filas, tipos, [4,5]);
+  }
+});
 
 // ---------- MODAL PRODUCTO ----------
 $('btn-nuevo-producto').addEventListener('click', ()=>abrirProducto(null));

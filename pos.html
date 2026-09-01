@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>POS Kositas — Punto de Venta</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --verde:#2f7d4f; --verde-osc:#245f3c; --rojo:#c0392b; --gris:#6b7280;
@@ -93,6 +96,7 @@
   <div class="acciones">
     <button class="btn-secundario" id="btn-movimiento-caja">Movimiento de caja</button>
     <button class="btn-secundario" id="btn-actualizar-catalogo">Actualizar catálogo</button>
+    <button class="btn-secundario" id="btn-reportes">Reportes</button>
     <button class="btn-peligro" id="btn-cerrar-caja">Cerrar caja</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
@@ -201,6 +205,46 @@
   </div>
 </div>
 
+<!-- REPORTES -->
+<div class="pantalla" id="pantalla-reportes">
+  <div class="fila" style="justify-content:space-between;align-items:center;">
+    <h1 style="margin:0;">Reportes</h1>
+    <button class="btn-gris" id="rep-volver">‹ Volver a vender</button>
+  </div>
+  <div class="card" style="margin-top:14px;">
+    <h2 style="margin-top:0;">Reporte de ventas</h2>
+    <div class="fila" style="flex-wrap:wrap;align-items:flex-end;">
+      <div class="col" style="min-width:150px;">
+        <label>Desde</label>
+        <input type="date" id="rep-fecha-desde">
+      </div>
+      <div class="col" style="min-width:150px;">
+        <label>Hasta</label>
+        <input type="date" id="rep-fecha-hasta">
+      </div>
+      <div class="col" style="min-width:170px;">
+        <label>Categoría</label>
+        <select id="rep-filtro-categoria"><option value="">Todas</option></select>
+      </div>
+      <div class="col" style="min-width:170px;">
+        <label>Línea de artículo</label>
+        <select id="rep-filtro-linea"><option value="">Todas</option></select>
+      </div>
+      <div class="col" style="min-width:120px;">
+        <label>Formato</label>
+        <select id="rep-formato">
+          <option value="excel">Excel</option>
+          <option value="pdf">PDF</option>
+        </select>
+      </div>
+      <button class="btn-primario" id="rep-generar" style="height:38px;">Generar reporte</button>
+    </div>
+    <p class="nota" style="margin-top:10px;">La categoría y línea de artículo solo filtran el listado de productos vendidos (hoja/página 2). El resumen de venta e impuestos de abajo siempre corresponde al total real del periodo (para que cuadre con los cortes de caja), sin filtrar por categoría o línea.</p>
+    <div id="rep-error"></div>
+    <div class="totales" id="rep-resumen" style="margin-top:14px;"></div>
+  </div>
+</div>
+
 <!-- MODAL: movimiento de caja -->
 <div class="modal-fondo" id="modal-movimiento">
   <div class="modal">
@@ -266,7 +310,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.1.004';
+const APP_VERSION = '1.2.001';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -311,6 +355,7 @@ const state = {
   catalogo: [],
   clientes: [], clienteId: null,
   formasPago: [],
+  categorias: [], lineas: [], // para los filtros de la pestaña Reportes
   carrito: [], // {varianteId, nombre, precio, cantidad, impuestos:[{impuestoId,nombre,tasa}], stock, codigo}
   pagos: [], // {formaPagoId, monto, referencia}
 };
@@ -591,7 +636,7 @@ async function entrarAlPOS(){
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
     : 'Precios mostrados con IVA incluido.';
 
-  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago()]);
+  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas()]);
   reiniciarVenta();
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
@@ -643,6 +688,25 @@ async function cargarFormasPago(){
   const { data } = await sb.from('formas_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true);
   state.formasPago = data || [];
 }
+
+function llenarSelectConTodas(id, items, valFn, textFn){
+  $(id).innerHTML = '<option value="">Todas</option>' + items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
+}
+async function cargarCategoriasLineas(){
+  const [{ data: categorias }, { data: lineas }] = await Promise.all([
+    sb.from('categorias').select('*').order('nombre'),
+    sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
+  ]);
+  state.categorias = categorias || [];
+  state.lineas = lineas || [];
+  llenarSelectConTodas('rep-filtro-categoria', state.categorias, c=>c.id, c=>c.nombre);
+  llenarSelectConTodas('rep-filtro-linea', state.lineas, l=>l.id, l=>l.nombre);
+}
+$('rep-filtro-categoria').addEventListener('change', ()=>{
+  const catId = $('rep-filtro-categoria').value;
+  const lineasFiltradas = catId ? state.lineas.filter(l=>l.categoria_id===catId) : state.lineas;
+  llenarSelectConTodas('rep-filtro-linea', lineasFiltradas, l=>l.id, l=>l.nombre);
+});
 
 // ---------- BÚSQUEDA / CARRITO ----------
 const buscarInput = $('buscar-input');
@@ -717,6 +781,141 @@ function renderCarrito(){
 // flotante, ej. 40 * 0.08 en JS no da exactamente 3.20). Todo cálculo de dinero pasa por aquí.
 function redondear2(n){
   return Math.round((Number(n)||0) * 100) / 100;
+}
+
+// ---------- REPORTES DE VENTAS (cierre de caja y pestaña Reportes) ----------
+// Mismo patrón que admin.html: agrupa Categoría → Línea con subtotal en cada nivel y total general.
+function agruparPorCategoriaLinea(filas){
+  const porCategoria = {};
+  filas.forEach(f=>{
+    const cat = f.categoriaNombre || 'Sin categoría';
+    const lin = f.lineaNombre || 'Sin línea';
+    if(!porCategoria[cat]) porCategoria[cat] = {};
+    if(!porCategoria[cat][lin]) porCategoria[cat][lin] = [];
+    porCategoria[cat][lin].push(f);
+  });
+  return Object.keys(porCategoria).sort((a,b)=>a.localeCompare(b)).map(cat=>({
+    categoria: cat,
+    lineas: Object.keys(porCategoria[cat]).sort((a,b)=>a.localeCompare(b)).map(lin=>({
+      linea: lin, filas: porCategoria[cat][lin],
+    })),
+  }));
+}
+function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols){
+  const filas = []; const tipos = [];
+  const totalGeneral = new Array(numCols-1).fill(0);
+  grupos.forEach(g=>{
+    filas.push([`Categoría: ${g.categoria}`, ...new Array(numCols-1).fill('')]); tipos.push('grupo');
+    const subtotalCategoria = new Array(numCols-1).fill(0);
+    g.lineas.forEach(l=>{
+      filas.push([`Línea: ${l.linea}`, ...new Array(numCols-1).fill('')]); tipos.push('subgrupo');
+      const subtotalLinea = new Array(numCols-1).fill(0);
+      l.filas.forEach(f=>{
+        const fila = filaProducto(f);
+        filas.push(fila); tipos.push('producto');
+        columnasSuma.forEach(i=>{ subtotalLinea[i-1] += Number(fila[i])||0; });
+      });
+      const filaSub = new Array(numCols).fill('');
+      filaSub[0] = `Subtotal línea "${l.linea}"`;
+      columnasSuma.forEach(i=>{ filaSub[i] = redondear2(subtotalLinea[i-1]); subtotalCategoria[i-1] += subtotalLinea[i-1]; });
+      filas.push(filaSub); tipos.push('subtotal');
+    });
+    const filaSubCat = new Array(numCols).fill('');
+    filaSubCat[0] = `Subtotal categoría "${g.categoria}"`;
+    columnasSuma.forEach(i=>{ filaSubCat[i] = redondear2(subtotalCategoria[i-1]); totalGeneral[i-1] += subtotalCategoria[i-1]; });
+    filas.push(filaSubCat); tipos.push('subtotalCategoria');
+  });
+  const filaTotal = new Array(numCols).fill('');
+  filaTotal[0] = 'TOTAL GENERAL';
+  columnasSuma.forEach(i=>{ filaTotal[i] = redondear2(totalGeneral[i-1]); });
+  filas.push(filaTotal); tipos.push('total');
+  return { filas, tipos };
+}
+// A partir del arreglo "productos" que regresa el RPC reporte_ventas (uno por producto, ya sumado
+// cantidad/venta_total/costo_total), calcula las columnas pedidas por Adrián: Precio al Público y
+// Costo Unitario se derivan como promedio ponderado (venta_total/cantidad, costo_total/cantidad) para
+// que Venta = Unidades×Precio y Costo = Unidades×CostoUnitario cuadren exacto aunque el precio real
+// haya variado entre ventas dentro del periodo.
+function filasProductosVenta(productosApi){
+  return (productosApi||[]).map(p=>{
+    const cantidad = Number(p.cantidad)||0;
+    const venta = redondear2(Number(p.venta_total)||0);
+    const costo = redondear2(Number(p.costo_total)||0);
+    const utilidad = redondear2(venta - costo);
+    const margen = venta > 0 ? redondear2((utilidad/venta)*100) : 0;
+    return {
+      categoriaNombre: p.categoria, lineaNombre: p.linea,
+      articulo: p.marca ? `${p.producto} (${p.marca})` : p.producto,
+      unidades: cantidad,
+      precioPublico: cantidad ? redondear2(venta/cantidad) : 0,
+      venta, costoUnitario: cantidad ? redondear2(costo/cantidad) : 0, costo, utilidad, margen,
+    };
+  });
+}
+// Construye la tabla agrupada de productos vendidos (Artículo, Unidades, Precio público, Venta,
+// Costo unitario, Costo, Utilidad, Margen%) — reutilizada por el PDF automático de cierre y por la
+// pestaña Reportes. El margen de los renglones de subtotal/categoría/total se recalcula a partir de
+// Utilidad/Venta de ese mismo renglón (nunca se promedian los % de cada producto, sería incorrecto).
+function tablaProductosVendidos(productosApi){
+  const filas = filasProductosVenta(productosApi);
+  const grupos = agruparPorCategoriaLinea(filas);
+  const encabezados = ['Artículo', 'Unidades', 'Precio público (sin imp.)', 'Venta', 'Costo unitario (sin imp.)', 'Costo', 'Utilidad', 'Margen'];
+  const { filas: filasTabla, tipos } = filasAgrupadasConSubtotales(
+    grupos,
+    f=>[f.articulo, f.unidades, f.precioPublico, f.venta, f.costoUnitario, f.costo, f.utilidad, `${f.margen.toFixed(2)}%`],
+    [1, 3, 5, 6], // Unidades, Venta, Costo, Utilidad se suman; Precio público/Costo unitario son valores unitarios (no se suman)
+    8
+  );
+  // Margen de los renglones de subtotal/categoría/total: se recalcula de Utilidad/Venta de ESE
+  // mismo renglón (nunca se promedian los % de cada producto individual, sería incorrecto).
+  filasTabla.forEach((fila, i)=>{
+    if(tipos[i] !== 'producto'){
+      const venta = Number(fila[3])||0, utilidad = Number(fila[6])||0;
+      fila[7] = venta > 0 ? `${redondear2((utilidad/venta)*100).toFixed(2)}%` : '—';
+    }
+  });
+  return { encabezados, filas: filasTabla, tipos };
+}
+// Descarga el logotipo y lo regresa como data URL (igual que en admin.html) — si no hay logotipo o
+// falla la descarga, regresa null y el PDF se genera igual, sin logotipo.
+async function logoComoDataUrl(){
+  if(!state.logoUrl) return null;
+  try{
+    const resp = await fetch(state.logoUrl);
+    if(!resp.ok) return null;
+    const blob = await resp.blob();
+    return await new Promise(resolve=>{
+      const lector = new FileReader();
+      lector.onerror = ()=> resolve(null);
+      lector.onload = ()=> resolve(lector.result);
+      lector.readAsDataURL(blob);
+    });
+  } catch(err){ return null; }
+}
+// Agrega al doc de jsPDF (ya creado) la tabla agrupada de productos, con colSpan en los renglones de
+// grupo y negritas/fondo gris en subtotales y total. Regresa la posición Y final de la tabla.
+function agregarTablaProductosPDF(doc, startY, encabezados, filas, tipos){
+  const columnasMoneda = [2, 3, 4, 5, 6]; // Precio público, Venta, Costo unitario, Costo, Utilidad (Unidades y Margen no llevan "$")
+  const cuerpo = filas.map((fila, i)=>{
+    if(tipos[i]==='grupo' || tipos[i]==='subgrupo'){
+      return [{ content: fila[0], colSpan: encabezados.length, styles: { fontStyle:'bold', fillColor: tipos[i]==='grupo' ? [200,225,210] : [222,236,226] } }];
+    }
+    return fila.map((v,c)=> columnasMoneda.includes(c) ? (v===''? '' : money(v)) : v);
+  });
+  const columnStyles = {};
+  columnasMoneda.forEach(c=>{ columnStyles[c] = { halign:'right' }; });
+  columnStyles[7] = { halign:'right' };
+  doc.autoTable({
+    head: [encabezados], body: cuerpo, startY,
+    styles: { fontSize: 8 }, headStyles: { fillColor: [47, 125, 79] }, columnStyles,
+    didParseCell: (data)=>{
+      const tipo = tipos[data.row.index];
+      if(tipo === 'subtotal'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[245,245,245]; }
+      else if(tipo === 'subtotalCategoria'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[226,226,226]; }
+      else if(tipo === 'total'){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[190,215,198]; }
+    },
+  });
+  return doc.lastAutoTable.finalY;
 }
 
 function calcularTotales(){
@@ -1033,6 +1232,71 @@ function renderResumenCierre(r){
   `;
 }
 
+// Genera y descarga automáticamente el PDF del cierre de esta sesión: página 1 con los mismos datos
+// del cierre que ya se muestran en el modal "Caja cerrada" + el resumen de venta con impuestos
+// (que debe cuadrar con el total del corte); página 2 con el listado de productos vendidos en esa
+// sesión, agrupado por Categoría → Línea con subtotales. Si el reporte de ventas falla por cualquier
+// motivo, no se interrumpe el cierre de caja — solo se omite el PDF y se avisa en consola.
+async function generarReportePDFCierre(r){
+  try{
+    const { data: reporte, error } = await sb.rpc('reporte_ventas', { p_sesion_caja_id: state.sesionCaja.id });
+    if(error) throw error;
+    const logoDataUrl = await logoComoDataUrl();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait' });
+    const margenTexto = logoDataUrl ? 34 : 14;
+    if(logoDataUrl){
+      try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si falla, sin interrumpir la exportación */ }
+    }
+    doc.setFontSize(14);
+    doc.text(`Cierre de caja — ${state.empresaNombre || ''}`, margenTexto, 16);
+    doc.setFontSize(10);
+    doc.text(`${state.sucursalNombre} · ${state.cajaNombre} · ${state.usuario.nombre} · ${new Date().toLocaleString('es-MX')}`, margenTexto, 22);
+
+    const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
+    const filasDatosCierre = [
+      ['Fondo inicial', money(r.fondo_inicial)],
+      ['Ventas en efectivo', money(r.ventas_efectivo)],
+      ['Entradas de caja', money(r.entradas)],
+      ['Salidas de caja', money(r.salidas)],
+      ['Efectivo esperado', money(r.efectivo_esperado)],
+      ['Efectivo contado', money(r.efectivo_contado)],
+      ['Diferencia', money(r.diferencia)],
+      ...otrasFormas.map(d=>[d.forma_pago, money(d.total)]),
+      ['Ventas a crédito', money(r.ventas_credito)],
+    ];
+    doc.autoTable({
+      head: [['Datos del cierre', '']], body: filasDatosCierre, startY: 28,
+      styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
+      columnStyles: { 1: { halign:'right' } },
+      didParseCell: (data)=>{ if(data.row.index === filasDatosCierre.length-3){ data.cell.styles.fontStyle='bold'; } }, // "Diferencia"
+    });
+
+    const filasResumenVenta = [
+      ['Venta total sin impuestos', money(reporte.venta_sin_impuestos)],
+      ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, money(i.monto)]),
+      ['TOTAL GENERAL', money(reporte.total_general)],
+    ];
+    doc.autoTable({
+      head: [['Resumen de venta', '']], body: filasResumenVenta, startY: doc.lastAutoTable.finalY + 8,
+      styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
+      columnStyles: { 1: { halign:'right' } },
+      didParseCell: (data)=>{ if(data.row.index === filasResumenVenta.length-1){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[220,232,224]; } },
+    });
+
+    doc.addPage();
+    doc.setFontSize(12);
+    doc.text('Productos vendidos en esta sesión', 14, 16);
+    const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
+    agregarTablaProductosPDF(doc, 22, encabezados, filas, tipos);
+
+    const fecha = new Date().toISOString().slice(0,10);
+    doc.save(`cierre_caja_${fecha}_${(state.cajaNombre||'').replace(/[^a-zA-Z0-9]/g,'_')}.pdf`);
+  } catch(err){
+    console.error('No se pudo generar el PDF del cierre de caja:', err);
+  }
+}
+
 $('btn-cerrar-caja').addEventListener('click', async ()=>{
   $('cierre-confirmar').disabled = false;
   $('cierre-resumen').innerHTML = 'Calculando…';
@@ -1062,6 +1326,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     return;
   }
   const r = data[0];
+  generarReportePDFCierre(r); // descarga automática del PDF del cierre — no bloquea el resto del flujo si falla
   const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
   const filasOtras = otrasFormas.map(d=>{
     const nota = notaComprobante(d.forma_pago);
@@ -1087,6 +1352,132 @@ $('resultado-cierre-ok').addEventListener('click', async ()=>{
   $('modal-resultado-cierre').classList.remove('activo');
   await sb.auth.signOut();
   location.reload();
+});
+
+// ---------- PESTAÑA REPORTES (reporte de ventas acumulado, con filtros) ----------
+$('btn-reportes').addEventListener('click', ()=>{
+  const hoy = new Date().toISOString().slice(0,10);
+  if(!$('rep-fecha-desde').value) $('rep-fecha-desde').value = hoy;
+  if(!$('rep-fecha-hasta').value) $('rep-fecha-hasta').value = hoy;
+  $('rep-resumen').innerHTML = '';
+  $('rep-error').innerHTML = '';
+  mostrarPantalla('pantalla-reportes');
+});
+$('rep-volver').addEventListener('click', ()=>{ mostrarPantalla('pantalla-pos'); });
+
+// El resumen (venta sin impuestos + desglose de impuestos + total general) SIEMPRE se calcula sin
+// filtrar por categoría/línea — así coincide con el total real de los cortes del periodo, tal como
+// pidió Adrián. La categoría/línea elegidas solo filtran qué productos entran en la hoja/página 2.
+async function obtenerReporteVentasPeriodo(){
+  const desde = $('rep-fecha-desde').value;
+  const hasta = $('rep-fecha-hasta').value;
+  if(!desde || !hasta) throw new Error('Selecciona el rango de fechas.');
+  if(desde > hasta) throw new Error('La fecha "Desde" no puede ser posterior a "Hasta".');
+  const categoriaId = $('rep-filtro-categoria').value || null;
+  const lineaId = $('rep-filtro-linea').value || null;
+  const { data, error } = await sb.rpc('reporte_ventas', {
+    p_fecha_desde: desde, p_fecha_hasta: hasta, p_sucursal_id: state.sucursalId,
+    p_categoria_id: categoriaId, p_linea_id: lineaId,
+  });
+  if(error) throw error;
+  return data;
+}
+function renderResumenReporteVentas(reporte){
+  const impuestosHtml = (reporte.impuestos||[]).map(i=>
+    `<div class="linea"><span>${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)</span><span>${money(i.monto)}</span></div>`
+  ).join('');
+  $('rep-resumen').innerHTML = `
+    <div class="linea"><span>Venta total sin impuestos</span><span>${money(reporte.venta_sin_impuestos)}</span></div>
+    ${impuestosHtml}
+    <div class="linea total-final"><span>Total general</span><span>${money(reporte.total_general)}</span></div>
+    <p class="nota" style="margin-top:10px;">${(reporte.productos||[]).length} producto${(reporte.productos||[]).length===1?'':'s'} distinto${(reporte.productos||[]).length===1?'':'s'} en el listado filtrado — el detalle completo, agrupado por categoría y línea con subtotales, va en el archivo exportado.</p>
+  `;
+}
+async function exportarReporteVentasPDF(reporte){
+  const desde = $('rep-fecha-desde').value, hasta = $('rep-fecha-hasta').value;
+  const logoDataUrl = await logoComoDataUrl();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait' });
+  const margenTexto = logoDataUrl ? 34 : 14;
+  if(logoDataUrl){
+    try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* se omite el logotipo si falla, sin interrumpir la exportación */ }
+  }
+  doc.setFontSize(14);
+  doc.text(`Reporte de ventas — ${state.empresaNombre || ''}`, margenTexto, 16);
+  doc.setFontSize(10);
+  doc.text(`Del ${desde} al ${hasta} — Generado: ${new Date().toLocaleString('es-MX')}`, margenTexto, 22);
+  const filasResumen = [
+    ['Venta total sin impuestos', money(reporte.venta_sin_impuestos)],
+    ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, money(i.monto)]),
+    ['TOTAL GENERAL', money(reporte.total_general)],
+  ];
+  doc.autoTable({
+    head: [['Resumen de venta acumulado', '']], body: filasResumen, startY: 28,
+    styles: { fontSize: 9 }, headStyles: { fillColor: [47, 125, 79] },
+    columnStyles: { 1: { halign:'right' } },
+    didParseCell: (data)=>{ if(data.row.index === filasResumen.length-1){ data.cell.styles.fontStyle='bold'; data.cell.styles.fillColor=[220,232,224]; } },
+  });
+  doc.addPage();
+  doc.setFontSize(12);
+  doc.text('Productos vendidos en el periodo filtrado', 14, 16);
+  const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
+  agregarTablaProductosPDF(doc, 22, encabezados, filas, tipos);
+  doc.save(`reporte_ventas_${desde}_a_${hasta}.pdf`);
+}
+function exportarReporteVentasExcel(reporte){
+  const desde = $('rep-fecha-desde').value, hasta = $('rep-fecha-hasta').value;
+  const wb = XLSX.utils.book_new();
+
+  const filasResumen = [
+    ['Reporte de ventas', state.empresaNombre || ''],
+    ['Periodo', `${desde} a ${hasta}`],
+    [],
+    ['Venta total sin impuestos', Number(reporte.venta_sin_impuestos)||0],
+    ...(reporte.impuestos||[]).map(i=>[`${i.nombre} (${(Number(i.tasa)*100).toFixed(0)}%)`, Number(i.monto)||0]),
+    ['TOTAL GENERAL', Number(reporte.total_general)||0],
+  ];
+  const wsResumen = XLSX.utils.aoa_to_sheet(filasResumen);
+  const rangoR = XLSX.utils.decode_range(wsResumen['!ref']);
+  for(let f=3; f<=rangoR.e.r; f++){
+    const celda = wsResumen[XLSX.utils.encode_cell({r:f, c:1})];
+    if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
+  }
+  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+
+  const { encabezados, filas, tipos } = tablaProductosVendidos(reporte.productos);
+  const wsProd = XLSX.utils.aoa_to_sheet([encabezados, ...filas]);
+  wsProd['!merges'] = wsProd['!merges'] || [];
+  tipos.forEach((tipo, i)=>{
+    const fila = i + 1;
+    if(tipo==='grupo' || tipo==='subgrupo'){
+      wsProd['!merges'].push({ s:{r:fila, c:0}, e:{r:fila, c:encabezados.length-1} });
+    }
+  });
+  const columnasMoneda = [2, 3, 4, 5, 6]; // Precio público, Venta, Costo unitario, Costo, Utilidad
+  const rangoP = XLSX.utils.decode_range(wsProd['!ref']);
+  for(let f=1; f<=rangoP.e.r; f++){
+    columnasMoneda.forEach(c=>{
+      const celda = wsProd[XLSX.utils.encode_cell({r:f, c})];
+      if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
+    });
+  }
+  XLSX.utils.book_append_sheet(wb, wsProd, 'Productos vendidos');
+
+  XLSX.writeFile(wb, `reporte_ventas_${desde}_a_${hasta}.xlsx`);
+}
+$('rep-generar').addEventListener('click', async ()=>{
+  $('rep-error').innerHTML = '';
+  $('rep-resumen').innerHTML = 'Generando…';
+  try{
+    const reporte = await obtenerReporteVentasPeriodo();
+    renderResumenReporteVentas(reporte);
+    const formato = $('rep-formato').value;
+    if(formato === 'pdf') await exportarReporteVentasPDF(reporte);
+    else exportarReporteVentasExcel(reporte);
+  } catch(err){
+    $('rep-resumen').innerHTML = '';
+    $('rep-error').innerHTML = `<div class="msg-error">${err.message||err}</div>`;
+  }
 });
 
 // ---------- ARRANQUE ----------
