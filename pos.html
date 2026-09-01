@@ -170,7 +170,7 @@
         <p class="nota" id="nota-impuestos"></p>
         <div class="tabla-scroll">
           <table>
-            <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th class="num">Cant.</th><th>Lista</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
             <tbody id="carrito-body"></tbody>
           </table>
         </div>
@@ -181,6 +181,9 @@
       <div class="card">
         <h2>Cliente</h2>
         <select id="sel-cliente"></select>
+        <p class="nota" style="margin:10px 0 4px;">Lista de precios del ticket</p>
+        <select id="sel-lista-precio"></select>
+        <p class="nota" style="margin-top:4px;">Aplica a todo el ticket, salvo los artículos a los que ya les cambiaste la lista uno por uno en el carrito.</p>
       </div>
       <div class="card" style="margin-top:14px;" id="card-cobro">
         <h2>Cobro</h2>
@@ -310,7 +313,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.2.006';
+const APP_VERSION = '1.2.007';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -363,13 +366,19 @@ const state = {
   empresaId: null, empresaNombre: '', desglosarImpuestos: true, logoUrl: '',
   sucursalId: null, sucursalNombre: '',
   almacenId: null, cajaId: null, cajaNombre: '',
-  listaPrecioId: null, periodoOperacionId: null,
+  // listaPrecioId: la lista de precios ACTIVA para el ticket en curso — arranca en la lista default
+  // de la sucursal (listaPrecioDefaultId) pero se puede cambiar durante la venta (ver sel-lista-precio).
+  listaPrecioId: null, listaPrecioDefaultId: null, periodoOperacionId: null,
   sesionCaja: null,
   catalogo: [],
+  listasPrecio: [], // catálogo de listas de precio activas, para el selector de la venta
   clientes: [], clienteId: null,
   formasPago: [],
   categorias: [], lineas: [], // para los filtros de la pestaña Reportes
-  carrito: [], // {varianteId, nombre, precio, cantidad, impuestos:[{impuestoId,nombre,tasa}], stock, codigo}
+  // carrito: cada línea trae preciosPorLista (copia del mapa del producto) y listaPrecioId — null
+  // significa "usa la lista del ticket" (state.listaPrecioId); un valor propio significa que esa
+  // línea quedó fijada a una lista distinta y ya no sigue los cambios de la lista del ticket.
+  carrito: [], // {varianteId, nombre, precio, preciosPorLista, listaPrecioId, cantidad, impuestos, stock, codigo}
   pagos: [], // {formaPagoId, monto, referencia}
 };
 
@@ -596,6 +605,7 @@ async function seleccionarSucursalCaja(sucursal, caja){
   state.sucursalId = sucursal.id;
   state.sucursalNombre = sucursal.nombre;
   state.listaPrecioId = sucursal.lista_precio_default_id;
+  state.listaPrecioDefaultId = sucursal.lista_precio_default_id;
   state.cajaId = caja.id;
   state.cajaNombre = caja.nombre;
   state.almacenId = caja.almacen_id;
@@ -649,11 +659,28 @@ async function entrarAlPOS(){
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
     : 'Precios mostrados con IVA incluido.';
 
-  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas()]);
+  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio()]);
   reiniciarVenta();
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
 }
+
+async function cargarListasPrecio(){
+  const { data } = await sb.from('listas_precio').select('id, nombre').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
+  state.listasPrecio = data || [];
+  llenarSelect('sel-lista-precio', state.listasPrecio, l=>l.id, l=>l.nombre);
+  $('sel-lista-precio').value = state.listaPrecioId;
+}
+// Cambiar la lista de precios del TICKET: re-cotiza el catálogo completo (para que la búsqueda ya
+// muestre los precios de la nueva lista) y re-cotiza cada línea del carrito que NO tenga su propia
+// lista fijada (linea.listaPrecioId === null) — las líneas que sí tienen una lista propia (cambiadas
+// una por una, ver renderCarrito) se quedan como están, sin importar el cambio aquí.
+$('sel-lista-precio').addEventListener('change', ()=>{
+  state.listaPrecioId = $('sel-lista-precio').value;
+  recalcularPreciosCatalogo();
+  renderResultados(buscarInput.value.trim());
+  renderCarrito();
+});
 
 async function cargarCatalogo(){
   const { data, error } = await sb.from('variantes').select(`
@@ -667,12 +694,16 @@ async function cargarCatalogo(){
   state.catalogo = (data||[])
     .filter(v => v.activo && v.producto && v.producto.activo && v.producto.empresa_id === state.empresaId)
     .map(v=>{
-      const precioRow = (v.precios||[]).find(p=>p.lista_precio_id === state.listaPrecioId);
+      // preciosPorLista: TODOS los precios capturados para esta variante, uno por lista de precio —
+      // permite recotizar sin volver a consultar Supabase cuando se cambia de lista en pantalla.
+      const preciosPorLista = {};
+      (v.precios||[]).forEach(p=>{ preciosPorLista[p.lista_precio_id] = Number(p.precio); });
       const stockRow = (v.stock||[]).find(e=>e.almacen_id === state.almacenId);
       return {
         varianteId: v.id,
         nombre: v.producto.nombre + (v.nombre_variante && v.nombre_variante !== 'Único' ? ' - ' + v.nombre_variante : ''),
-        precio: precioRow ? Number(precioRow.precio) : null,
+        preciosPorLista,
+        precio: preciosPorLista[state.listaPrecioId] ?? null,
         stock: stockRow ? Number(stockRow.cantidad) : 0,
         // Un código tipo "empaque" representa una caja/paquete con varias piezas — al escanearlo
         // hay que agregar factor_unidades_base piezas, no 1 (ej. una caja de 12). "individual" (o
@@ -689,7 +720,15 @@ async function cargarCatalogo(){
         })),
       };
     })
-    .filter(p=>p.precio !== null);
+    // Se excluye solo si no tiene precio capturado en NINGUNA lista (nunca sería vendible); si tiene
+    // precio en alguna lista pero no en la actualmente activa, se deja en el catálogo (recalcularPreciosCatalogo
+    // lo vuelve a evaluar al cambiar de lista) y se marca en pantalla como "Sin precio en esta lista".
+    .filter(p=>Object.keys(p.preciosPorLista).length > 0);
+}
+// Recalcula p.precio de cada producto del catálogo según la lista de precios ACTUALMENTE activa del
+// ticket (state.listaPrecioId) — se llama cada vez que cambia el selector "Lista de precios" de arriba.
+function recalcularPreciosCatalogo(){
+  state.catalogo.forEach(p=>{ p.precio = p.preciosPorLista[state.listaPrecioId] ?? null; });
 }
 $('btn-actualizar-catalogo').addEventListener('click', async ()=>{ await cargarCatalogo(); renderResultados(buscarInput.value.trim()); renderCarrito(); });
 
@@ -737,12 +776,18 @@ buscarInput.addEventListener('keydown', e=>{
   const porCodigo = state.catalogo.find(p=>p.codigos.some(c=>c.codigo===q));
   if(porCodigo){
     const codigoInfo = porCodigo.codigos.find(c=>c.codigo===q);
-    agregarAlCarrito(porCodigo, q, codigoInfo.factor);
-    buscarInput.value=''; renderResultados(''); return;
+    if(agregarAlCarrito(porCodigo, q, codigoInfo.factor)){ buscarInput.value=''; renderResultados(''); }
+    return;
   }
   const coincidencias = state.catalogo.filter(p=>p.nombre.toLowerCase().includes(q.toLowerCase()));
-  if(coincidencias.length === 1){ agregarAlCarrito(coincidencias[0]); buscarInput.value=''; renderResultados(''); }
+  if(coincidencias.length === 1){
+    if(agregarAlCarrito(coincidencias[0])){ buscarInput.value=''; renderResultados(''); }
+  }
 });
+
+function nombreLista(listaId){
+  return (state.listasPrecio.find(l=>l.id===listaId)||{}).nombre || 'sin nombre';
+}
 
 function renderResultados(q){
   const cont = $('resultados-busqueda');
@@ -752,12 +797,12 @@ function renderResultados(q){
   cont.innerHTML = resultados.map((p,i)=>`
     <div class="resultado-item" data-idx="${i}">
       <span>${p.nombre}</span>
-      <span style="white-space:nowrap;">${money(precioMostrar(p))} · <span class="${p.stock<=0?'stock-bajo':''}">stock: ${p.stock}</span></span>
+      <span style="white-space:nowrap;">${p.precio===null ? '<span class="stock-bajo">Sin precio en esta lista</span>' : money(precioMostrar(p))} · <span class="${p.stock<=0?'stock-bajo':''}">stock: ${p.stock}</span></span>
     </div>`).join('') || '<div class="resultado-item">Sin resultados</div>';
   cont.querySelectorAll('.resultado-item[data-idx]').forEach(el=>{
     el.addEventListener('click', ()=>{
-      agregarAlCarrito(resultados[Number(el.dataset.idx)]);
-      buscarInput.value=''; renderResultados(''); buscarInput.focus();
+      if(agregarAlCarrito(resultados[Number(el.dataset.idx)])){ buscarInput.value=''; renderResultados(''); }
+      buscarInput.focus();
     });
   });
 }
@@ -765,36 +810,75 @@ function renderResultados(q){
 // cantidadAgregar: piezas a agregar por este escaneo/selección — 1 en el caso normal (búsqueda por
 // nombre, o código "individual"), o factor_unidades_base cuando se escaneó un código tipo "empaque"
 // (ej. una caja de 12 piezas agrega 12, no 1).
+// Regresa true si se agregó, false si se rechazó (el producto no tiene precio en la lista activa).
 function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
+  if(producto.precio === null){
+    $('resultados-busqueda').innerHTML = `<div class="resultado-item">${producto.nombre} no tiene precio capturado en la lista "${nombreLista(state.listaPrecioId)}" — cambia de lista de precios o revísalo en el Catálogo.</div>`;
+    return false;
+  }
   const cantidad = (Number(cantidadAgregar) > 1) ? Number(cantidadAgregar) : 1;
   const existente = state.carrito.find(l=>l.varianteId===producto.varianteId);
   if(existente){ existente.cantidad += cantidad; }
   else {
     state.carrito.push({
       varianteId: producto.varianteId, nombre: producto.nombre, precio: producto.precio,
+      // preciosPorLista + listaPrecioId (null = "sigue la lista del ticket") permiten cambiar la
+      // lista de precios de ESTA línea sola, distinta a la del resto del ticket — ver renderCarrito.
+      preciosPorLista: producto.preciosPorLista, listaPrecioId: null,
       cantidad, impuestos: producto.impuestos,
       stock: producto.stock, codigo: codigoEscaneado || null,
     });
   }
   renderCarrito();
+  return true;
+}
+
+// Precio real de una línea del carrito, según su propia lista (si se le fijó una distinta a la del
+// ticket) o la del ticket en curso — null si esa combinación producto/lista no tiene precio capturado.
+function precioParaLinea(l){
+  const listaUsar = l.listaPrecioId || state.listaPrecioId;
+  const p = l.preciosPorLista ? l.preciosPorLista[listaUsar] : undefined;
+  return (p === undefined || p === null) ? null : Number(p);
+}
+function hayLineaSinPrecio(){
+  return state.carrito.some(l=>precioParaLinea(l) === null);
 }
 
 function renderCarrito(){
   const body = $('carrito-body');
   $('carrito-vacio').style.display = state.carrito.length ? 'none' : 'block';
-  body.innerHTML = state.carrito.map((l,i)=>`
+  body.innerHTML = state.carrito.map((l,i)=>{
+    // Se recalcula siempre al pintar, por si cambió la lista del ticket (y esta línea la sigue) o
+    // por si a esta línea ya se le fijó su propia lista de precios.
+    l.precio = precioParaLinea(l);
+    const sinPrecio = l.precio === null;
+    const listasConPrecio = state.listasPrecio.filter(lp => l.preciosPorLista && l.preciosPorLista[lp.id] !== undefined);
+    const opcionesLista = `<option value="">(la del ticket: ${nombreLista(state.listaPrecioId)})</option>` +
+      listasConPrecio.map(lp=>`<option value="${lp.id}" ${l.listaPrecioId===lp.id?'selected':''}>${lp.nombre}</option>`).join('');
+    return `
     <tr>
       <td>${l.nombre}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}</td>
       <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
-      <td class="num">${money(precioMostrar(l))}</td>
-      <td class="num">${money(precioMostrar(l)*l.cantidad)}</td>
+      <td><select class="linea-lista" data-idx="${i}" title="Lista de precios de este artículo">${opcionesLista}</select></td>
+      <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
+      <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(precioMostrar(l)*l.cantidad)}</td>
       <td><button class="quitar" data-idx="${i}">Quitar</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   body.querySelectorAll('.cant-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       const i = Number(inp.dataset.idx);
       const val = parseInt(inp.value,10);
       state.carrito[i].cantidad = (isNaN(val) || val < 1) ? 1 : val;
+      renderCarrito();
+    });
+  });
+  // Cambiar la lista de precios de UNA sola línea del carrito — independiente del selector "Lista de
+  // precios del ticket" de arriba; value="" vuelve a seguir esa lista del ticket.
+  body.querySelectorAll('.linea-lista').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const i = Number(sel.dataset.idx);
+      state.carrito[i].listaPrecioId = sel.value || null;
       renderCarrito();
     });
   });
@@ -1063,8 +1147,11 @@ function recalcularTotales(){
       : '';
   });
   const faltaAuth = faltaAutorizacion();
-  $('pago-aviso').textContent = faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '';
-  $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth;
+  const sinPrecio = hayLineaSinPrecio();
+  $('pago-aviso').textContent = sinPrecio
+    ? 'Hay un artículo sin precio en la lista elegida — cámbiale la lista (columna "Lista" del carrito) o quítalo para poder cobrar.'
+    : (faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '');
+  $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth || sinPrecio;
   $('btn-agregar-pago').disabled = (pagado >= total - 0.001 && total > 0) || formasDisponiblesNuevaLinea().length===0;
 }
 
