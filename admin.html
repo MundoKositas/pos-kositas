@@ -292,7 +292,7 @@
         <input type="checkbox" id="compra-con-impuestos" style="width:auto;"> Capturar costos y precio público con impuestos incluidos
       </label>
 
-      <div class="tabla-scroll" style="margin-top:10px;">
+      <div class="tabla-scroll" id="compra-lineas-scroll" style="margin-top:10px;max-height:280px;overflow-y:auto;">
         <table>
           <thead><tr>
             <th>Producto</th><th class="num">Último costo</th><th class="num">Cantidad</th>
@@ -319,7 +319,7 @@
       </div>
       <div class="tabla-scroll" style="margin-top:10px;">
         <table>
-          <thead><tr><th>Fecha</th><th>Folio</th><th>Proveedor</th><th>Almacén</th><th>Capturó</th><th class="num">Total</th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Folio</th><th>Proveedor</th><th>Almacén</th><th>Capturó</th><th class="num">Total (con impuestos)</th></tr></thead>
           <tbody id="compras-lista-body"></tbody>
         </table>
       </div>
@@ -470,6 +470,11 @@
         </div>
       </div>
       <p class="nota" id="prod-resumen-precio" style="margin:6px 0 0;"></p>
+    </div>
+
+    <div class="fila" id="prod-xml-pendiente-banner" style="display:none;background:#f0f7f2;border:1px solid var(--verde);border-radius:6px;padding:10px;margin-bottom:10px;justify-content:space-between;align-items:center;gap:10px;">
+      <span id="prod-xml-pendiente-texto" style="font-weight:600;"></span>
+      <button type="button" class="btn-gris" id="prod-xml-pendiente-omitir">Omitir este producto</button>
     </div>
 
     <div class="tabs" id="prod-tabs" style="margin-bottom:6px;">
@@ -679,7 +684,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.7.000';
+const APP_VERSION = '1.7.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -814,6 +819,7 @@ const state = {
   // formulario tipo ticket (compra, ajuste de salida, traspaso).
   sucursales: [], almacenes: [], proveedores: [], usuariosEmpresa: [], permisosInventario: [],
   compraLineas: [], ajusteLineas: [], traspLineas: [],
+  xmlPendientes: [], xmlPendienteIdx: -1, xmlPendienteActivo: false, xmlProveedorId: null,
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -1626,6 +1632,11 @@ function irAPanelDatos(){
 }
 
 function abrirProducto(varianteId){
+  // Reset del flujo de "altas pendientes de XML" — solo se reactiva explícitamente desde
+  // abrirPendienteXmlActual(), justo después de llamar a esta función. Cualquier otro camino que
+  // abra este modal (Catálogo, "+ Dar de alta" normal de Compras/Ajustes/Traspasos) debe arrancar limpio.
+  state.xmlPendienteActivo = false;
+  $('prod-xml-pendiente-banner').style.display = 'none';
   state.varianteEditId = varianteId;
   const p = varianteId ? state.productos.find(x=>x.varianteId===varianteId) : null;
   state.productoEditId = p ? p.productoId : null;
@@ -1903,9 +1914,35 @@ $('prod-cancelar').addEventListener('click', ()=>{
 $('prod-guardar').addEventListener('click', async ()=>{
   if($('prod-guardar').disabled) return;
   $('prod-guardar').disabled = true;
+  const veniaDeXmlPendiente = state.xmlPendienteActivo;
+  const idxPendiente = state.xmlPendienteIdx;
   const ok = await guardarProducto();
   $('prod-guardar').disabled = false;
-  if(ok) $('modal-producto').classList.remove('activo');
+  if(!ok) return;
+  if(veniaDeXmlPendiente){
+    // Producto recién creado (state.varianteEditId, actualizado por guardarProducto) — se agrega
+    // a la compra con la cantidad/costo que traía el XML, se guarda la referencia proveedor↔código
+    // para que la próxima factura de este mismo proveedor ya empareje sola, y se salta al siguiente
+    // pendiente sin cerrar el modal.
+    const pend = state.xmlPendientes[idxPendiente];
+    const productoNuevo = state.productos.find(p=>p.varianteId===state.varianteEditId);
+    if(productoNuevo){
+      agregarLineaCompra(productoNuevo, pend.cantidad);
+      const lineaNueva = state.compraLineas.find(l=>l.varianteId===productoNuevo.varianteId);
+      if(lineaNueva) lineaNueva.costoUnitario = pend.valorUnitario;
+      renderLineasCompra(true);
+    }
+    if(pend.noId && state.xmlProveedorId){
+      sb.from('proveedor_producto_referencias').upsert({
+        empresa_id: state.empresaId, proveedor_id: state.xmlProveedorId,
+        no_identificacion: pend.noId, variante_id: state.varianteEditId,
+      }, { onConflict: 'proveedor_id,no_identificacion' }).then(({error})=>{ if(error) console.error(error); });
+    }
+    state.xmlPendienteIdx++;
+    abrirPendienteXmlActual();
+  } else {
+    $('modal-producto').classList.remove('activo');
+  }
 });
 // Lógica de guardado del producto, reutilizada por el botón Guardar normal (F10) y por el botón
 // Guardar del modal de "cambios sin guardar" (Anterior/Siguiente/Cancelar con cambios pendientes).
@@ -1952,11 +1989,12 @@ async function guardarProducto(){
     codigos_barra: codigosBarraPayload.map(c=>({ codigo: c.codigo, tipo: c.tipo, factor_unidades_base: c.factor })),
   };
 
-  const { error } = await sb.rpc('guardar_producto', { p: payload });
+  const { data, error } = await sb.rpc('guardar_producto', { p: payload });
   if(error){
     $('prod-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
     return false;
   }
+  state.varianteEditId = data; // variante recién creada/editada — usado por el flujo de altas pendientes de XML
   await cargarProductos();
   // El snapshot se actualiza para que formTieneCambios() ya no detecte estos cambios como pendientes
   // (relevante para el flujo de "Guardar y continuar" desde el modal de cambios sin guardar).
@@ -2439,8 +2477,17 @@ async function exportarReportePDF(){
 // (filtro incremental mientras se escribe, clic para elegir). onSeleccionar recibe la fila completa
 // de state.productos. onSinResultados(q) se llama en Enter si no hay ningún match, para ofrecer
 // "+ Dar de alta este producto" sin salir de la pantalla.
-function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados){
+// onSeleccionar(producto, cantidad) — cantidad es 1 salvo que se haya escaneado/tecleado + Enter
+// justo el código de barras tipo "empaque" de ese producto, en cuyo caso es su factor_unidades_base
+// (mismo criterio que pos.html: solo aplica al código exacto, nunca a la búsqueda por nombre/clic).
+// formatoCosto(producto) es opcional — cómo mostrar "Último costo" en los resultados (por default,
+// siempre sin impuestos); Compras lo usa para respetar el checkbox "con impuestos".
+function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados, formatoCosto){
   const input = $(inputId);
+  const costoTexto = (p)=>{
+    const v = formatoCosto ? formatoCosto(p) : p.costo;
+    return v!=null ? money(v) : '—';
+  };
   const render = (q)=>{
     const cont = $(resultadosId);
     if(!q){ cont.innerHTML=''; return; }
@@ -2451,11 +2498,11 @@ function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados)
     cont.innerHTML = resultados.map((p,i)=>`
       <div class="resultado-item" data-idx="${i}">
         <span>${p.nombre}${p.marca?' — '+p.marca:''}</span>
-        <span style="white-space:nowrap;">Último costo: ${p.costo!=null?money(p.costo):'—'}</span>
+        <span style="white-space:nowrap;">Último costo: ${costoTexto(p)}</span>
       </div>`).join('') || '<div class="resultado-item">Sin resultados</div>';
     cont.querySelectorAll('.resultado-item[data-idx]').forEach(el=>{
       el.addEventListener('click', ()=>{
-        onSeleccionar(resultados[Number(el.dataset.idx)]);
+        onSeleccionar(resultados[Number(el.dataset.idx)], 1);
         input.value=''; cont.innerHTML='';
         input.focus();
       });
@@ -2468,9 +2515,13 @@ function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados)
     const q = input.value.trim();
     if(!q) return;
     const porCodigo = state.productos.find(p=>p.activo && p.codigos.some(c=>c.codigo===q));
-    if(porCodigo){ onSeleccionar(porCodigo); input.value=''; $(resultadosId).innerHTML=''; return; }
+    if(porCodigo){
+      const codigoUsado = porCodigo.codigos.find(c=>c.codigo===q);
+      const cantidad = (codigoUsado && codigoUsado.tipo==='empaque' && codigoUsado.factor>0) ? codigoUsado.factor : 1;
+      onSeleccionar(porCodigo, cantidad); input.value=''; $(resultadosId).innerHTML=''; return;
+    }
     const coincidencias = state.productos.filter(p=>p.activo && p.nombre.toLowerCase().includes(q.toLowerCase()));
-    if(coincidencias.length === 1){ onSeleccionar(coincidencias[0]); input.value=''; $(resultadosId).innerHTML=''; return; }
+    if(coincidencias.length === 1){ onSeleccionar(coincidencias[0], 1); input.value=''; $(resultadosId).innerHTML=''; return; }
     if(coincidencias.length === 0 && onSinResultados) onSinResultados(q);
   });
 }
@@ -2497,7 +2548,7 @@ function prepararPantallaCompras(){
   renderLineasCompra();
   buscadorProducto('compra-buscar-producto', 'compra-resultados-busqueda', agregarLineaCompra, (q)=>{
     $('compra-producto-no-encontrado').style.display = 'block';
-  });
+  }, (p)=> p.costo!=null ? ($('compra-con-impuestos').checked ? redondear2(Number(p.costo)*(1+tasaTotalProducto(p))) : Number(p.costo)) : null);
   $('compra-buscar-producto').addEventListener('input', ()=>{ $('compra-producto-no-encontrado').style.display = 'none'; });
   if(!$('compras-lista-desde').value){
     $('compras-lista-desde').value = fechaLocalISO();
@@ -2535,21 +2586,25 @@ $('compra-abrir-producto-nuevo').addEventListener('click', ()=>{ abrirProducto(n
 // costoUnitario y precioPublico se guardan SIEMPRE sin impuestos (misma convención que
 // variante_precios/costo_ultima_compra en toda la app) — el checkbox "con impuestos" solo
 // cambia cómo se muestran/capturan en pantalla; la conversión usa la tasa propia del producto.
-function agregarLineaCompra(producto){
+function agregarLineaCompra(producto, cantidad){
+  cantidad = cantidad || 1;
   const existente = state.compraLineas.find(l=>l.varianteId===producto.varianteId);
-  if(existente){ existente.cantidad += 1; renderLineasCompra(); return; }
+  if(existente){ existente.cantidad += cantidad; renderLineasCompra(true); return; }
   const listaPublica = obtenerListaPublica();
   const precioActual = listaPublica ? (producto.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio ?? null) : null;
   state.compraLineas.push({
     varianteId: producto.varianteId, productoId: producto.productoId, nombre: producto.nombre,
     tasa: tasaTotalProducto(producto),
-    ultimoCosto: producto.costo, cantidad: 1, costoUnitario: producto.costo != null ? Number(producto.costo) : 0,
+    ultimoCosto: producto.costo, cantidad, costoUnitario: producto.costo != null ? Number(producto.costo) : 0,
     precioPublico: precioActual,
   });
-  renderLineasCompra();
+  renderLineasCompra(true);
 }
 $('compra-con-impuestos').addEventListener('change', renderLineasCompra);
-function renderLineasCompra(){
+// scrollAlFinal: true justo después de agregar producto(s) — para que la última línea capturada
+// quede visible sin tener que desplazarse dentro de la lista (pedido de Adrián: ver a la vez el
+// último renglón, el total y el buscador, en un ticket con muchos productos).
+function renderLineasCompra(scrollAlFinal){
   const conImp = $('compra-con-impuestos').checked;
   $('compra-th-costo').textContent = conImp ? 'Costo unitario (con imp.)' : 'Costo unitario (sin imp.)';
   $('compra-th-precio').textContent = conImp ? 'Precio público (con imp.)' : 'Precio público (sin imp.)';
@@ -2589,6 +2644,7 @@ function renderLineasCompra(){
     return s + redondear2((Number(l.cantidad)||0)*costo);
   },0));
   $('compra-total').textContent = money(total);
+  if(scrollAlFinal){ const cont = $('compra-lineas-scroll'); cont.scrollTop = cont.scrollHeight; }
 }
 
 $('compra-registrar').addEventListener('click', async ()=>{
@@ -2637,7 +2693,7 @@ async function cargarComprasLista(){
       <td>${c.proveedor}</td>
       <td>${c.almacen}</td>
       <td>${c.usuario}</td>
-      <td class="num">${money(c.total)}</td>
+      <td class="num">${money(c.total_con_impuestos)}</td>
     </tr>`).join('');
 }
 
@@ -2666,17 +2722,48 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
     const conceptos = Array.from(doc.querySelectorAll('Concepto'));
     if(!conceptos.length) throw new Error('El XML no trae ningún concepto (Conceptos vacío) — revisa que sea un CFDI de compra.');
 
+    // Proveedor primero: se resuelve/da de alta ANTES de emparejar conceptos, para poder consultar
+    // sus referencias ya guardadas de facturas anteriores (proveedor_producto_referencias) — así,
+    // la primera vez que se completa el alta de un producto pendiente de este proveedor, la SIGUIENTE
+    // factura con el mismo código de él ya empareja sola.
+    $('compra-proveedor-nuevo-nombre').value = nombreEmisor;
+    let proveedorId = null;
+    if(nombreEmisor){
+      const yaExiste = state.proveedores.find(p=>p.nombre.trim().toLowerCase() === nombreEmisor.trim().toLowerCase());
+      if(yaExiste){ proveedorId = yaExiste.id; $('compra-proveedor').value = yaExiste.id; }
+      else {
+        const { data } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre: nombreEmisor, rfc: rfcEmisor } });
+        const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+        state.proveedores = proveedores || [];
+        renderProveedorSelect();
+        if(data){ proveedorId = data; $('compra-proveedor').value = data; }
+      }
+    }
+    let referencias = new Map(); // no_identificacion -> variante_id, de facturas anteriores de este proveedor
+    if(proveedorId){
+      const { data: refs } = await sb.from('proveedor_producto_referencias').select('no_identificacion, variante_id').eq('proveedor_id', proveedorId);
+      (refs||[]).forEach(r=>referencias.set(r.no_identificacion, r.variante_id));
+    }
+
     let agregados = 0;
-    const sinIdentificar = [];
+    state.xmlPendientes = [];
+    state.xmlProveedorId = proveedorId;
     conceptos.forEach(c=>{
       const noId = (c.getAttribute('NoIdentificacion') || '').trim();
       const descripcion = (c.getAttribute('Descripcion') || '').trim();
+      const claveProdServ = (c.getAttribute('ClaveProdServ') || '').trim();
       const cantidad = Number(c.getAttribute('Cantidad')) || 1;
       const valorUnitario = Number(c.getAttribute('ValorUnitario')) || 0;
-      let producto = noId ? state.productos.find(p=>p.activo && p.codigos.some(cod=>cod.codigo===noId)) : null;
-      if(!producto && descripcion){
-        producto = state.productos.find(p=>p.activo && p.nombre.trim().toLowerCase() === descripcion.toLowerCase());
-      }
+      const traslado = c.querySelector('Traslado');
+      const tasaXml = traslado && traslado.getAttribute('TipoFactor')==='Tasa' ? Number(traslado.getAttribute('TasaOCuota'))||0 : 0;
+
+      // Orden de emparejado: 1) referencia ya vinculada a este proveedor (la más confiable, viene de
+      // una alta anterior hecha a mano), 2) código de barras exacto, 3) nombre exacto.
+      const varianteRef = noId ? referencias.get(noId) : null;
+      let producto = varianteRef ? state.productos.find(p=>p.activo && p.varianteId===varianteRef) : null;
+      if(!producto && noId) producto = state.productos.find(p=>p.activo && p.codigos.some(cod=>cod.codigo===noId));
+      if(!producto && descripcion) producto = state.productos.find(p=>p.activo && p.nombre.trim().toLowerCase() === descripcion.toLowerCase());
+
       if(producto){
         const existente = state.compraLineas.find(l=>l.varianteId===producto.varianteId);
         if(existente){ existente.cantidad += cantidad; existente.costoUnitario = valorUnitario; }
@@ -2691,35 +2778,66 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
         }
         agregados++;
       } else {
-        sinIdentificar.push(`${descripcion || noId || '(sin descripción)'} (cant. ${cantidad}, $${valorUnitario})`);
+        state.xmlPendientes.push({ noId, descripcion, claveProdServ, cantidad, valorUnitario, tasaXml });
       }
     });
 
-    $('compra-proveedor-nuevo-nombre').value = nombreEmisor;
-    if(nombreEmisor){
-      const yaExiste = state.proveedores.find(p=>p.nombre.trim().toLowerCase() === nombreEmisor.trim().toLowerCase());
-      if(yaExiste){ $('compra-proveedor').value = yaExiste.id; }
-      else {
-        const { data } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre: nombreEmisor, rfc: rfcEmisor } });
-        const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
-        state.proveedores = proveedores || [];
-        renderProveedorSelect();
-        if(data) $('compra-proveedor').value = data;
-      }
-    }
     if(folio) $('compra-folio').value = folio;
     if(fecha) $('compra-fecha').value = fecha;
-    renderLineasCompra();
+    renderLineasCompra(true);
 
     let mensaje = `<p class="nota">XML leído: ${agregados} de ${conceptos.length} producto(s) se identificaron y se agregaron a la compra.</p>`;
-    if(sinIdentificar.length){
-      mensaje += `<div class="msg-error">No se pudo asociar automáticamente ${sinIdentificar.length} concepto(s) del XML — agrégalos a mano en el buscador de arriba:<br>${sinIdentificar.map(s=>'• '+s).join('<br>')}</div>`;
+    if(state.xmlPendientes.length){
+      mensaje += `<div class="msg-error">${state.xmlPendientes.length} producto(s) de este XML todavía no existen en tu catálogo:<br>` +
+        state.xmlPendientes.map(p=>`• ${p.descripcion || p.noId || '(sin descripción)'} (cant. ${p.cantidad}, $${p.valorUnitario})`).join('<br>') +
+        `<br><button type="button" class="btn-primario" id="btn-completar-pendientes-xml" style="margin-top:8px;">Dar de alta y completar la compra (${state.xmlPendientes.length})</button></div>`;
     }
     $('compra-xml-estado').innerHTML = mensaje;
+    if(state.xmlPendientes.length) $('btn-completar-pendientes-xml').addEventListener('click', iniciarAltaPendientesXml);
   } catch(err){
     $('compra-xml-estado').innerHTML = `<div class="msg-error">${err.message || 'No se pudo leer el XML.'}</div>`;
   }
   e.target.value = '';
+});
+
+// ---- Alta guiada de los productos que el XML no pudo identificar ----
+// Abre el modal normal de "Nuevo producto" (mismo formulario, mismas validaciones) pero: (1) prefija
+// nombre/clave SAT/impuesto con lo que ya sabemos por el XML, (2) al guardar, en vez de solo cerrar,
+// agrega el producto recién creado como línea de la compra con la cantidad/costo del XML, guarda la
+// referencia proveedor+código para la próxima factura, y salta directo al siguiente pendiente — así
+// Adrián solo completa marca/categoría/línea/código de barras de cada uno, sin reabrir nada a mano.
+function iniciarAltaPendientesXml(){
+  const btn = document.getElementById('btn-completar-pendientes-xml');
+  if(btn) btn.disabled = true; // evita volver a arrancar el mismo lote si ya se completó o está en curso
+  state.xmlPendienteIdx = 0;
+  abrirPendienteXmlActual();
+}
+function abrirPendienteXmlActual(){
+  if(state.xmlPendienteIdx >= state.xmlPendientes.length){
+    state.xmlPendienteActivo = false;
+    $('compra-xml-estado').innerHTML = '<p class="nota">Listo — ya diste de alta todos los productos pendientes de este XML y se agregaron a la compra.</p>';
+    renderLineasCompra(true);
+    return;
+  }
+  state.xmlPendienteActivo = true;
+  const pend = state.xmlPendientes[state.xmlPendienteIdx];
+  abrirProducto(null);
+  $('prod-nombre').value = pend.descripcion || '';
+  $('prod-clave-sat').value = pend.claveProdServ || '';
+  if(pend.tasaXml > 0){
+    const impMatch = state.impuestos.find(i=>i.tipo_factor==='tasa' && Math.abs(Number(i.tasa)-pend.tasaXml) < 0.001);
+    if(impMatch){
+      const chk = document.querySelector(`#prod-impuestos .chk-impuesto[value="${impMatch.id}"]`);
+      if(chk){ chk.checked = true; recalcularPreciosModal(); }
+    }
+  }
+  state.formSnapshot = capturarEstadoFormulario();
+  $('prod-xml-pendiente-banner').style.display = 'flex';
+  $('prod-xml-pendiente-texto').textContent = `Alta pendiente por compra XML — producto ${state.xmlPendienteIdx+1} de ${state.xmlPendientes.length}. Completa marca/categoría/línea/código de barras y guarda para continuar.`;
+}
+$('prod-xml-pendiente-omitir').addEventListener('click', ()=>{
+  state.xmlPendienteIdx++;
+  abrirPendienteXmlActual();
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -2823,11 +2941,12 @@ function existenciaEnAlmacen(producto, almacenId){
   const fila = (producto.stockPorAlmacen||[]).find(s=>s.almacen_id===almacenId);
   return fila ? Number(fila.cantidad)||0 : 0;
 }
-function agregarLineaAjuste(producto){
+function agregarLineaAjuste(producto, cantidad){
+  cantidad = cantidad || 1;
   const existenciaFila = existenciaEnAlmacen(producto, $('ajuste-almacen').value);
   const existente = state.ajusteLineas.find(l=>l.varianteId===producto.varianteId);
-  if(existente){ existente.cantidad += 1; renderLineasAjuste(); return; }
-  state.ajusteLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad: 1 });
+  if(existente){ existente.cantidad += cantidad; renderLineasAjuste(); return; }
+  state.ajusteLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad });
   renderLineasAjuste();
 }
 function renderLineasAjuste(){
@@ -2863,11 +2982,12 @@ $('ajuste-registrar').addEventListener('click', async ()=>{
 });
 
 // ---- Traspasos ----
-function agregarLineaTraspaso(producto){
+function agregarLineaTraspaso(producto, cantidad){
+  cantidad = cantidad || 1;
   const existenciaFila = existenciaEnAlmacen(producto, $('trasp-origen').value);
   const existente = state.traspLineas.find(l=>l.varianteId===producto.varianteId);
-  if(existente){ existente.cantidad += 1; renderLineasTraspaso(); return; }
-  state.traspLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad: 1 });
+  if(existente){ existente.cantidad += cantidad; renderLineasTraspaso(); return; }
+  state.traspLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad });
   renderLineasTraspaso();
 }
 function renderLineasTraspaso(){
