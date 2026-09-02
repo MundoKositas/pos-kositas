@@ -519,7 +519,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.004';
+const APP_VERSION = '1.4.005';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -2492,9 +2492,16 @@ function renderDevolverPagos(total){
 function actualizarDvPagosResumen(total){
   const repartido = redondear2(dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0));
   const falta = redondear2(total - repartido);
-  $('dv-pagos-resumen').innerHTML = Math.abs(falta) > 0.005
+  const cuadra = Math.abs(falta) <= 0.005;
+  $('dv-pagos-resumen').innerHTML = !cuadra
     ? `<span class="stock-bajo">Repartido: ${money(repartido)} de ${money(total)} — falta ${money(Math.abs(falta))}${falta<0?' de más':''}</span>`
     : `Repartido: ${money(repartido)} de ${money(total)} ✓`;
+  // "Registrar devolución" solo se habilita si hay algo marcado para devolver (total>0) y lo
+  // repartido entre formas de pago cuadra exacto — así se evita registrar una devolución mal
+  // repartida o sin ningún artículo seleccionado. "+ Forma de pago" solo se habilita si todavía
+  // falta repartir dinero Y queda alguna forma de pago disponible sin usar en el reparto.
+  $('dv-confirmar').disabled = !(total > 0 && cuadra);
+  $('dv-agregar-pago').disabled = !(falta > 0.005 && dvFormasDisponibles().length > 0);
 }
 $('dv-agregar-pago').addEventListener('click', ()=>{
   const disponibles = dvFormasDisponibles();
