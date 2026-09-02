@@ -51,6 +51,15 @@
   td.num, th.num{text-align:right;}
   th{color:var(--gris);font-weight:600;font-size:.78rem;text-transform:uppercase;}
   tr.fila-clic{cursor:pointer;}
+  .resultados{max-height:260px;overflow-y:auto;border:1px solid var(--borde);border-radius:6px;margin-top:6px;}
+  .resultado-item{padding:10px;border-bottom:1px solid var(--borde);display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:10px;}
+  .resultado-item:hover{background:#f0f7f2;}
+  .resultado-item:last-child{border-bottom:none;}
+  .stock-bajo{color:var(--rojo);font-weight:600;}
+  .cant-input{width:70px;text-align:center;}
+  .totales{margin-top:14px;font-size:.95rem;}
+  .totales .linea{display:flex;justify-content:space-between;padding:4px 0;gap:12px;}
+  .totales .total-final{font-size:1.3rem;font-weight:700;border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;}
   tr.fila-clic:hover{background:#f0f5fa;}
   .tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;}
   .tag-ok{background:#eafaf1;color:var(--verde-osc);}
@@ -123,6 +132,8 @@
     <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
+    <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
+    <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
   </div>
 
   <!-- TAB CATÁLOGO -->
@@ -235,6 +246,214 @@
           <tbody id="reporte-tabla-body"></tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- TAB COMPRAS -->
+  <div class="tab-panel" id="tab-compras" style="display:none;">
+    <div class="card">
+      <div class="fila" style="justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;">Nueva compra</h2>
+        <div class="fila" style="gap:8px;">
+          <input type="file" accept=".xml" id="compra-xml-archivo" style="display:none;">
+          <button type="button" class="btn-gris" id="btn-compra-cargar-xml">Cargar XML de factura</button>
+        </div>
+      </div>
+      <p class="nota">Captura la compra como un ticket: proveedor, folio del documento y una línea por producto — el total debe coincidir con la factura/nota del proveedor.</p>
+      <div id="compra-xml-estado"></div>
+
+      <div class="grid-2">
+        <div class="campo">
+          <label>Proveedor</label>
+          <select id="compra-proveedor"><option value="">(sin proveedor)</option></select>
+          <div class="fila" id="compra-proveedor-nuevo" style="display:none;gap:6px;margin-top:6px;">
+            <input type="text" id="compra-proveedor-nuevo-nombre" placeholder="Nombre del proveedor" style="flex:1;">
+            <button type="button" class="btn-secundario" id="compra-proveedor-nuevo-guardar">Guardar</button>
+            <button type="button" class="btn-gris" id="compra-proveedor-nuevo-cancelar">Cancelar</button>
+          </div>
+          <button type="button" class="btn-gris" id="compra-proveedor-nuevo-abrir" style="margin-top:6px;">+ Proveedor nuevo</button>
+        </div>
+        <div class="campo"><label>Almacén que recibe</label><select id="compra-almacen"></select></div>
+      </div>
+      <div class="grid-2">
+        <div class="campo"><label>Folio del documento (factura/remisión)</label><input type="text" id="compra-folio"></div>
+        <div class="campo"><label>Fecha de compra</label><input type="date" id="compra-fecha"></div>
+      </div>
+
+      <h3 class="seccion">Productos de la compra</h3>
+      <div class="campo" style="position:relative;">
+        <label>Buscar producto (código o nombre)</label>
+        <input type="text" id="compra-buscar-producto" autocomplete="off" placeholder="Escanea o escribe el código, o teclea el nombre…">
+        <div class="resultados" id="compra-resultados-busqueda"></div>
+      </div>
+      <p class="nota" id="compra-producto-no-encontrado" style="display:none;">No se encontró ningún producto con ese código/nombre. <button type="button" class="btn-secundario" id="compra-abrir-producto-nuevo" style="margin-left:6px;">+ Dar de alta este producto</button></p>
+
+      <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;">
+        <input type="checkbox" id="compra-con-impuestos" style="width:auto;"> Capturar costos y precio público con impuestos incluidos
+      </label>
+
+      <div class="tabla-scroll" style="margin-top:10px;">
+        <table>
+          <thead><tr>
+            <th>Producto</th><th class="num">Último costo</th><th class="num">Cantidad</th>
+            <th class="num" id="compra-th-costo">Costo unitario</th><th class="num" id="compra-th-precio">Precio público</th><th class="num">Importe</th><th></th>
+          </tr></thead>
+          <tbody id="compra-lineas-body"></tbody>
+        </table>
+      </div>
+      <p class="nota" id="compra-lineas-vacio">Todavía no agregas ningún producto a esta compra.</p>
+
+      <div class="totales" style="margin-top:10px;">
+        <div class="linea total-final"><span>Total de la compra</span><span id="compra-total">$0.00</span></div>
+      </div>
+      <div id="compra-error"></div>
+      <button class="btn-primario" style="margin-top:10px;" id="compra-registrar">Registrar compra</button>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h2 style="margin-top:0;">Compras registradas</h2>
+      <div class="fila" style="align-items:flex-end;">
+        <div class="col" style="min-width:150px;"><label>Desde</label><input type="date" id="compras-lista-desde"></div>
+        <div class="col" style="min-width:150px;"><label>Hasta</label><input type="date" id="compras-lista-hasta"></div>
+        <button type="button" class="btn-secundario" id="compras-lista-buscar">Buscar</button>
+      </div>
+      <div class="tabla-scroll" style="margin-top:10px;">
+        <table>
+          <thead><tr><th>Fecha</th><th>Folio</th><th>Proveedor</th><th>Almacén</th><th>Capturó</th><th class="num">Total</th></tr></thead>
+          <tbody id="compras-lista-body"></tbody>
+        </table>
+      </div>
+      <p class="nota" id="compras-lista-vacio" style="display:none;">No hay compras registradas en ese rango.</p>
+    </div>
+  </div>
+
+  <!-- TAB INVENTARIO (almacenes, ajustes de salida, traspasos) -->
+  <div class="tab-panel" id="tab-inventario" style="display:none;">
+    <div class="tabs" id="inv-tabs" style="margin-bottom:14px;">
+      <button type="button" class="tab-btn activo" data-invtab="inv-panel-almacenes">Almacenes</button>
+      <button type="button" class="tab-btn" data-invtab="inv-panel-ajustes">Salidas por ajuste</button>
+      <button type="button" class="tab-btn" data-invtab="inv-panel-traspasos">Traspasos</button>
+    </div>
+
+    <div id="inv-panel-almacenes">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Catálogo de almacenes</h2>
+          <button class="btn-primario" id="btn-nuevo-almacen">+ Nuevo almacén</button>
+        </div>
+        <div class="tabla-scroll">
+          <table>
+            <thead><tr><th>Nombre</th><th>Sucursal</th><th>Tipo</th><th>Default de su sucursal</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="almacenes-tabla-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="inv-panel-ajustes" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Salida por ajuste (merma, daño, caducidad)</h2>
+        <p class="nota">Descuenta existencias del almacén indicado. El motivo es obligatorio y queda registrado en el Kardex — no afecta ventas ni caja.</p>
+        <div class="grid-2">
+          <div class="campo"><label>Almacén</label><select id="ajuste-almacen"></select></div>
+          <div class="campo"><label>Fecha</label><input type="date" id="ajuste-fecha"></div>
+        </div>
+        <div class="campo"><label>Motivo</label><input type="text" id="ajuste-motivo" placeholder="Ej. mercancía dañada, caducado, merma…"></div>
+
+        <div class="campo" style="position:relative;">
+          <label>Buscar producto</label>
+          <input type="text" id="ajuste-buscar-producto" autocomplete="off">
+          <div class="resultados" id="ajuste-resultados-busqueda"></div>
+        </div>
+        <div class="tabla-scroll" style="margin-top:10px;">
+          <table>
+            <thead><tr><th>Producto</th><th class="num">Existencia</th><th class="num">Cantidad a dar de baja</th><th></th></tr></thead>
+            <tbody id="ajuste-lineas-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="ajuste-lineas-vacio">Todavía no agregas ningún producto.</p>
+        <div id="ajuste-error"></div>
+        <button class="btn-peligro" style="margin-top:10px;" id="ajuste-registrar">Registrar salida</button>
+      </div>
+    </div>
+
+    <div id="inv-panel-traspasos" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Enviar traspaso entre almacenes</h2>
+        <p class="nota">La mercancía se descuenta del almacén origen en cuanto se envía, y queda "en tránsito" hasta que el almacén destino confirme la recepción.</p>
+        <div class="grid-2">
+          <div class="campo"><label>Almacén origen</label><select id="trasp-origen"></select></div>
+          <div class="campo"><label>Almacén destino</label><select id="trasp-destino"></select></div>
+        </div>
+        <div class="campo" style="position:relative;">
+          <label>Buscar producto</label>
+          <input type="text" id="trasp-buscar-producto" autocomplete="off">
+          <div class="resultados" id="trasp-resultados-busqueda"></div>
+        </div>
+        <div class="tabla-scroll" style="margin-top:10px;">
+          <table>
+            <thead><tr><th>Producto</th><th class="num">Existencia en origen</th><th class="num">Cantidad a enviar</th><th></th></tr></thead>
+            <tbody id="trasp-lineas-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="trasp-lineas-vacio">Todavía no agregas ningún producto.</p>
+        <div class="campo" style="margin-top:10px;"><label>Notas (opcional)</label><input type="text" id="trasp-notas"></div>
+        <div id="trasp-error"></div>
+        <button class="btn-primario" style="margin-top:10px;" id="trasp-enviar">Enviar traspaso</button>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Traspasos pendientes de recibir</h2>
+        <div class="tabla-scroll">
+          <table>
+            <thead><tr><th>Folio</th><th>Origen</th><th>Destino</th><th>Enviado por</th><th>Fecha de envío</th><th></th></tr></thead>
+            <tbody id="trasp-pendientes-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="trasp-pendientes-vacio" style="display:none;">No hay traspasos pendientes de recibir.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: recibir/cancelar traspaso -->
+<div class="modal-fondo" id="modal-traspaso-recibir">
+  <div class="modal" style="max-width:640px;">
+    <h2 id="tr-titulo">Recibir traspaso</h2>
+    <p class="nota" id="tr-subtitulo"></p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Enviado</th><th class="num">Recibido</th></tr></thead>
+        <tbody id="tr-lineas-body"></tbody>
+      </table>
+    </div>
+    <div class="campo" style="margin-top:10px;"><label>Notas de recepción (obligatorio si hay diferencia)</label><input type="text" id="tr-notas-recepcion"></div>
+    <div id="tr-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="tr-cerrar">Cerrar</button>
+      <button class="btn-primario" style="flex:1;" id="tr-confirmar-recepcion">Confirmar recepción</button>
+    </div>
+    <hr style="margin:14px 0;border:none;border-top:1px solid var(--borde);">
+    <p class="nota">Si este traspaso no debía haberse enviado, puedes cancelarlo — regresa la mercancía al almacén origen.</p>
+    <div class="campo"><label>Motivo de cancelación</label><input type="text" id="tr-motivo-cancelar"></div>
+    <button class="btn-peligro" style="width:100%;" id="tr-cancelar">Cancelar traspaso</button>
+  </div>
+</div>
+
+<!-- MODAL: alta/edición de almacén -->
+<div class="modal-fondo" id="modal-almacen">
+  <div class="modal">
+    <h2 id="almacen-titulo">Nuevo almacén</h2>
+    <div class="campo"><label>Nombre</label><input type="text" id="almacen-nombre"></div>
+    <div class="campo"><label>Sucursal</label><select id="almacen-sucursal"></select></div>
+    <div class="campo"><label>Tipo</label><select id="almacen-tipo"><option value="tienda">Tienda</option><option value="bodega">Bodega</option></select></div>
+    <div class="campo"><label>Responsable</label><select id="almacen-responsable"><option value="">(sin asignar)</option></select></div>
+    <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="almacen-default" style="width:auto;"> Es el almacén default de su sucursal</label></div>
+    <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="almacen-activo" checked style="width:auto;"> Activo</label></div>
+    <div id="almacen-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="almacen-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="almacen-guardar">Guardar</button>
     </div>
   </div>
 </div>
@@ -460,7 +679,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.6.006';
+const APP_VERSION = '1.7.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -590,6 +809,11 @@ const state = {
   formSnapshot: '', marcas: [],
   catalogoPagina: 1, catalogoPorPagina: 50,
   logoUrl: '', desglosarImpuestos: true,
+  // Ronda 21 (Compras/Inventarios): sucursales/almacenes/proveedores/usuarios de la empresa,
+  // permisos del módulo "inventario" del usuario actual, y las líneas en construcción de cada
+  // formulario tipo ticket (compra, ajuste de salida, traspaso).
+  sucursales: [], almacenes: [], proveedores: [], usuariosEmpresa: [], permisosInventario: [],
+  compraLineas: [], ajusteLineas: [], traspLineas: [],
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -764,8 +988,31 @@ async function iniciarSesionApp(){
   state.logoUrl = empresa.logo_url || '';
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
 
-  const { data: almacenes } = await sb.from('almacenes').select('*').eq('activo', true);
-  state.almacenId = almacenes?.[0]?.id || null;
+  const { data: almacenesActivos } = await sb.from('almacenes').select('*').eq('activo', true);
+  state.almacenId = almacenesActivos?.[0]?.id || null;
+
+  // Ronda 21: catálogos de apoyo para Compras/Inventario, y los permisos del módulo "inventario"
+  // del usuario actual (mismo patrón que mis_permisos_pos() del POS) — deciden si las pestañas
+  // nuevas se muestran.
+  const [{ data: sucursales }, { data: almacenes }, { data: proveedores }, { data: usuariosEmpresa }, { data: permisosInv }] = await Promise.all([
+    sb.from('sucursales').select('*').eq('activo', true),
+    sb.from('almacenes').select('*'),
+    sb.from('proveedores').select('*').eq('activo', true).order('nombre'),
+    sb.from('usuarios').select('id, nombre').eq('activo', true).order('nombre'),
+    sb.rpc('mis_permisos_inventario'),
+  ]);
+  state.sucursales = sucursales || [];
+  state.almacenes = almacenes || [];
+  state.proveedores = proveedores || [];
+  state.usuariosEmpresa = usuariosEmpresa || [];
+  state.permisosInventario = permisosInv || [];
+
+  const puedeComprar = state.permisosInventario.includes('inventario.registrar_compra');
+  const puedeAjustarTraspasar = state.permisosInventario.includes('inventario.ajuste_salida') || state.permisosInventario.includes('inventario.traspasos');
+  $('tabbtn-compras').style.display = puedeComprar ? '' : 'none';
+  $('tabbtn-inventario').style.display = puedeAjustarTraspasar ? '' : 'none';
+  if(puedeComprar) prepararPantallaCompras();
+  if(puedeAjustarTraspasar) prepararPantallaInventario();
 
   $('hdr-empresa').textContent = state.empresaNombre;
   $('hdr-info').textContent = `${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
@@ -951,6 +1198,7 @@ async function cargarProductos(){
         porcentajeManual: p.porcentaje_margen_manual!=null ? Number(p.porcentaje_margen_manual) : null,
       })),
       stock: existenciaAlmacen?.cantidad ?? 0, minimo: existenciaAlmacen?.minimo ?? 0, maximo: existenciaAlmacen?.maximo ?? 0,
+      stockPorAlmacen: v.stock || [],
       codigos,
       codigoPrincipal: codigos.find(c=>c.tipo==='individual')?.codigo || codigos[0]?.codigo || '',
     };
@@ -2181,6 +2429,535 @@ async function exportarReportePDF(){
   const fecha = fechaLocalISO();
   doc.save(`reporte_precios_${fecha}.pdf`);
 }
+
+// ============================================================================================
+// RONDA 21 — Compras (Entradas), Proveedores, Almacenes, Ajustes de salida y Traspasos.
+// ============================================================================================
+
+// ---------- Buscador de producto reutilizable (Compras / Ajustes / Traspasos) ----------
+// Mismo criterio que el buscador de pos.html: por código de barras exacto (Enter) o por nombre/marca
+// (filtro incremental mientras se escribe, clic para elegir). onSeleccionar recibe la fila completa
+// de state.productos. onSinResultados(q) se llama en Enter si no hay ningún match, para ofrecer
+// "+ Dar de alta este producto" sin salir de la pantalla.
+function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados){
+  const input = $(inputId);
+  const render = (q)=>{
+    const cont = $(resultadosId);
+    if(!q){ cont.innerHTML=''; return; }
+    const qLower = q.toLowerCase();
+    const resultados = state.productos.filter(p=>p.activo &&
+      (p.nombre.toLowerCase().includes(qLower) || p.marca.toLowerCase().includes(qLower) || p.codigos.some(c=>c.codigo===q))
+    ).slice(0,15);
+    cont.innerHTML = resultados.map((p,i)=>`
+      <div class="resultado-item" data-idx="${i}">
+        <span>${p.nombre}${p.marca?' — '+p.marca:''}</span>
+        <span style="white-space:nowrap;">Último costo: ${p.costo!=null?money(p.costo):'—'}</span>
+      </div>`).join('') || '<div class="resultado-item">Sin resultados</div>';
+    cont.querySelectorAll('.resultado-item[data-idx]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        onSeleccionar(resultados[Number(el.dataset.idx)]);
+        input.value=''; cont.innerHTML='';
+        input.focus();
+      });
+    });
+  };
+  input.addEventListener('input', ()=>render(input.value.trim()));
+  input.addEventListener('keydown', e=>{
+    if(e.key !== 'Enter') return;
+    e.preventDefault();
+    const q = input.value.trim();
+    if(!q) return;
+    const porCodigo = state.productos.find(p=>p.activo && p.codigos.some(c=>c.codigo===q));
+    if(porCodigo){ onSeleccionar(porCodigo); input.value=''; $(resultadosId).innerHTML=''; return; }
+    const coincidencias = state.productos.filter(p=>p.activo && p.nombre.toLowerCase().includes(q.toLowerCase()));
+    if(coincidencias.length === 1){ onSeleccionar(coincidencias[0]); input.value=''; $(resultadosId).innerHTML=''; return; }
+    if(coincidencias.length === 0 && onSinResultados) onSinResultados(q);
+  });
+}
+
+function llenarSelectAlmacenes(id, incluirVacio){
+  const valorPrevio = $(id).value;
+  const opciones = state.almacenes.filter(a=>a.activo).map(a=>{
+    const suc = state.sucursales.find(s=>s.id===a.sucursal_id);
+    return `<option value="${a.id}">${a.nombre}${suc?' — '+suc.nombre:''}</option>`;
+  }).join('');
+  $(id).innerHTML = (incluirVacio ? '<option value="">Selecciona…</option>' : '') + opciones;
+  if(valorPrevio && Array.from($(id).options).some(o=>o.value===valorPrevio)) $(id).value = valorPrevio;
+}
+
+// ---------------------------------------------------------------------------------------------
+// COMPRAS
+// ---------------------------------------------------------------------------------------------
+function prepararPantallaCompras(){
+  renderProveedorSelect();
+  llenarSelectAlmacenes('compra-almacen', false);
+  if(!$('compra-fecha').value) $('compra-fecha').value = fechaLocalISO();
+  $('compra-con-impuestos').checked = state.desglosarImpuestos === false;
+  state.compraLineas = [];
+  renderLineasCompra();
+  buscadorProducto('compra-buscar-producto', 'compra-resultados-busqueda', agregarLineaCompra, (q)=>{
+    $('compra-producto-no-encontrado').style.display = 'block';
+  });
+  $('compra-buscar-producto').addEventListener('input', ()=>{ $('compra-producto-no-encontrado').style.display = 'none'; });
+  if(!$('compras-lista-desde').value){
+    $('compras-lista-desde').value = fechaLocalISO();
+    $('compras-lista-hasta').value = fechaLocalISO();
+  }
+  cargarComprasLista();
+}
+
+function renderProveedorSelect(){
+  const valorPrevio = $('compra-proveedor').value;
+  $('compra-proveedor').innerHTML = '<option value="">(sin proveedor)</option>' +
+    state.proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
+  if(valorPrevio && state.proveedores.some(p=>p.id===valorPrevio)) $('compra-proveedor').value = valorPrevio;
+}
+$('compra-proveedor-nuevo-abrir').addEventListener('click', ()=>{
+  $('compra-proveedor-nuevo').style.display = 'flex';
+  $('compra-proveedor-nuevo-nombre').value = '';
+  $('compra-proveedor-nuevo-nombre').focus();
+});
+$('compra-proveedor-nuevo-cancelar').addEventListener('click', ()=>{ $('compra-proveedor-nuevo').style.display = 'none'; });
+$('compra-proveedor-nuevo-guardar').addEventListener('click', async ()=>{
+  const nombre = $('compra-proveedor-nuevo-nombre').value.trim();
+  if(!nombre) return;
+  const { data, error } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre } });
+  if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  state.proveedores = proveedores || [];
+  renderProveedorSelect();
+  $('compra-proveedor').value = data;
+  $('compra-proveedor-nuevo').style.display = 'none';
+});
+
+$('compra-abrir-producto-nuevo').addEventListener('click', ()=>{ abrirProducto(null); });
+
+// costoUnitario y precioPublico se guardan SIEMPRE sin impuestos (misma convención que
+// variante_precios/costo_ultima_compra en toda la app) — el checkbox "con impuestos" solo
+// cambia cómo se muestran/capturan en pantalla; la conversión usa la tasa propia del producto.
+function agregarLineaCompra(producto){
+  const existente = state.compraLineas.find(l=>l.varianteId===producto.varianteId);
+  if(existente){ existente.cantidad += 1; renderLineasCompra(); return; }
+  const listaPublica = obtenerListaPublica();
+  const precioActual = listaPublica ? (producto.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio ?? null) : null;
+  state.compraLineas.push({
+    varianteId: producto.varianteId, productoId: producto.productoId, nombre: producto.nombre,
+    tasa: tasaTotalProducto(producto),
+    ultimoCosto: producto.costo, cantidad: 1, costoUnitario: producto.costo != null ? Number(producto.costo) : 0,
+    precioPublico: precioActual,
+  });
+  renderLineasCompra();
+}
+$('compra-con-impuestos').addEventListener('change', renderLineasCompra);
+function renderLineasCompra(){
+  const conImp = $('compra-con-impuestos').checked;
+  $('compra-th-costo').textContent = conImp ? 'Costo unitario (con imp.)' : 'Costo unitario (sin imp.)';
+  $('compra-th-precio').textContent = conImp ? 'Precio público (con imp.)' : 'Precio público (sin imp.)';
+  $('compra-lineas-vacio').style.display = state.compraLineas.length ? 'none' : 'block';
+  $('compra-lineas-body').innerHTML = state.compraLineas.map((l,i)=>{
+    const factor = 1 + (Number(l.tasa)||0);
+    const costoMostrado = conImp ? redondear2((Number(l.costoUnitario)||0) * factor) : (Number(l.costoUnitario)||0);
+    const precioMostrado = l.precioPublico != null ? (conImp ? redondear2(Number(l.precioPublico) * factor) : Number(l.precioPublico)) : '';
+    const ultimoCostoMostrado = l.ultimoCosto != null ? (conImp ? redondear2(Number(l.ultimoCosto) * factor) : Number(l.ultimoCosto)) : null;
+    return `<tr>
+      <td>${l.nombre}</td>
+      <td class="num">${ultimoCostoMostrado!=null?money(ultimoCostoMostrado):'—'}</td>
+      <td class="num"><input type="number" class="cant-input compra-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num"><input type="number" step="0.01" min="0" class="compra-costo" style="width:90px;text-align:right;" value="${costoMostrado}" data-idx="${i}"></td>
+      <td class="num"><input type="number" step="0.01" min="0" class="compra-precio" style="width:90px;text-align:right;" value="${precioMostrado}" placeholder="sin cambio" data-idx="${i}"></td>
+      <td class="num">${money(redondear2((Number(l.cantidad)||0) * costoMostrado))}</td>
+      <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
+    </tr>`;
+  }).join('');
+  $('compra-lineas-body').querySelectorAll('.compra-cant').forEach(inp=>inp.addEventListener('input', ()=>{ state.compraLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; renderLineasCompra(); }));
+  $('compra-lineas-body').querySelectorAll('.compra-costo').forEach(inp=>inp.addEventListener('change', ()=>{
+    const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
+    const factor = 1 + (Number(l.tasa)||0); const v = parseFloat(inp.value)||0;
+    l.costoUnitario = conImp ? redondear2(v/factor) : v;
+    renderLineasCompra();
+  }));
+  $('compra-lineas-body').querySelectorAll('.compra-precio').forEach(inp=>inp.addEventListener('change', ()=>{
+    const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
+    const factor = 1 + (Number(l.tasa)||0); const txt = inp.value.trim();
+    l.precioPublico = txt==='' ? null : (conImp ? redondear2(parseFloat(txt)/factor) : parseFloat(txt));
+    renderLineasCompra();
+  }));
+  $('compra-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.compraLineas.splice(Number(btn.dataset.idx),1); renderLineasCompra(); }));
+  const total = redondear2(state.compraLineas.reduce((s,l)=>{
+    const factor = 1 + (Number(l.tasa)||0);
+    const costo = conImp ? redondear2((Number(l.costoUnitario)||0)*factor) : (Number(l.costoUnitario)||0);
+    return s + redondear2((Number(l.cantidad)||0)*costo);
+  },0));
+  $('compra-total').textContent = money(total);
+}
+
+$('compra-registrar').addEventListener('click', async ()=>{
+  $('compra-error').innerHTML = '';
+  if(!state.compraLineas.length){ $('compra-error').innerHTML = '<div class="msg-error">Agrega al menos un producto a la compra.</div>'; return; }
+  if(!$('compra-fecha').value){ $('compra-error').innerHTML = '<div class="msg-error">Captura la fecha de compra.</div>'; return; }
+  const listaPublica = obtenerListaPublica();
+  const payload = {
+    empresa_id: state.empresaId,
+    sucursal_id: (state.almacenes.find(a=>a.id===$('compra-almacen').value)||{}).sucursal_id,
+    almacen_id: $('compra-almacen').value,
+    proveedor_id: $('compra-proveedor').value || null,
+    folio_documento: $('compra-folio').value.trim() || null,
+    fecha_compra: $('compra-fecha').value,
+    usuario_id: state.usuario.id,
+    origen: 'manual',
+    lista_publico_id: listaPublica ? listaPublica.id : null,
+    lineas: state.compraLineas.map(l=>({
+      variante_id: l.varianteId, cantidad: Number(l.cantidad)||0, costo_unitario: Number(l.costoUnitario)||0,
+      precio_publico: l.precioPublico != null && l.precioPublico !== '' ? Number(l.precioPublico) : null,
+    })),
+  };
+  $('compra-registrar').disabled = true;
+  const { error } = await sb.rpc('registrar_compra', { p: payload });
+  $('compra-registrar').disabled = false;
+  if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  state.compraLineas = [];
+  $('compra-folio').value = '';
+  renderLineasCompra();
+  await cargarProductos();
+  await cargarComprasLista();
+});
+
+$('compras-lista-buscar').addEventListener('click', cargarComprasLista);
+async function cargarComprasLista(){
+  const desde = $('compras-lista-desde').value || fechaLocalISO();
+  const hasta = $('compras-lista-hasta').value || fechaLocalISO();
+  const { data, error } = await sb.rpc('compras_periodo', { p_fecha_desde: desde, p_fecha_hasta: hasta });
+  if(error){ console.error(error); return; }
+  const compras = data || [];
+  $('compras-lista-vacio').style.display = compras.length ? 'none' : 'block';
+  $('compras-lista-body').innerHTML = compras.map(c=>`
+    <tr>
+      <td>${new Date(c.fecha_compra+'T00:00:00').toLocaleDateString('es-MX')}</td>
+      <td>${c.folio_documento}</td>
+      <td>${c.proveedor}</td>
+      <td>${c.almacen}</td>
+      <td>${c.usuario}</td>
+      <td class="num">${money(c.total)}</td>
+    </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------------------------
+// XML DE FACTURA (CFDI) — carga automática de proveedor/folio/fecha/líneas
+// ---------------------------------------------------------------------------------------------
+// El CFDI es un formato oficial del SAT, igual para todos los proveedores — a diferencia de una foto
+// o PDF (formato libre de cada quien), esto sí se puede leer de forma confiable. Cada <Concepto> se
+// intenta emparejar con el catálogo por código de barras (NoIdentificacion) y, si no, por coincidencia
+// exacta de nombre — lo que no se reconoce se avisa para agregarlo a mano, nunca se inventa nada.
+$('btn-compra-cargar-xml').addEventListener('click', ()=>$('compra-xml-archivo').click());
+$('compra-xml-archivo').addEventListener('change', async (e)=>{
+  const archivo = e.target.files[0];
+  if(!archivo) return;
+  $('compra-xml-estado').innerHTML = '<p class="nota">Leyendo XML…</p>';
+  try{
+    const texto = await archivo.text();
+    const doc = new DOMParser().parseFromString(texto, 'text/xml');
+    if(doc.querySelector('parsererror')) throw new Error('El archivo no es un XML válido.');
+    const comprobante = doc.querySelector('Comprobante') || doc.documentElement;
+    const emisor = doc.querySelector('Emisor');
+    const nombreEmisor = emisor?.getAttribute('Nombre') || '';
+    const rfcEmisor = emisor?.getAttribute('Rfc') || '';
+    const folio = comprobante.getAttribute('Folio') || comprobante.getAttribute('Serie') || '';
+    const fecha = (comprobante.getAttribute('Fecha') || '').slice(0,10) || fechaLocalISO();
+    const conceptos = Array.from(doc.querySelectorAll('Concepto'));
+    if(!conceptos.length) throw new Error('El XML no trae ningún concepto (Conceptos vacío) — revisa que sea un CFDI de compra.');
+
+    let agregados = 0;
+    const sinIdentificar = [];
+    conceptos.forEach(c=>{
+      const noId = (c.getAttribute('NoIdentificacion') || '').trim();
+      const descripcion = (c.getAttribute('Descripcion') || '').trim();
+      const cantidad = Number(c.getAttribute('Cantidad')) || 1;
+      const valorUnitario = Number(c.getAttribute('ValorUnitario')) || 0;
+      let producto = noId ? state.productos.find(p=>p.activo && p.codigos.some(cod=>cod.codigo===noId)) : null;
+      if(!producto && descripcion){
+        producto = state.productos.find(p=>p.activo && p.nombre.trim().toLowerCase() === descripcion.toLowerCase());
+      }
+      if(producto){
+        const existente = state.compraLineas.find(l=>l.varianteId===producto.varianteId);
+        if(existente){ existente.cantidad += cantidad; existente.costoUnitario = valorUnitario; }
+        else {
+          const listaPublica = obtenerListaPublica();
+          const precioActual = listaPublica ? (producto.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio ?? null) : null;
+          state.compraLineas.push({
+            varianteId: producto.varianteId, productoId: producto.productoId, nombre: producto.nombre,
+            tasa: tasaTotalProducto(producto),
+            ultimoCosto: producto.costo, cantidad, costoUnitario: valorUnitario, precioPublico: precioActual,
+          });
+        }
+        agregados++;
+      } else {
+        sinIdentificar.push(`${descripcion || noId || '(sin descripción)'} (cant. ${cantidad}, $${valorUnitario})`);
+      }
+    });
+
+    $('compra-proveedor-nuevo-nombre').value = nombreEmisor;
+    if(nombreEmisor){
+      const yaExiste = state.proveedores.find(p=>p.nombre.trim().toLowerCase() === nombreEmisor.trim().toLowerCase());
+      if(yaExiste){ $('compra-proveedor').value = yaExiste.id; }
+      else {
+        const { data } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre: nombreEmisor, rfc: rfcEmisor } });
+        const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+        state.proveedores = proveedores || [];
+        renderProveedorSelect();
+        if(data) $('compra-proveedor').value = data;
+      }
+    }
+    if(folio) $('compra-folio').value = folio;
+    if(fecha) $('compra-fecha').value = fecha;
+    renderLineasCompra();
+
+    let mensaje = `<p class="nota">XML leído: ${agregados} de ${conceptos.length} producto(s) se identificaron y se agregaron a la compra.</p>`;
+    if(sinIdentificar.length){
+      mensaje += `<div class="msg-error">No se pudo asociar automáticamente ${sinIdentificar.length} concepto(s) del XML — agrégalos a mano en el buscador de arriba:<br>${sinIdentificar.map(s=>'• '+s).join('<br>')}</div>`;
+    }
+    $('compra-xml-estado').innerHTML = mensaje;
+  } catch(err){
+    $('compra-xml-estado').innerHTML = `<div class="msg-error">${err.message || 'No se pudo leer el XML.'}</div>`;
+  }
+  e.target.value = '';
+});
+
+// ---------------------------------------------------------------------------------------------
+// INVENTARIO — Almacenes / Ajustes de salida / Traspasos
+// ---------------------------------------------------------------------------------------------
+function prepararPantallaInventario(){
+  const puedeAjustar = state.permisosInventario.includes('inventario.ajuste_salida');
+  const puedeTraspasar = state.permisosInventario.includes('inventario.traspasos');
+  document.querySelector('#inv-tabs [data-invtab="inv-panel-ajustes"]').style.display = puedeAjustar ? '' : 'none';
+  document.querySelector('#inv-tabs [data-invtab="inv-panel-traspasos"]').style.display = puedeTraspasar ? '' : 'none';
+
+  llenarSelect('almacen-sucursal', state.sucursales, s=>s.id, s=>s.nombre);
+  $('almacen-responsable').innerHTML = '<option value="">(sin asignar)</option>' +
+    state.usuariosEmpresa.map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('');
+  renderAlmacenesTabla();
+
+  if(puedeAjustar){
+    llenarSelectAlmacenes('ajuste-almacen', false);
+    if(!$('ajuste-fecha').value) $('ajuste-fecha').value = fechaLocalISO();
+    state.ajusteLineas = [];
+    renderLineasAjuste();
+    buscadorProducto('ajuste-buscar-producto', 'ajuste-resultados-busqueda', agregarLineaAjuste);
+  }
+  if(puedeTraspasar){
+    llenarSelectAlmacenes('trasp-origen', false);
+    llenarSelectAlmacenes('trasp-destino', false);
+    state.traspLineas = [];
+    renderLineasTraspaso();
+    buscadorProducto('trasp-buscar-producto', 'trasp-resultados-busqueda', agregarLineaTraspaso);
+    cargarTraspasosPendientes();
+  }
+}
+
+document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#inv-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
+    btn.classList.add('activo');
+    ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos'].forEach(id=>{
+      $(id).style.display = (id === btn.dataset.invtab) ? 'block' : 'none';
+    });
+  });
+});
+
+// ---- Almacenes ----
+function renderAlmacenesTabla(){
+  $('almacenes-tabla-body').innerHTML = state.almacenes.map(a=>{
+    const suc = state.sucursales.find(s=>s.id===a.sucursal_id);
+    const esDefault = suc && suc.almacen_default_id === a.id;
+    return `<tr>
+      <td>${a.nombre}</td><td>${suc?suc.nombre:'—'}</td><td>${a.tipo}</td>
+      <td>${esDefault ? 'Sí' : ''}</td><td>${a.activo ? 'Activo' : 'Inactivo'}</td>
+      <td><button type="button" class="btn-gris almacen-editar" data-id="${a.id}">Editar</button></td>
+    </tr>`;
+  }).join('');
+  $('almacenes-tabla-body').querySelectorAll('.almacen-editar').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirAlmacen(btn.dataset.id));
+  });
+}
+function abrirAlmacen(id){
+  const a = id ? state.almacenes.find(x=>x.id===id) : null;
+  $('almacen-titulo').textContent = a ? 'Editar almacén' : 'Nuevo almacén';
+  $('almacen-error').innerHTML = '';
+  $('almacen-nombre').value = a?.nombre || '';
+  $('almacen-sucursal').value = a?.sucursal_id || state.sucursales[0]?.id || '';
+  $('almacen-tipo').value = a?.tipo || 'bodega';
+  $('almacen-responsable').value = a?.responsable_usuario_id || '';
+  const suc = a ? state.sucursales.find(s=>s.id===a.sucursal_id) : null;
+  $('almacen-default').checked = !!(suc && suc.almacen_default_id === a?.id);
+  $('almacen-activo').checked = a ? a.activo : true;
+  state.almacenEditId = a?.id || null;
+  $('modal-almacen').classList.add('activo');
+}
+$('btn-nuevo-almacen').addEventListener('click', ()=>abrirAlmacen(null));
+$('almacen-cancelar').addEventListener('click', ()=>{ $('modal-almacen').classList.remove('activo'); });
+$('almacen-guardar').addEventListener('click', async ()=>{
+  $('almacen-error').innerHTML = '';
+  const nombre = $('almacen-nombre').value.trim();
+  if(!nombre){ $('almacen-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
+  const payload = {
+    id: state.almacenEditId, sucursal_id: $('almacen-sucursal').value, nombre,
+    tipo: $('almacen-tipo').value, responsable_usuario_id: $('almacen-responsable').value || null,
+    es_default: $('almacen-default').checked, activo: $('almacen-activo').checked,
+  };
+  const { error } = await sb.rpc('guardar_almacen', { p: payload });
+  if(error){ $('almacen-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  const [{ data: almacenes }, { data: sucursales }] = await Promise.all([
+    sb.from('almacenes').select('*'),
+    sb.from('sucursales').select('*').eq('activo', true),
+  ]);
+  state.almacenes = almacenes || [];
+  state.sucursales = sucursales || [];
+  renderAlmacenesTabla();
+  if(state.permisosInventario.includes('inventario.ajuste_salida')) llenarSelectAlmacenes('ajuste-almacen', false);
+  if(state.permisosInventario.includes('inventario.traspasos')){ llenarSelectAlmacenes('trasp-origen', false); llenarSelectAlmacenes('trasp-destino', false); }
+  if(state.permisosInventario.includes('inventario.registrar_compra')) llenarSelectAlmacenes('compra-almacen', false);
+  $('modal-almacen').classList.remove('activo');
+});
+
+// ---- Ajustes de salida ----
+function existenciaEnAlmacen(producto, almacenId){
+  const fila = (producto.stockPorAlmacen||[]).find(s=>s.almacen_id===almacenId);
+  return fila ? Number(fila.cantidad)||0 : 0;
+}
+function agregarLineaAjuste(producto){
+  const existenciaFila = existenciaEnAlmacen(producto, $('ajuste-almacen').value);
+  const existente = state.ajusteLineas.find(l=>l.varianteId===producto.varianteId);
+  if(existente){ existente.cantidad += 1; renderLineasAjuste(); return; }
+  state.ajusteLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad: 1 });
+  renderLineasAjuste();
+}
+function renderLineasAjuste(){
+  $('ajuste-lineas-vacio').style.display = state.ajusteLineas.length ? 'none' : 'block';
+  $('ajuste-lineas-body').innerHTML = state.ajusteLineas.map((l,i)=>`
+    <tr>
+      <td>${l.nombre}</td>
+      <td class="num">${l.existencia}</td>
+      <td class="num"><input type="number" class="cant-input ajuste-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
+    </tr>`).join('');
+  $('ajuste-lineas-body').querySelectorAll('.ajuste-cant').forEach(inp=>inp.addEventListener('input', ()=>{ state.ajusteLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; }));
+  $('ajuste-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.ajusteLineas.splice(Number(btn.dataset.idx),1); renderLineasAjuste(); }));
+}
+$('ajuste-registrar').addEventListener('click', async ()=>{
+  $('ajuste-error').innerHTML = '';
+  if(!state.ajusteLineas.length){ $('ajuste-error').innerHTML = '<div class="msg-error">Agrega al menos un producto.</div>'; return; }
+  if(!$('ajuste-motivo').value.trim()){ $('ajuste-error').innerHTML = '<div class="msg-error">El motivo es obligatorio.</div>'; return; }
+  const payload = {
+    empresa_id: state.empresaId, almacen_id: $('ajuste-almacen').value,
+    fecha: $('ajuste-fecha').value || fechaLocalISO(), motivo: $('ajuste-motivo').value.trim(),
+    usuario_id: state.usuario.id,
+    lineas: state.ajusteLineas.map(l=>({ variante_id: l.varianteId, cantidad: Number(l.cantidad)||0 })),
+  };
+  $('ajuste-registrar').disabled = true;
+  const { error } = await sb.rpc('registrar_ajuste_salida', { p: payload });
+  $('ajuste-registrar').disabled = false;
+  if(error){ $('ajuste-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  state.ajusteLineas = [];
+  $('ajuste-motivo').value = '';
+  renderLineasAjuste();
+  await cargarProductos();
+});
+
+// ---- Traspasos ----
+function agregarLineaTraspaso(producto){
+  const existenciaFila = existenciaEnAlmacen(producto, $('trasp-origen').value);
+  const existente = state.traspLineas.find(l=>l.varianteId===producto.varianteId);
+  if(existente){ existente.cantidad += 1; renderLineasTraspaso(); return; }
+  state.traspLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad: 1 });
+  renderLineasTraspaso();
+}
+function renderLineasTraspaso(){
+  $('trasp-lineas-vacio').style.display = state.traspLineas.length ? 'none' : 'block';
+  $('trasp-lineas-body').innerHTML = state.traspLineas.map((l,i)=>`
+    <tr>
+      <td>${l.nombre}</td>
+      <td class="num">${l.existencia}</td>
+      <td class="num"><input type="number" class="cant-input trasp-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
+    </tr>`).join('');
+  $('trasp-lineas-body').querySelectorAll('.trasp-cant').forEach(inp=>inp.addEventListener('input', ()=>{ state.traspLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; }));
+  $('trasp-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.traspLineas.splice(Number(btn.dataset.idx),1); renderLineasTraspaso(); }));
+}
+$('trasp-enviar').addEventListener('click', async ()=>{
+  $('trasp-error').innerHTML = '';
+  if($('trasp-origen').value === $('trasp-destino').value){ $('trasp-error').innerHTML = '<div class="msg-error">El almacén origen y destino no pueden ser el mismo.</div>'; return; }
+  if(!state.traspLineas.length){ $('trasp-error').innerHTML = '<div class="msg-error">Agrega al menos un producto.</div>'; return; }
+  const payload = {
+    empresa_id: state.empresaId, almacen_origen_id: $('trasp-origen').value, almacen_destino_id: $('trasp-destino').value,
+    usuario_id: state.usuario.id, notas_envio: $('trasp-notas').value.trim() || null,
+    lineas: state.traspLineas.map(l=>({ variante_id: l.varianteId, cantidad: Number(l.cantidad)||0 })),
+  };
+  $('trasp-enviar').disabled = true;
+  const { error } = await sb.rpc('enviar_traspaso', { p: payload });
+  $('trasp-enviar').disabled = false;
+  if(error){ $('trasp-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  state.traspLineas = [];
+  $('trasp-notas').value = '';
+  renderLineasTraspaso();
+  await cargarProductos();
+  await cargarTraspasosPendientes();
+});
+
+async function cargarTraspasosPendientes(){
+  const { data, error } = await sb.rpc('traspasos_pendientes');
+  if(error){ console.error(error); return; }
+  const pendientes = data || [];
+  $('trasp-pendientes-vacio').style.display = pendientes.length ? 'none' : 'block';
+  $('trasp-pendientes-body').innerHTML = pendientes.map(t=>`
+    <tr>
+      <td>${t.folio}</td><td>${t.almacen_origen}</td><td>${t.almacen_destino}</td>
+      <td>${t.usuario_envio}</td><td>${new Date(t.fecha_envio).toLocaleString('es-MX')}</td>
+      <td><button type="button" class="btn-secundario trasp-abrir" data-id="${t.traspaso_id}">Recibir / Cancelar</button></td>
+    </tr>`).join('');
+  $('trasp-pendientes-body').querySelectorAll('.trasp-abrir').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirRecepcionTraspaso(btn.dataset.id));
+  });
+}
+async function abrirRecepcionTraspaso(traspasoId){
+  const { data, error } = await sb.rpc('traspaso_detalle_completo', { p_traspaso_id: traspasoId });
+  if(error){ alert(error.message); return; }
+  state.traspasoAbiertoId = traspasoId;
+  $('tr-titulo').textContent = `Traspaso ${data.folio}`;
+  $('tr-subtitulo').textContent = `De ${data.almacen_origen} a ${data.almacen_destino} — enviado por ${data.usuario_envio}`;
+  $('tr-lineas-body').innerHTML = data.lineas.map((l,i)=>`
+    <tr>
+      <td>${l.producto}</td>
+      <td class="num">${l.cantidad_enviada}</td>
+      <td class="num"><input type="number" class="cant-input tr-cant-recibida" min="0" max="${l.cantidad_enviada}" step="1" value="${l.cantidad_enviada}" data-variante="${l.variante_id}"></td>
+    </tr>`).join('');
+  $('tr-notas-recepcion').value = '';
+  $('tr-error').innerHTML = '';
+  $('modal-traspaso-recibir').classList.add('activo');
+}
+$('tr-cerrar').addEventListener('click', ()=>{ $('modal-traspaso-recibir').classList.remove('activo'); });
+$('tr-confirmar-recepcion').addEventListener('click', async ()=>{
+  $('tr-error').innerHTML = '';
+  const lineas = Array.from(document.querySelectorAll('.tr-cant-recibida')).map(inp=>({
+    variante_id: inp.dataset.variante, cantidad_recibida: Number(inp.value)||0,
+  }));
+  const payload = { traspaso_id: state.traspasoAbiertoId, usuario_id: state.usuario.id, lineas, notas_recepcion: $('tr-notas-recepcion').value.trim() || null };
+  $('tr-confirmar-recepcion').disabled = true;
+  const { error } = await sb.rpc('confirmar_recepcion_traspaso', { p: payload });
+  $('tr-confirmar-recepcion').disabled = false;
+  if(error){ $('tr-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  $('modal-traspaso-recibir').classList.remove('activo');
+  await cargarProductos();
+  await cargarTraspasosPendientes();
+});
+$('tr-cancelar').addEventListener('click', async ()=>{
+  $('tr-error').innerHTML = '';
+  const motivo = $('tr-motivo-cancelar').value.trim();
+  if(!motivo){ $('tr-error').innerHTML = '<div class="msg-error">Captura el motivo de cancelación.</div>'; return; }
+  const { error } = await sb.rpc('cancelar_traspaso', { p: { traspaso_id: state.traspasoAbiertoId, usuario_id: state.usuario.id, motivo } });
+  if(error){ $('tr-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  $('modal-traspaso-recibir').classList.remove('activo');
+  await cargarProductos();
+  await cargarTraspasosPendientes();
+});
 
 // ---------- ARRANQUE ----------
 (async ()=>{
