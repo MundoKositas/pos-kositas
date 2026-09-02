@@ -519,7 +519,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.003';
+const APP_VERSION = '1.4.004';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1744,6 +1744,18 @@ function agregarPaginaPagosMovimientosPDF(doc, reporte, { titulo, subtitulo, fil
   tablaGrupo('Otras formas de pago', ['Forma de pago','Folio','Referencia','Importe'],
     pagos.otras.filas.map(p=>[p.forma_pago, p.folio, p.referencia||'', money(p.monto)]),
     pagos.otras.subtotal, 'validar contra su comprobante correspondiente');
+
+  // Total de formas de pago (Ronda 19, a petición de Adrián): suma efectivo + tarjeta crédito +
+  // tarjeta débito + otras formas de pago. Las ventas a crédito NO se incluyen aquí porque todavía
+  // no representan dinero/comprobante recibido en este corte — se listan aparte, abajo.
+  const totalFormasPago = (incluirEfectivo ? pagos.efectivo.subtotal : 0)
+    + pagos.tarjetaCredito.subtotal + pagos.tarjetaDebito.subtotal + pagos.otras.subtotal;
+  doc.autoTable({
+    body: [[{content:'Total de formas de pago', styles:{fontStyle:'bold'}}, {content: money(totalFormasPago), styles:{fontStyle:'bold', halign:'right'}}]],
+    startY, theme:'plain', styles:{fontSize:9},
+  });
+  startY = doc.lastAutoTable.finalY + 8;
+
   tablaGrupo('Ventas a crédito', ['Folio','Cliente','Importe'],
     creditos.map(c=>[c.folio, c.cliente, money(c.monto)]),
     subtotalCreditos, 'validar contra los tickets/pagarés firmados por el cliente');
@@ -2978,6 +2990,16 @@ function hojaFormasPagoMovimientos(reporte, { desde, hasta, filtroTexto, incluir
     pagos.tarjetaDebito.filas.map(p=>[p.folio, p.referencia||'(sin autorización)', Number(p.monto)||0]), pagos.tarjetaDebito.subtotal);
   agregarGrupo('Otras formas de pago — validar contra su comprobante correspondiente', ['Forma de pago','Folio','Referencia','Importe'],
     pagos.otras.filas.map(p=>[p.forma_pago, p.folio, p.referencia||'', Number(p.monto)||0]), pagos.otras.subtotal);
+
+  // Total de formas de pago (Ronda 19, a petición de Adrián): suma efectivo + tarjeta crédito +
+  // tarjeta débito + otras formas de pago. Las ventas a crédito NO se incluyen porque todavía no
+  // representan dinero/comprobante recibido en este corte — se listan aparte, abajo.
+  const totalFormasPago = (incluirEfectivo ? pagos.efectivo.subtotal : 0)
+    + pagos.tarjetaCredito.subtotal + pagos.tarjetaDebito.subtotal + pagos.otras.subtotal;
+  filas.push(['Total de formas de pago', Number(totalFormasPago)||0]);
+  celdasMoneda.push({ r: filas.length-1, c: 1 });
+  filas.push([]);
+
   agregarGrupo('Ventas a crédito — validar contra los tickets/pagarés firmados por el cliente', ['Folio','Cliente','Importe'],
     creditos.map(c=>[c.folio, c.cliente, Number(c.monto)||0]), subtotalCreditos);
   agregarGrupo('Entradas de efectivo', ['Concepto','Importe'],
