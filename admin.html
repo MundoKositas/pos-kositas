@@ -440,6 +440,31 @@
   </div>
 </div>
 
+<!-- MODAL: asociar un concepto del XML (que no emparejó solo) con un producto YA existente en el
+     catálogo, antes de ofrecer darlo de alta como nuevo — la asociación se guarda para que la
+     próxima factura del mismo proveedor con ese mismo código ya empareje sola. -->
+<div class="modal-fondo" id="modal-xml-asociar">
+  <div class="modal" style="max-width:640px;">
+    <h2 style="margin-top:0;">Producto no identificado en el XML</h2>
+    <p class="nota" id="xml-asociar-progreso"></p>
+    <div class="card" style="background:var(--bg);margin:10px 0;">
+      <div class="fila" style="justify-content:space-between;"><strong id="xml-asociar-descripcion"></strong><span id="xml-asociar-cantidad-costo"></span></div>
+    </div>
+    <p>¿Este producto ya existe en tu catálogo con otro nombre o código? Búscalo y selecciónalo:</p>
+    <div class="campo" style="position:relative;">
+      <label>Buscar producto existente (código o nombre)</label>
+      <input type="text" id="xml-asociar-buscar" autocomplete="off" placeholder="Escanea o escribe el código, o teclea el nombre…">
+      <div class="resultados" id="xml-asociar-resultados"></div>
+    </div>
+    <div id="xml-asociar-error"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button type="button" class="btn-secundario" style="flex:1;" id="xml-asociar-dar-alta">No existe — dar de alta nuevo producto</button>
+      <button type="button" class="btn-gris" style="flex:1;" id="xml-asociar-omitir">Omitir este producto</button>
+    </div>
+    <button type="button" class="btn-gris" style="width:100%;margin-top:8px;" id="xml-asociar-cerrar">Cerrar (detener el proceso)</button>
+  </div>
+</div>
+
 <!-- MODAL: alta/edición de almacén -->
 <div class="modal-fondo" id="modal-almacen">
   <div class="modal">
@@ -474,7 +499,7 @@
 
     <div class="fila" id="prod-xml-pendiente-banner" style="display:none;background:#f0f7f2;border:1px solid var(--verde);border-radius:6px;padding:10px;margin-bottom:10px;justify-content:space-between;align-items:center;gap:10px;">
       <span id="prod-xml-pendiente-texto" style="font-weight:600;"></span>
-      <button type="button" class="btn-gris" id="prod-xml-pendiente-omitir">Omitir este producto</button>
+      <button type="button" class="btn-gris" id="prod-xml-pendiente-omitir">Cancelar (volver a buscarlo)</button>
     </div>
 
     <div class="tabs" id="prod-tabs" style="margin-bottom:6px;">
@@ -684,7 +709,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.7.002';
+const APP_VERSION = '1.7.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -819,7 +844,7 @@ const state = {
   // formulario tipo ticket (compra, ajuste de salida, traspaso).
   sucursales: [], almacenes: [], proveedores: [], usuariosEmpresa: [], permisosInventario: [],
   compraLineas: [], ajusteLineas: [], traspLineas: [],
-  xmlPendientes: [], xmlPendienteIdx: -1, xmlPendienteActivo: false, xmlProveedorId: null,
+  xmlPendientes: [], xmlPendientesTotalLote: 0, xmlPendienteActivo: false, xmlProveedorId: null,
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -1037,6 +1062,9 @@ async function iniciarSesionApp(){
   const varianteUrl = new URLSearchParams(window.location.search).get('variante');
   if(varianteUrl && state.productos.some(p=>p.varianteId===varianteUrl)){
     abrirProducto(varianteUrl);
+    // Limpia el ?variante= de la URL en cuanto se usa — si no, un refresh o volver a entrar con esa
+    // misma pestaña/URL reabre siempre ese mismo producto en vez de llevar al Catálogo (reportado por Adrián).
+    history.replaceState(null, '', window.location.pathname);
   }
 }
 
@@ -1633,7 +1661,7 @@ function irAPanelDatos(){
 
 function abrirProducto(varianteId){
   // Reset del flujo de "altas pendientes de XML" — solo se reactiva explícitamente desde
-  // abrirPendienteXmlActual(), justo después de llamar a esta función. Cualquier otro camino que
+  // el handler de "xml-asociar-dar-alta", justo después de llamar a esta función. Cualquier otro camino que
   // abra este modal (Catálogo, "+ Dar de alta" normal de Compras/Ajustes/Traspasos) debe arrancar limpio.
   state.xmlPendienteActivo = false;
   $('prod-xml-pendiente-banner').style.display = 'none';
@@ -1915,31 +1943,21 @@ $('prod-guardar').addEventListener('click', async ()=>{
   if($('prod-guardar').disabled) return;
   $('prod-guardar').disabled = true;
   const veniaDeXmlPendiente = state.xmlPendienteActivo;
-  const idxPendiente = state.xmlPendienteIdx;
   const ok = await guardarProducto();
   $('prod-guardar').disabled = false;
   if(!ok) return;
   if(veniaDeXmlPendiente){
+    // El pendiente en turno es siempre state.xmlPendientes[0] — se quita de la lista al resolverse
+    // (dado de alta u omitido), así "reanudar" más tarde siempre retoma justo donde se quedó.
+    const pend = state.xmlPendientes.shift();
     // Producto recién creado (state.varianteEditId, actualizado por guardarProducto) — se agrega
-    // a la compra con la cantidad/costo que traía el XML, se guarda la referencia proveedor↔código
-    // para que la próxima factura de este mismo proveedor ya empareje sola, y se salta al siguiente
-    // pendiente sin cerrar el modal.
-    const pend = state.xmlPendientes[idxPendiente];
-    const productoNuevo = state.productos.find(p=>p.varianteId===state.varianteEditId);
-    if(productoNuevo){
-      agregarLineaCompra(productoNuevo, pend.cantidad);
-      const lineaNueva = state.compraLineas.find(l=>l.varianteId===productoNuevo.varianteId);
-      if(lineaNueva) lineaNueva.costoUnitario = pend.valorUnitario;
-      renderLineasCompra(true);
-    }
-    if(pend.noId && state.xmlProveedorId){
-      sb.from('proveedor_producto_referencias').upsert({
-        empresa_id: state.empresaId, proveedor_id: state.xmlProveedorId,
-        no_identificacion: pend.noId, variante_id: state.varianteEditId,
-      }, { onConflict: 'proveedor_id,no_identificacion' }).then(({error})=>{ if(error) console.error(error); });
-    }
-    state.xmlPendienteIdx++;
-    abrirPendienteXmlActual();
+    // a la compra con la cantidad/costo que traía el XML, y se guarda la referencia proveedor↔código
+    // (permanece para futuras importaciones) para que la próxima factura de este mismo proveedor con
+    // ese mismo código ya empareje sola.
+    vincularYAgregarLineaCompra(pend, state.varianteEditId);
+    state.xmlPendienteActivo = false;
+    $('modal-producto').classList.remove('activo');
+    procesarPendienteXmlActual(); // abre el paso de asociar/alta del siguiente pendiente, o muestra el resumen final
   } else {
     $('modal-producto').classList.remove('activo');
   }
@@ -2757,12 +2775,13 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
       const traslado = c.querySelector('Traslado');
       const tasaXml = traslado && traslado.getAttribute('TipoFactor')==='Tasa' ? Number(traslado.getAttribute('TasaOCuota'))||0 : 0;
 
-      // Orden de emparejado: 1) referencia ya vinculada a este proveedor (la más confiable, viene de
-      // una alta anterior hecha a mano), 2) código de barras exacto, 3) nombre exacto.
+      // Emparejado automático SOLO por identificadores duros (nunca por nombre a ciegas — un nombre
+      // parecido no es garantía de que sea el mismo producto): 1) referencia ya vinculada a este
+      // proveedor (viene de una asociación o alta manual anterior, la más confiable) 2) código de
+      // barras exacto. Todo lo demás pasa por el paso 2 (asociar a existente) antes de ofrecer alta.
       const varianteRef = noId ? referencias.get(noId) : null;
       let producto = varianteRef ? state.productos.find(p=>p.activo && p.varianteId===varianteRef) : null;
       if(!producto && noId) producto = state.productos.find(p=>p.activo && p.codigos.some(cod=>cod.codigo===noId));
-      if(!producto && descripcion) producto = state.productos.find(p=>p.activo && p.nombre.trim().toLowerCase() === descripcion.toLowerCase());
 
       if(producto){
         const existente = state.compraLineas.find(l=>l.varianteId===producto.varianteId);
@@ -2788,40 +2807,65 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
 
     let mensaje = `<p class="nota">XML leído: ${agregados} de ${conceptos.length} producto(s) se identificaron y se agregaron a la compra.</p>`;
     if(state.xmlPendientes.length){
-      mensaje += `<div class="msg-error">${state.xmlPendientes.length} producto(s) de este XML todavía no existen en tu catálogo:<br>` +
+      mensaje += `<div class="msg-error">${state.xmlPendientes.length} producto(s) de este XML no emparejaron automáticamente:<br>` +
         state.xmlPendientes.map(p=>`• ${p.descripcion || p.noId || '(sin descripción)'} (cant. ${p.cantidad}, $${p.valorUnitario})`).join('<br>') +
-        `<br><button type="button" class="btn-primario" id="btn-completar-pendientes-xml" style="margin-top:8px;">Dar de alta y completar la compra (${state.xmlPendientes.length})</button></div>`;
+        `<br><button type="button" class="btn-primario" id="btn-completar-pendientes-xml" style="margin-top:8px;">Asociar o dar de alta (${state.xmlPendientes.length})</button></div>`;
     }
     $('compra-xml-estado').innerHTML = mensaje;
-    if(state.xmlPendientes.length) $('btn-completar-pendientes-xml').addEventListener('click', iniciarAltaPendientesXml);
+    if(state.xmlPendientes.length) $('btn-completar-pendientes-xml').addEventListener('click', iniciarResolucionPendientesXml);
   } catch(err){
     $('compra-xml-estado').innerHTML = `<div class="msg-error">${err.message || 'No se pudo leer el XML.'}</div>`;
   }
   e.target.value = '';
 });
 
-// ---- Alta guiada de los productos que el XML no pudo identificar ----
-// Abre el modal normal de "Nuevo producto" (mismo formulario, mismas validaciones) pero: (1) prefija
-// nombre/clave SAT/impuesto con lo que ya sabemos por el XML, (2) al guardar, en vez de solo cerrar,
-// agrega el producto recién creado como línea de la compra con la cantidad/costo del XML, guarda la
-// referencia proveedor+código para la próxima factura, y salta directo al siguiente pendiente — así
-// Adrián solo completa marca/categoría/línea/código de barras de cada uno, sin reabrir nada a mano.
-function iniciarAltaPendientesXml(){
+// ---- Resolución guiada de los productos del XML que no emparejaron solos ----
+// 3 pasos, en el orden que pidió Adrián: (1, ya hecho arriba) automático solo por identificadores
+// duros — referencia guardada de una factura anterior de este proveedor, o código de barras exacto.
+// (2) para lo que quede, pedir que se ASOCIE a mano con un producto YA existente del catálogo — la
+// asociación se guarda (proveedor_producto_referencias) y permanece para futuras importaciones de
+// XML de este proveedor. (3) solo lo que se confirme que de verdad no existe pasa al alta de producto
+// nuevo (mismo formulario de siempre, prefijado con los datos del XML).
+// state.xmlPendientes[0] es siempre "el pendiente en turno" — se quita de la lista (shift) al
+// resolverse (asociado, dado de alta, u omitido), así retomar más tarde siempre continúa donde quedó.
+function iniciarResolucionPendientesXml(){
   const btn = document.getElementById('btn-completar-pendientes-xml');
   if(btn) btn.disabled = true; // evita volver a arrancar el mismo lote si ya se completó o está en curso
-  state.xmlPendienteIdx = 0;
-  abrirPendienteXmlActual();
+  state.xmlPendientesTotalLote = state.xmlPendientes.length;
+  procesarPendienteXmlActual();
 }
-function abrirPendienteXmlActual(){
-  if(state.xmlPendienteIdx >= state.xmlPendientes.length){
-    state.xmlPendienteActivo = false;
-    $('compra-xml-estado').innerHTML = '<p class="nota">Listo — ya diste de alta todos los productos pendientes de este XML y se agregaron a la compra.</p>';
+function procesarPendienteXmlActual(){
+  $('modal-xml-asociar').classList.remove('activo');
+  if(!state.xmlPendientes.length){
+    $('compra-xml-estado').innerHTML = '<p class="nota">Listo — ya se resolvieron todos los productos pendientes de este XML y se agregaron a la compra.</p>';
     renderLineasCompra(true);
     return;
   }
+  const pend = state.xmlPendientes[0];
+  const total = state.xmlPendientesTotalLote || state.xmlPendientes.length;
+  $('xml-asociar-progreso').textContent = `Quedan ${state.xmlPendientes.length} de ${total} por resolver.`;
+  $('xml-asociar-descripcion').textContent = pend.descripcion || pend.noId || '(sin descripción)';
+  $('xml-asociar-cantidad-costo').textContent = `Cantidad ${pend.cantidad} — $${pend.valorUnitario} c/u`;
+  $('xml-asociar-error').innerHTML = '';
+  $('xml-asociar-buscar').value = '';
+  $('xml-asociar-resultados').innerHTML = '';
+  $('modal-xml-asociar').classList.add('activo');
+  $('xml-asociar-buscar').focus();
+}
+buscadorProducto('xml-asociar-buscar', 'xml-asociar-resultados', (producto)=>{
+  // Ignora la cantidad que buscadorProducto detecte por código de empaque — aquí la cantidad
+  // correcta es siempre la del propio XML, no la del código escaneado en el buscador.
+  const pend = state.xmlPendientes.shift();
+  vincularYAgregarLineaCompra(pend, producto.varianteId);
+  procesarPendienteXmlActual();
+});
+$('xml-asociar-dar-alta').addEventListener('click', ()=>{
+  // El pendiente se queda en state.xmlPendientes[0] — recién se quita cuando se guarda el producto
+  // nuevo (ver el hook de prod-guardar), para que "Cerrar" desde el modal de alta no lo pierda.
+  const pend = state.xmlPendientes[0];
+  $('modal-xml-asociar').classList.remove('activo');
+  abrirProducto(null); // ojo: resetea state.xmlPendienteActivo a false — se activa DESPUÉS, no antes
   state.xmlPendienteActivo = true;
-  const pend = state.xmlPendientes[state.xmlPendienteIdx];
-  abrirProducto(null);
   $('prod-nombre').value = pend.descripcion || '';
   $('prod-clave-sat').value = pend.claveProdServ || '';
   if(pend.tasaXml > 0){
@@ -2833,12 +2877,43 @@ function abrirPendienteXmlActual(){
   }
   state.formSnapshot = capturarEstadoFormulario();
   $('prod-xml-pendiente-banner').style.display = 'flex';
-  $('prod-xml-pendiente-texto').textContent = `Alta pendiente por compra XML — producto ${state.xmlPendienteIdx+1} de ${state.xmlPendientes.length}. Completa marca/categoría/línea/código de barras y guarda para continuar.`;
-}
-$('prod-xml-pendiente-omitir').addEventListener('click', ()=>{
-  state.xmlPendienteIdx++;
-  abrirPendienteXmlActual();
+  $('prod-xml-pendiente-texto').textContent = `Alta pendiente por compra XML — quedan ${state.xmlPendientes.length} por resolver. Completa marca/categoría/línea/código de barras y guarda para continuar.`;
 });
+$('prod-xml-pendiente-omitir').addEventListener('click', ()=>{
+  // Cancela el alta en curso (sin guardar) y retoma el paso de asociar/dar de alta del pendiente
+  // que sigue — el actual NO se quita de la lista, se queda pendiente por si se quiere resolver después.
+  $('modal-producto').classList.remove('activo');
+  state.xmlPendienteActivo = false;
+  procesarPendienteXmlActual();
+});
+$('xml-asociar-omitir').addEventListener('click', ()=>{
+  state.xmlPendientes.shift();
+  procesarPendienteXmlActual();
+});
+$('xml-asociar-cerrar').addEventListener('click', ()=>{
+  // Detiene el proceso sin perder lo pendiente — el botón "Asociar o dar de alta (N)" sigue ahí para
+  // retomarlo (se vuelve a habilitar), y sigue siendo state.xmlPendientes[0] el que continúa.
+  $('modal-xml-asociar').classList.remove('activo');
+  const btn = document.getElementById('btn-completar-pendientes-xml');
+  if(btn) btn.disabled = false;
+});
+// Guarda la asociación proveedor+código → variante (permanece para futuras importaciones de XML de
+// este mismo proveedor) y agrega la línea a la compra con la cantidad/costo que traía el XML.
+function vincularYAgregarLineaCompra(pend, varianteId){
+  const producto = state.productos.find(p=>p.varianteId===varianteId);
+  if(producto){
+    agregarLineaCompra(producto, pend.cantidad);
+    const linea = state.compraLineas.find(l=>l.varianteId===varianteId);
+    if(linea) linea.costoUnitario = pend.valorUnitario;
+    renderLineasCompra(true);
+  }
+  if(pend.noId && state.xmlProveedorId){
+    sb.from('proveedor_producto_referencias').upsert({
+      empresa_id: state.empresaId, proveedor_id: state.xmlProveedorId,
+      no_identificacion: pend.noId, variante_id: varianteId,
+    }, { onConflict: 'proveedor_id,no_identificacion' }).then(({error})=>{ if(error) console.error(error); });
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // INVENTARIO — Almacenes / Ajustes de salida / Traspasos
