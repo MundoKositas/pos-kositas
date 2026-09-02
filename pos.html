@@ -264,14 +264,32 @@
     <button class="btn-gris" id="vd-volver">‹ Volver a vender</button>
   </div>
   <div class="card" style="margin-top:14px;">
-    <div class="fila" style="align-items:flex-end;">
-      <div class="col" style="min-width:170px;flex:0 0 auto;">
-        <label>Fecha</label>
-        <input type="date" id="vd-fecha">
+    <div class="fila" style="align-items:flex-end;flex-wrap:wrap;">
+      <div class="col" style="min-width:150px;flex:0 0 auto;">
+        <label>Desde</label>
+        <input type="date" id="vd-fecha-desde">
+      </div>
+      <div class="col" style="min-width:150px;flex:0 0 auto;">
+        <label>Hasta</label>
+        <input type="date" id="vd-fecha-hasta">
       </div>
       <button class="btn-primario" id="vd-buscar" style="height:38px;">Buscar</button>
     </div>
-    <p class="nota" style="margin-top:10px;">Se muestran los tickets de cualquier cajero de la sucursal, no solo los propios. Reimprimir está disponible siempre; modificar y cancelar solo aplican a tickets del día de hoy; devolver aplica a cualquier ticket, sea de hoy o de días anteriores.</p>
+    <div class="fila" style="align-items:flex-end;flex-wrap:wrap;margin-top:10px;">
+      <div class="col" style="min-width:170px;">
+        <label>Folio</label>
+        <select id="vd-filtro-folio"><option value="">Todos</option></select>
+      </div>
+      <div class="col" style="min-width:170px;">
+        <label>Cliente</label>
+        <select id="vd-filtro-cliente"><option value="">Todos</option></select>
+      </div>
+      <div class="col" style="min-width:150px;">
+        <label>Estado</label>
+        <select id="vd-filtro-estado"><option value="">Todos</option></select>
+      </div>
+    </div>
+    <p class="nota" style="margin-top:10px;">Se muestran los tickets de cualquier cajero de la sucursal, no solo los propios. Reimprimir está disponible siempre; modificar y cancelar solo aplican a tickets del día de hoy; devolver aplica a cualquier ticket, sea de hoy o de días anteriores. Los combos de Folio, Cliente y Estado solo muestran lo que aparece en el rango de fechas buscado.</p>
     <div id="vd-error"></div>
     <div class="tabla-scroll">
       <table>
@@ -279,7 +297,7 @@
         <tbody id="vd-body"></tbody>
       </table>
     </div>
-    <p class="nota" id="vd-vacio" style="display:none;">No hay ventas registradas ese día.</p>
+    <p class="nota" id="vd-vacio" style="display:none;">No hay ventas registradas en ese rango.</p>
   </div>
 </div>
 
@@ -519,7 +537,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.005';
+const APP_VERSION = '1.4.006';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -2107,28 +2125,58 @@ function reiniciarVenta(){
 // función que agrupa ventas por día calendario.
 $('btn-ventas-dia').addEventListener('click', ()=>{
   mostrarPantalla('pantalla-ventas-dia');
-  $('vd-fecha').value = fechaLocalISO();
+  const hoy = fechaLocalISO();
+  $('vd-fecha-desde').value = hoy;
+  $('vd-fecha-hasta').value = hoy;
   cargarVentasDia();
 });
 $('vd-volver').addEventListener('click', ()=>mostrarPantalla('pantalla-pos'));
 $('vd-buscar').addEventListener('click', ()=>cargarVentasDia());
+$('vd-filtro-folio').addEventListener('change', renderVentasDiaFiltradas);
+$('vd-filtro-cliente').addEventListener('change', renderVentasDiaFiltradas);
+$('vd-filtro-estado').addEventListener('change', renderVentasDiaFiltradas);
 
 const ESTADO_VENTA_ETIQUETA = { completada: 'Completada', cancelada: 'Cancelada', con_devolucion: 'Con devolución' };
 
+// vdVentasCompletas guarda TODO el rango de fechas buscado (sin filtrar); folio/cliente/estado se
+// aplican del lado del navegador sobre ese conjunto (Ronda 20, a petición de Adrián) — así los
+// combos se llenan solo con lo que de verdad aparece en el rango, y cambiar un filtro no necesita
+// volver a consultar el servidor.
+let vdVentasCompletas = [];
 async function cargarVentasDia(){
   $('vd-error').innerHTML = '';
-  const fecha = $('vd-fecha').value || fechaLocalISO();
-  const { data, error } = await sb.rpc('ventas_del_dia', { p_fecha: fecha, p_sucursal_id: state.sucursalId });
+  const desde = $('vd-fecha-desde').value || fechaLocalISO();
+  const hasta = $('vd-fecha-hasta').value || fechaLocalISO();
+  const { data, error } = await sb.rpc('ventas_del_dia', { p_fecha_desde: desde, p_fecha_hasta: hasta, p_sucursal_id: state.sucursalId });
   if(error){
     $('vd-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`;
     return;
   }
-  const ventas = data || [];
+  vdVentasCompletas = data || [];
+  const folios = [...new Set(vdVentasCompletas.map(v=>v.folio))].sort();
+  const clientes = [...new Set(vdVentasCompletas.map(v=>v.cliente))].sort((a,b)=>a.localeCompare(b,'es'));
+  const estados = [...new Set(vdVentasCompletas.map(v=>v.estado))];
+  const previoFolio = $('vd-filtro-folio').value, previoCliente = $('vd-filtro-cliente').value, previoEstado = $('vd-filtro-estado').value;
+  $('vd-filtro-folio').innerHTML = '<option value="">Todos</option>' + folios.map(f=>`<option value="${f}">${f}</option>`).join('');
+  $('vd-filtro-cliente').innerHTML = '<option value="">Todos</option>' + clientes.map(c=>`<option value="${c}">${c}</option>`).join('');
+  $('vd-filtro-estado').innerHTML = '<option value="">Todos</option>' + estados.map(e=>`<option value="${e}">${ESTADO_VENTA_ETIQUETA[e]||e}</option>`).join('');
+  if(folios.includes(previoFolio)) $('vd-filtro-folio').value = previoFolio;
+  if(clientes.includes(previoCliente)) $('vd-filtro-cliente').value = previoCliente;
+  if(estados.includes(previoEstado)) $('vd-filtro-estado').value = previoEstado;
+  renderVentasDiaFiltradas();
+}
+
+function renderVentasDiaFiltradas(){
+  const fFolio = $('vd-filtro-folio').value, fCliente = $('vd-filtro-cliente').value, fEstado = $('vd-filtro-estado').value;
+  const ventas = vdVentasCompletas.filter(v =>
+    (!fFolio || v.folio === fFolio) && (!fCliente || v.cliente === fCliente) && (!fEstado || v.estado === fEstado)
+  );
   $('vd-vacio').style.display = ventas.length ? 'none' : 'block';
-  // "mismo día" para habilitar modificar/cancelar = la fecha que se está consultando es HOY (no una
-  // fecha pasada del filtro) — el servidor vuelve a validar esto con su propio reloj de todas formas.
-  const esHoy = fecha === fechaLocalISO();
+  const hoyISO = fechaLocalISO();
   $('vd-body').innerHTML = ventas.map(v=>{
+    // "mismo día" para habilitar modificar/cancelar = la fecha LOCAL del propio ticket es hoy — ya
+    // no basta con comparar contra la fecha buscada, porque ahora el rango puede incluir varios días.
+    const esHoy = v.fecha_hora ? fechaLocalISO(new Date(v.fecha_hora)) === hoyISO : false;
     const esCompletada = v.estado === 'completada';
     const puedeModificar = esCompletada && esHoy && !v.articulo_unico;
     const puedeCancelar = esCompletada && esHoy;
