@@ -342,7 +342,13 @@
       </table>
     </div>
     <div class="totales" id="dv-total" style="margin-top:10px;"></div>
-    <div class="campo" style="margin-top:10px;"><label>Forma de pago para el reembolso</label><select id="dv-forma"></select></div>
+    <div class="campo" style="margin-top:10px;">
+      <label>Forma(s) de pago para el reembolso</label>
+      <p class="nota" style="margin:2px 0 6px;">Si ninguna forma de pago sola alcanza para cubrir todo, agrega otra línea para repartir el reembolso — cada una topada a lo que se pagó con ella.</p>
+      <div id="dv-pagos-lista"></div>
+      <button type="button" class="btn-gris" id="dv-agregar-pago" style="margin-top:6px;">+ Forma de pago</button>
+      <div id="dv-pagos-resumen" class="nota" style="margin-top:6px;"></div>
+    </div>
     <div class="campo" style="margin-top:10px;"><label>Motivo</label><input type="text" id="dv-motivo" placeholder="Ej. cliente ya no lo quiso, venía dañado, etc."></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="dv-cancelar">Cerrar</button>
@@ -462,7 +468,7 @@
       <button class="btn-gris" id="el-desc-autorizar" style="display:none;white-space:nowrap;">🔒 Autorizar</button>
     </div>
 
-    <p class="nota" style="margin-bottom:4px;"><strong>Precio manual</strong> <span class="nota">(ej. mercancía dañada)</span></p>
+    <p class="nota" style="margin-bottom:4px;"><strong>Precio manual</strong> <span class="nota">(ej. mercancía dañada)</span> — <span id="el-precio-manual-nota"></span></p>
     <div style="display:flex;gap:6px;align-items:center;">
       <input type="text" inputmode="decimal" id="el-precio-manual" placeholder="Dejar vacío para usar el precio de lista" style="flex:1;">
       <button class="btn-gris" id="el-precio-autorizar" style="display:none;white-space:nowrap;">🔒 Autorizar</button>
@@ -513,7 +519,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.002';
+const APP_VERSION = '1.4.003';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1085,7 +1091,19 @@ function abrirEditarLinea(idx){
     $('el-error').innerHTML = '<div class="msg-error">Este artículo tiene el descuento de "toda la venta" aplicado — quítalo con el botón "% Descuento a toda la venta" para poder ponerle un descuento propio.</div>';
   }
 
-  $('el-precio-manual').value = (l.precioManual !== null && l.precioManual !== undefined) ? l.precioManual : '';
+  // l.precioManual SIEMPRE se guarda internamente como precio BASE (sin impuestos), igual que
+  // precioBaseEfectivo()/precioMostrar() lo esperan en el resto del carrito. Pero lo que el cajero
+  // TECLEA y VE aquí depende de empresas.desglosar_impuestos_ticket: si no se desglosa, los precios
+  // en todo el POS son "con impuestos incluidos", así que este campo también debe funcionar así —
+  // se convierte a/desde base con la tasa de impuestos propia del artículo (l.impuestos).
+  const tieneManual = l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '';
+  const valorMostrado = tieneManual
+    ? (state.desglosarImpuestos ? Number(l.precioManual) : redondear2(Number(l.precioManual) * (1 + tasaTotal(l))))
+    : '';
+  $('el-precio-manual').value = valorMostrado;
+  $('el-precio-manual-nota').textContent = state.desglosarImpuestos
+    ? 'captura el precio SIN impuestos, se le agregan aparte'
+    : 'captura el precio final, CON impuestos incluidos';
   const puedePrecio = tienePermiso('pos.editar_precio_manual') || !!l.autorizaciones.precioManual;
   $('el-precio-manual').disabled = !puedePrecio;
   $('el-precio-autorizar').style.display = puedePrecio ? 'none' : 'inline-block';
@@ -1136,7 +1154,15 @@ $('el-aplicar').addEventListener('click', ()=>{
       $('el-error').innerHTML = '<div class="msg-error">El precio manual debe ser mayor a 0, o deja el campo vacío para usar el precio de lista.</div>';
       return;
     }
-    l.precioManual = txt ? parseMoney(txt) : null;
+    // Lo capturado sigue la misma convención que precioMostrar(): con desglosarImpuestos=true es
+    // precio base (sin impuestos), tal cual se guarda; con desglosarImpuestos=false es precio final
+    // (con impuestos incluidos) y hay que quitarle la tasa antes de guardarlo como base.
+    if(!txt){
+      l.precioManual = null;
+    } else {
+      const capturado = parseMoney(txt);
+      l.precioManual = state.desglosarImpuestos ? capturado : redondear2(capturado / (1 + tasaTotal(l)));
+    }
     if(!txt) l.autorizaciones.precioManual = null;
   }
   $('modal-editar-linea').classList.remove('activo');
@@ -1727,6 +1753,27 @@ function agregarPaginaPagosMovimientosPDF(doc, reporte, { titulo, subtitulo, fil
   tablaGrupo('Salidas de efectivo', ['Concepto','Importe'],
     movs.salidas.filas.map(m=>[m.motivo||'(sin concepto)', money(m.monto)]),
     movs.salidas.subtotal, null);
+
+  // Sección "Movimientos de caja" (Ronda 19) — resumen de cantidad+importe de ventas completadas y
+  // canceladas, y de artículos devueltos, más la cantidad (sin importe) de tickets modificados. Va
+  // debajo del subtotal de "Salidas de efectivo", tal como pidió Adrián.
+  const vc = reporte.ventas_completadas || {cantidad:0, importe:0};
+  const vcan = reporte.ventas_canceladas || {cantidad:0, importe:0};
+  const ad = reporte.articulos_devueltos || {cantidad:0, importe:0};
+  const tm = reporte.tickets_modificados || {cantidad:0};
+  doc.autoTable({
+    head: [[{content:'Movimientos de caja', colSpan:3, styles:{fontStyle:'bold'}}], ['Concepto','Cantidad','Importe']],
+    body: [
+      ['Ventas completadas', vc.cantidad, money(vc.importe)],
+      ['Ventas canceladas', vcan.cantidad, money(vcan.importe)],
+      ['Artículos devueltos', ad.cantidad, money(ad.importe)],
+      ['Tickets modificados', tm.cantidad, ''],
+    ],
+    startY, theme:'plain', styles:{fontSize:8.5}, headStyles:{fontStyle:'bold'},
+    columnStyles:{1:{halign:'right'}, 2:{halign:'right'}},
+    didDrawCell:(data)=>{ if(data.section==='head'){ dibujarLineaEncabezado(doc,data.cell); } },
+  });
+  startY = doc.lastAutoTable.finalY + 8;
 }
 
 function calcularTotales(){
@@ -2326,6 +2373,10 @@ $('cv-confirmar').addEventListener('click', async ()=>{
 
 // ---- Devolver artículos ----
 let dvVentaId = null, dvDatos = null, dvAutorizadoPor = null;
+// dvPagos: reparto del reembolso entre 1 o más formas de pago — {formaPagoId, monto} — para cuando
+// una sola forma no alcanza a cubrir todo el total a devolver (ej. ticket pagado mitad efectivo,
+// mitad tarjeta). Cada renglón se topa a su propio neto disponible (netoPorForma).
+let dvPagos = [];
 async function abrirDevolverVenta(ventaId){
   $('vd-error').innerHTML = '';
   const { data, error } = await sb.rpc('venta_detalle_completo', { p_venta_id: ventaId });
@@ -2344,10 +2395,7 @@ async function abrirDevolverVenta(ventaId){
   $('dv-titulo').textContent = `Devolver artículos — ${data.folio}`;
   $('dv-motivo').value = '';
   $('dv-error').innerHTML = '';
-  const formasDisponibles = netoPorForma(data.pagos);
-  $('dv-forma').innerHTML = formasDisponibles.length
-    ? formasDisponibles.map(f=>`<option value="${f.forma_pago_id}">${f.nombre} (disponible: ${money(f.neto)})</option>`).join('')
-    : '<option value="">Sin forma de pago disponible para reembolsar</option>';
+  dvPagos = [];
   $('dv-body').innerHTML = data.lineas.map((l,i)=>{
     const disponible = l.cantidad - (l.cantidad_devuelta||0);
     return `<tr>
@@ -2361,6 +2409,15 @@ async function abrirDevolverVenta(ventaId){
   renderDevolverTotal();
   $('modal-devolver-venta').classList.add('activo');
 }
+function dvFormasDisponibles(idxPropio){
+  // Las formas ya usadas en OTRO renglón del reparto se excluyen (no tiene sentido repetir la misma
+  // forma en 2 renglones — se sumaría directo a un solo renglón), salvo el propio renglón que se está
+  // editando, que sigue viendo su propia forma actual en la lista.
+  return netoPorForma(dvDatos.pagos).filter(f=>{
+    if(idxPropio!==undefined && dvPagos[idxPropio]?.formaPagoId===f.forma_pago_id) return true;
+    return !dvPagos.some((p,j)=>j!==idxPropio && p.formaPagoId===f.forma_pago_id);
+  });
+}
 function renderDevolverTotal(){
   let total = 0;
   $('dv-body').querySelectorAll('.dv-cant').forEach((inp,i)=>{
@@ -2370,9 +2427,81 @@ function renderDevolverTotal(){
     const tasa = (l.impuestos||[]).reduce((s,x)=>s+(Number(x.tasa)||0),0);
     total += redondear2(base * cant * (1+tasa));
   });
+  total = redondear2(total);
   $('dv-total').innerHTML = `<div class="linea total-final"><span>Total a devolver</span><span>${money(total)}</span></div>`;
+  // Si todavía no se ha capturado ningún reparto de pago, o el total cambió, se propone un reparto
+  // inicial automático: llenar cada forma usada en el ticket original hasta su neto disponible, en
+  // el orden en que aparecen los pagos, hasta cubrir el total — el cajero puede ajustarlo a mano.
+  if(!dvPagos.length && total > 0){
+    let restante = total;
+    netoPorForma(dvDatos.pagos).forEach(f=>{
+      if(restante <= 0.005) return;
+      const monto = redondear2(Math.min(f.neto, restante));
+      if(monto > 0){ dvPagos.push({ formaPagoId: f.forma_pago_id, monto: monto.toFixed(2) }); restante = redondear2(restante - monto); }
+    });
+  }
+  renderDevolverPagos(total);
   return total;
 }
+function renderDevolverPagos(total){
+  const cont = $('dv-pagos-lista');
+  cont.innerHTML = dvPagos.map((p,i)=>{
+    const opciones = dvFormasDisponibles(i);
+    const netoActual = netoPorForma(dvDatos.pagos).find(f=>f.forma_pago_id===p.formaPagoId);
+    return `
+    <div class="fila" style="margin-top:6px;align-items:center;">
+      <div class="col"><select data-idx="${i}" class="dv-pago-forma">${opciones.map(f=>`<option value="${f.forma_pago_id}" ${f.forma_pago_id===p.formaPagoId?'selected':''}>${f.nombre} (disponible: ${money(f.neto)})</option>`).join('')}</select></div>
+      <div class="col"><input type="text" inputmode="decimal" class="money-input dv-pago-monto" data-idx="${i}" value="${p.monto}"></div>
+      <button type="button" class="quitar" data-idx="${i}" title="Quitar">✕</button>
+    </div>`;
+  }).join('') || '<p class="nota">Sin ninguna forma de pago capturada todavía.</p>';
+  cont.querySelectorAll('.dv-pago-forma').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      dvPagos[Number(sel.dataset.idx)].formaPagoId = sel.value;
+      renderDevolverPagos(total);
+      actualizarDvPagosResumen(total);
+    });
+  });
+  cont.querySelectorAll('.dv-pago-monto').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      dvPagos[Number(inp.dataset.idx)].monto = inp.value;
+      actualizarDvPagosResumen(total);
+    });
+  });
+  cont.querySelectorAll('.quitar').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      dvPagos.splice(Number(btn.dataset.idx),1);
+      renderDevolverPagos(total);
+      actualizarDvPagosResumen(total);
+    });
+  });
+  actualizarDvPagosResumen(total);
+}
+function actualizarDvPagosResumen(total){
+  const repartido = redondear2(dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0));
+  const falta = redondear2(total - repartido);
+  $('dv-pagos-resumen').innerHTML = Math.abs(falta) > 0.005
+    ? `<span class="stock-bajo">Repartido: ${money(repartido)} de ${money(total)} — falta ${money(Math.abs(falta))}${falta<0?' de más':''}</span>`
+    : `Repartido: ${money(repartido)} de ${money(total)} ✓`;
+}
+$('dv-agregar-pago').addEventListener('click', ()=>{
+  const disponibles = dvFormasDisponibles();
+  if(!disponibles.length) return;
+  let total = 0;
+  $('dv-body').querySelectorAll('.dv-cant').forEach((inp,i)=>{
+    const l = dvDatos.lineas[i];
+    const cant = Math.max(0, Math.min(Number(inp.value)||0, l.cantidad - (l.cantidad_devuelta||0)));
+    const base = l.precio_unitario - l.descuento_unitario;
+    const tasa = (l.impuestos||[]).reduce((s,x)=>s+(Number(x.tasa)||0),0);
+    total += redondear2(base * cant * (1+tasa));
+  });
+  total = redondear2(total);
+  const repartido = dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);
+  const restante = Math.max(0, redondear2(total - repartido));
+  const forma = disponibles[0];
+  dvPagos.push({ formaPagoId: forma.forma_pago_id, monto: redondear2(Math.min(forma.neto, restante)).toFixed(2) });
+  renderDevolverPagos(total);
+});
 $('dv-cancelar').addEventListener('click', ()=>{ $('modal-devolver-venta').classList.remove('activo'); });
 $('dv-confirmar').addEventListener('click', async ()=>{
   $('dv-error').innerHTML = '';
@@ -2384,17 +2513,27 @@ $('dv-confirmar').addEventListener('click', async ()=>{
     if(cant > 0) lineas.push({ venta_detalle_id: dvDatos.lineas[i].venta_detalle_id, cantidad: cant });
   });
   if(!lineas.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura al menos una cantidad a devolver.</div>'; return; }
-  const formaPagoId = $('dv-forma').value;
-  if(!formaPagoId){ $('dv-error').innerHTML = '<div class="msg-error">Elige con qué forma de pago se va a reembolsar.</div>'; return; }
   const totalDevolver = renderDevolverTotal();
-  const neto = netoPorForma(dvDatos.pagos).find(f=>f.forma_pago_id===formaPagoId);
-  if(!neto || neto.neto + 0.005 < totalDevolver){
-    $('dv-error').innerHTML = '<div class="msg-error">No se puede devolver más de lo que se pagó con esa forma de pago.</div>';
+  if(!dvPagos.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura con qué forma(s) de pago se va a reembolsar.</div>'; return; }
+  const pagosNetos = netoPorForma(dvDatos.pagos);
+  for(const p of dvPagos){
+    const monto = parseMoney(p.monto)||0;
+    if(!(monto > 0)){ $('dv-error').innerHTML = '<div class="msg-error">Cada forma de pago del reembolso debe tener un monto mayor a 0.</div>'; return; }
+    const neto = pagosNetos.find(f=>f.forma_pago_id===p.formaPagoId);
+    if(!neto || monto > neto.neto + 0.005){
+      $('dv-error').innerHTML = '<div class="msg-error">No se puede devolver más de lo que se pagó con alguna de las formas de pago elegidas.</div>';
+      return;
+    }
+  }
+  const repartido = redondear2(dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0));
+  if(Math.abs(repartido - totalDevolver) > 0.005){
+    $('dv-error').innerHTML = `<div class="msg-error">Lo repartido entre las formas de pago (${money(repartido)}) no coincide con el total a devolver (${money(totalDevolver)}).</div>`;
     return;
   }
   $('dv-confirmar').disabled = true;
+  const payloadPagos = dvPagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0 }));
   const { error } = await sb.rpc('devolver_venta', {
-    p_venta_id: dvVentaId, p_lineas: lineas, p_motivo: motivo, p_forma_pago_id: formaPagoId,
+    p_venta_id: dvVentaId, p_lineas: lineas, p_motivo: motivo, p_pagos: payloadPagos,
     p_sesion_caja_actual_id: state.sesionCaja.id, p_autorizado_por: dvAutorizadoPor,
   });
   $('dv-confirmar').disabled = false;
@@ -2458,9 +2597,34 @@ async function calcularResumenCierre(){
   const salidas = (movs||[]).filter(m=>m.tipo==='salida').reduce((s,m)=>s+Number(m.monto),0);
   const fondoInicial = Number(sesion.fondo_inicial);
   const esperado = fondoInicial + ventasEfectivo + entradas - salidas;
-  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose, movimientos: movs||[] };
+  // Detalle de ventas completadas/canceladas, devoluciones y modificaciones de esta sesión — se pide
+  // aparte (mismo RPC que ya se usaba en la pantalla de resultado) para mostrarlo también en la
+  // vista previa, antes de confirmar el cierre. Si falla, no bloquea la vista previa — se omite.
+  let reporteSesion = null;
+  try{
+    const resp = await sb.rpc('reporte_ventas', { p_sesion_caja_id: sesion.id });
+    if(!resp.error) reporteSesion = resp.data;
+  } catch(err){ /* se ignora, ver comentario arriba */ }
+  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose, movimientos: movs||[], reporteSesion };
 }
 
+// Bloque en pantalla "Movimientos de caja" (Ronda 19): cantidad+importe de ventas completadas y
+// canceladas, artículos devueltos, y cantidad de tickets modificados — usado tanto en la vista previa
+// de "Cerrar caja" como en la pantalla de resultado "Caja cerrada".
+function htmlMovimientosCajaResumen(reporte){
+  if(!reporte) return '';
+  const vc = reporte.ventas_completadas || {cantidad:0, importe:0};
+  const vcan = reporte.ventas_canceladas || {cantidad:0, importe:0};
+  const ad = reporte.articulos_devueltos || {cantidad:0, importe:0};
+  const tm = reporte.tickets_modificados || {cantidad:0};
+  return `
+    <p class="nota" style="margin-top:10px;margin-bottom:2px;"><strong>Movimientos de caja</strong></p>
+    <div class="linea"><span>Ventas completadas <span class="nota">(${vc.cantidad})</span></span><span>${money(vc.importe)}</span></div>
+    <div class="linea"><span>Ventas canceladas <span class="nota">(${vcan.cantidad})</span></span><span>${money(vcan.importe)}</span></div>
+    <div class="linea"><span>Artículos devueltos <span class="nota">(${ad.cantidad})</span></span><span>${money(ad.importe)}</span></div>
+    <div class="linea"><span>Tickets modificados</span><span>${tm.cantidad}</span></div>
+  `;
+}
 function notaComprobante(nombre){
   if(/tarjeta/i.test(nombre)) return 'entregar los vouchers/comprobantes de la terminal';
   if(/transferencia/i.test(nombre)) return 'validar los comprobantes de transferencia';
@@ -2484,6 +2648,7 @@ function renderResumenCierre(r){
     <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventasCredito)}</span></div>
     ${htmlGrupoConSubtotal('Entradas de efectivo', clasificarMovimientos(r.movimientos).entradas.filas, clasificarMovimientos(r.movimientos).entradas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
     ${htmlGrupoConSubtotal('Salidas de efectivo', clasificarMovimientos(r.movimientos).salidas.filas, clasificarMovimientos(r.movimientos).salidas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
+    ${htmlMovimientosCajaResumen(r.reporteSesion)}
   `;
 }
 
@@ -2629,6 +2794,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     <div class="linea"><span>Ventas a crédito <span class="nota">(entregar tickets/pagarés firmados por el cliente)</span></span><span>${money(r.ventas_credito)}</span></div>
     ${htmlGrupoConSubtotal('Entradas de efectivo', movsSesion.entradas.filas, movsSesion.entradas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
     ${htmlGrupoConSubtotal('Salidas de efectivo', movsSesion.salidas.filas, movsSesion.salidas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
+    ${htmlMovimientosCajaResumen(reporteSesion)}
   `;
   $('modal-resultado-cierre').classList.add('activo');
   $('resultado-cierre-ok').focus();
@@ -2699,7 +2865,8 @@ function renderResumenReporteVentas(reporte){
     <div class="linea"><span>Venta total sin impuestos</span><span>${money(reporte.venta_sin_impuestos)}</span></div>
     ${impuestosHtml}
     <div class="linea total-final"><span>Total general</span><span>${money(reporte.total_general)}</span></div>
-    <p class="nota" style="margin-top:10px;">${(reporte.productos||[]).length} producto${(reporte.productos||[]).length===1?'':'s'} distinto${(reporte.productos||[]).length===1?'':'s'} en el listado — el detalle completo, agrupado por categoría y línea con subtotales, va en el archivo exportado.</p>
+    <p class="nota" style="margin-top:10px;">${(reporte.productos||[]).length} producto${(reporte.productos||[]).length===1?'':'s'} distinto${(reporte.productos||[]).length===1?'':'s'} en el listado (solo de ventas completadas) — el detalle completo, agrupado por categoría y línea con subtotales, va en el archivo exportado.</p>
+    ${htmlMovimientosCajaResumen(reporte)}
   `;
 }
 async function exportarReporteVentasPDF(reporte){
@@ -2817,6 +2984,21 @@ function hojaFormasPagoMovimientos(reporte, { desde, hasta, filtroTexto, incluir
     movs.entradas.filas.map(m=>[m.motivo||'(sin concepto)', Number(m.monto)||0]), movs.entradas.subtotal);
   agregarGrupo('Salidas de efectivo', ['Concepto','Importe'],
     movs.salidas.filas.map(m=>[m.motivo||'(sin concepto)', Number(m.monto)||0]), movs.salidas.subtotal);
+
+  // Sección "Movimientos de caja" (Ronda 19): cantidad+importe de ventas completadas/canceladas y
+  // artículos devueltos, más la cantidad (sin importe) de tickets modificados.
+  const vc = reporte.ventas_completadas || {cantidad:0, importe:0};
+  const vcan = reporte.ventas_canceladas || {cantidad:0, importe:0};
+  const ad = reporte.articulos_devueltos || {cantidad:0, importe:0};
+  const tm = reporte.tickets_modificados || {cantidad:0};
+  filas.push(['Movimientos de caja']);
+  filas.push(['Concepto','Cantidad','Importe']);
+  let filaMov = filas.length;
+  filas.push(['Ventas completadas', vc.cantidad, Number(vc.importe)||0]); celdasMoneda.push({r:filaMov,c:2}); filaMov++;
+  filas.push(['Ventas canceladas', vcan.cantidad, Number(vcan.importe)||0]); celdasMoneda.push({r:filaMov,c:2}); filaMov++;
+  filas.push(['Artículos devueltos', ad.cantidad, Number(ad.importe)||0]); celdasMoneda.push({r:filaMov,c:2}); filaMov++;
+  filas.push(['Tickets modificados', tm.cantidad, '']); filaMov++;
+  filas.push([]);
 
   const ws = XLSX.utils.aoa_to_sheet(filas);
   celdasMoneda.forEach(({r,c})=>{
