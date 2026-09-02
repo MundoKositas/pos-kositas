@@ -537,7 +537,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.006';
+const APP_VERSION = '1.4.007';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -2173,10 +2173,26 @@ function renderVentasDiaFiltradas(){
   );
   $('vd-vacio').style.display = ventas.length ? 'none' : 'block';
   const hoyISO = fechaLocalISO();
-  $('vd-body').innerHTML = ventas.map(v=>{
+  // Encabezado de día: como el rango de fechas ahora puede abarcar varios días, se inserta una fila
+  // separadora cada vez que cambia el día calendario local (los tickets ya vienen ordenados por
+  // fecha_hora descendente, así que el cambio de día se detecta comparando contra la fila anterior).
+  let filasHtml = '';
+  let fechaAnterior = null;
+  ventas.forEach(v=>{
+    const fechaLocalDia = v.fecha_hora ? fechaLocalISO(new Date(v.fecha_hora)) : null;
+    if(fechaLocalDia !== fechaAnterior){
+      fechaAnterior = fechaLocalDia;
+      let etiquetaDia = 'Sin fecha';
+      if(fechaLocalDia){
+        etiquetaDia = new Date(fechaLocalDia + 'T00:00:00').toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+        etiquetaDia = etiquetaDia.charAt(0).toUpperCase() + etiquetaDia.slice(1);
+        if(fechaLocalDia === hoyISO) etiquetaDia += ' (hoy)';
+      }
+      filasHtml += `<tr><td colspan="7" style="background:#f3f4f6;font-weight:700;padding:8px 6px;">${etiquetaDia}</td></tr>`;
+    }
     // "mismo día" para habilitar modificar/cancelar = la fecha LOCAL del propio ticket es hoy — ya
     // no basta con comparar contra la fecha buscada, porque ahora el rango puede incluir varios días.
-    const esHoy = v.fecha_hora ? fechaLocalISO(new Date(v.fecha_hora)) === hoyISO : false;
+    const esHoy = fechaLocalDia === hoyISO;
     const esCompletada = v.estado === 'completada';
     const puedeModificar = esCompletada && esHoy && !v.articulo_unico;
     const puedeCancelar = esCompletada && esHoy;
@@ -2185,7 +2201,7 @@ function renderVentasDiaFiltradas(){
       ? 'Este ticket es de un solo producto y una sola pieza — solo se puede cancelar o devolver'
       : (puedeModificar ? 'Modificar' : 'Solo se puede modificar el mismo día, sin devoluciones');
     const hora = v.fecha_hora ? new Date(v.fecha_hora).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
-    return `<tr>
+    filasHtml += `<tr>
       <td>${v.folio}${v.tiene_devolucion ? ' <span class="nota" style="display:inline;">(con devolución)</span>' : ''}</td>
       <td>${hora}</td>
       <td>${v.cliente}</td>
@@ -2199,7 +2215,8 @@ function renderVentasDiaFiltradas(){
         <button class="btn-secundario vd-devolver" data-id="${v.venta_id}" ${puedeDevolver?'':'disabled'} title="${puedeDevolver?'Devolver':'Este ticket ya está cancelado'}">↩</button>
       </td>
     </tr>`;
-  }).join('');
+  });
+  $('vd-body').innerHTML = filasHtml;
   $('vd-body').querySelectorAll('.vd-reimprimir').forEach(b=>b.addEventListener('click', ()=>abrirReimprimirTicket(b.dataset.id)));
   $('vd-body').querySelectorAll('.vd-modificar').forEach(b=>b.addEventListener('click', ()=>abrirModificarVenta(b.dataset.id)));
   $('vd-body').querySelectorAll('.vd-cancelar').forEach(b=>b.addEventListener('click', ()=>abrirCancelarVenta(b.dataset.id)));
