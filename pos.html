@@ -14,6 +14,7 @@
     --bg:#f4f6f5; --card:#ffffff; --borde:#e2e5e3; --texto:#222;
   }
   *{box-sizing:border-box;}
+  .editar-producto-link{font-size:.78rem;color:var(--verde-osc);text-decoration:underline;white-space:nowrap;}
   body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--texto);}
   header{background:var(--verde);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
   header .marca{font-weight:700;font-size:1.1rem;}
@@ -333,7 +334,7 @@
 <div class="modal-fondo" id="modal-devolver-venta">
   <div class="modal" style="max-width:560px;">
     <h2 id="dv-titulo">Devolver artículos</h2>
-    <p class="nota">Captura cuántas piezas de cada línea se devuelven (deja en 0 lo que no aplique). El dinero se regresa en efectivo desde la caja actual.</p>
+    <p class="nota">Captura cuántas piezas de cada línea se devuelven (deja en 0 lo que no aplique). El dinero se regresa con la misma forma de pago con la que se pagó el ticket, sin poder pasarse de lo que se pagó con ella.</p>
     <div class="tabla-scroll">
       <table>
         <thead><tr><th>Artículo</th><th class="num">Ya devuelto</th><th class="num">Comprado</th><th class="num">A devolver</th></tr></thead>
@@ -341,6 +342,7 @@
       </table>
     </div>
     <div class="totales" id="dv-total" style="margin-top:10px;"></div>
+    <div class="campo" style="margin-top:10px;"><label>Forma de pago para el reembolso</label><select id="dv-forma"></select></div>
     <div class="campo" style="margin-top:10px;"><label>Motivo</label><input type="text" id="dv-motivo" placeholder="Ej. cliente ya no lo quiso, venía dañado, etc."></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="dv-cancelar">Cerrar</button>
@@ -511,7 +513,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.001';
+const APP_VERSION = '1.4.002';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -818,6 +820,20 @@ async function iniciarSesionApp(){
 
 function llenarSelect(id, items, valFn, textFn){
   $(id).innerHTML = items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
+}
+
+// Neto disponible por forma de pago para un ticket: suma venta_pagos agrupado por forma_pago_id.
+// Como cada ajuste/devolución previa ya se registra como un renglón NEGATIVO en venta_pagos, esta
+// suma refleja "cuánto de esa forma sigue pendiente de reembolsar" — el mismo criterio que usan los
+// RPCs modificar_venta/devolver_venta en el servidor para topar el reembolso.
+function netoPorForma(pagos){
+  const mapa = new Map();
+  (pagos||[]).forEach(p=>{
+    const actual = mapa.get(p.forma_pago_id) || { forma_pago_id: p.forma_pago_id, nombre: p.forma_pago, neto: 0 };
+    actual.neto += Number(p.monto) || 0;
+    mapa.set(p.forma_pago_id, actual);
+  });
+  return Array.from(mapa.values()).filter(f=>f.neto > 0.005);
 }
 
 function mostrarError(msg){
@@ -1348,15 +1364,24 @@ function renderCarrito(){
     // por si a esta línea ya se le fijó su propia lista de precios.
     l.precio = precioParaLinea(l);
     const sinPrecio = l.precio === null;
+    const linkEditarProducto = tienePermiso('pos.ver_editar_producto')
+      ? ` <a href="#" class="editar-producto-link" data-variante="${l.varianteId}" title="Abrir este producto en Admin">Editar producto</a>`
+      : '';
     return `
     <tr>
-      <td>${l.nombre}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}${notaLineaEditada(l)}</td>
+      <td>${l.nombre}${linkEditarProducto}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}${notaLineaEditada(l)}</td>
       <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(precioMostrar(l)*l.cantidad)}</td>
       <td style="white-space:nowrap;"><button class="btn-gris editar-linea" data-idx="${i}" title="Cambiar lista de precio, descuento o precio manual">✎</button> <button class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`;
   }).join('');
+  body.querySelectorAll('.editar-producto-link').forEach(a=>{
+    a.addEventListener('click', (ev)=>{
+      ev.preventDefault();
+      window.open(`admin.html?variante=${encodeURIComponent(a.dataset.variante)}`, '_blank');
+    });
+  });
   body.querySelectorAll('.cant-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       const i = Number(inp.dataset.idx);
@@ -2046,9 +2071,12 @@ async function cargarVentasDia(){
   const esHoy = fecha === fechaLocalISO();
   $('vd-body').innerHTML = ventas.map(v=>{
     const esCompletada = v.estado === 'completada';
-    const puedeModificar = esCompletada && esHoy;
+    const puedeModificar = esCompletada && esHoy && !v.articulo_unico;
     const puedeCancelar = esCompletada && esHoy;
     const puedeDevolver = v.estado !== 'cancelada';
+    const tituloModificar = v.articulo_unico
+      ? 'Este ticket es de un solo producto y una sola pieza — solo se puede cancelar o devolver'
+      : (puedeModificar ? 'Modificar' : 'Solo se puede modificar el mismo día, sin devoluciones');
     const hora = v.fecha_hora ? new Date(v.fecha_hora).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
     return `<tr>
       <td>${v.folio}${v.tiene_devolucion ? ' <span class="nota" style="display:inline;">(con devolución)</span>' : ''}</td>
@@ -2059,7 +2087,7 @@ async function cargarVentasDia(){
       <td>${ESTADO_VENTA_ETIQUETA[v.estado] || v.estado}</td>
       <td style="white-space:nowrap;">
         <button class="btn-gris vd-reimprimir" data-id="${v.venta_id}" title="Reimprimir">🖨️</button>
-        <button class="btn-gris vd-modificar" data-id="${v.venta_id}" ${puedeModificar?'':'disabled'} title="${puedeModificar?'Modificar':'Solo se puede modificar el mismo día, sin devoluciones'}">✎</button>
+        <button class="btn-gris vd-modificar" data-id="${v.venta_id}" ${puedeModificar?'':'disabled'} title="${tituloModificar}">✎</button>
         <button class="btn-peligro vd-cancelar" data-id="${v.venta_id}" ${puedeCancelar?'':'disabled'} title="${puedeCancelar?'Cancelar':'Solo se puede cancelar el mismo día, sin devoluciones'}">✕</button>
         <button class="btn-secundario vd-devolver" data-id="${v.venta_id}" ${puedeDevolver?'':'disabled'} title="${puedeDevolver?'Devolver':'Este ticket ya está cancelado'}">↩</button>
       </td>
@@ -2111,6 +2139,10 @@ async function abrirModificarVenta(ventaId){
   if(error){ $('vd-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
   if(!data.mismo_dia){ $('vd-error').innerHTML = '<div class="msg-error">Solo se pueden modificar tickets del mismo día.</div>'; return; }
   if(data.estado !== 'completada'){ $('vd-error').innerHTML = '<div class="msg-error">Este ticket ya no se puede modificar (cancelado o con devolución).</div>'; return; }
+  if(data.lineas.length === 1 && Number(data.lineas[0].cantidad) === 1){
+    $('vd-error').innerHTML = '<div class="msg-error">Este ticket es de un solo producto y una sola pieza — solo se puede cancelar o devolver.</div>';
+    return;
+  }
 
   if(!tienePermiso('pos.modificar_venta')){
     const resultado = await pedirAutorizacionSupervisor('pos.modificar_venta', 'modificar este ticket');
@@ -2131,7 +2163,6 @@ async function abrirModificarVenta(ventaId){
   $('mv-error').innerHTML = '';
   $('mv-buscar').value = '';
   $('mv-resultados').innerHTML = '';
-  llenarSelect('mv-ajuste-forma', state.formasPago, f=>f.id, f=>f.nombre);
   renderModificarVenta();
   $('modal-modificar-venta').classList.add('activo');
 }
@@ -2183,9 +2214,20 @@ function renderModificarVenta(){
   if(Math.abs(diferencia) > 0.005){
     $('mv-ajuste-pago').style.display = 'block';
     $('mv-ajuste-nota').textContent = diferencia < 0
-      ? `Hay que reembolsar ${money(Math.abs(diferencia))} al cliente.`
+      ? `Hay que reembolsar ${money(Math.abs(diferencia))} al cliente. Solo se puede reembolsar con una forma de pago que se haya usado en el ticket, y hasta lo que se pagó con ella.`
       : `Hace falta cobrar ${money(diferencia)} adicionales.`;
     $('mv-ajuste-monto').value = money(Math.abs(diferencia));
+    // Si es reembolso (diferencia < 0), solo se ofrecen las formas de pago realmente usadas en el
+    // ticket, cada una topada a su neto pagado. Si es cobro adicional (diferencia > 0), se puede
+    // usar cualquier forma de pago activa — igual que al cobrar una venta normal.
+    const formasDisponibles = diferencia < 0
+      ? netoPorForma(mvDatos.pagos)
+      : state.formasPago.map(f=>({ forma_pago_id: f.id, nombre: f.nombre, neto: null }));
+    const valorPrevio = $('mv-ajuste-forma').value;
+    $('mv-ajuste-forma').innerHTML = formasDisponibles.length
+      ? formasDisponibles.map(f=>`<option value="${f.forma_pago_id}">${f.nombre}${f.neto!==null ? ' (disponible: '+money(f.neto)+')' : ''}</option>`).join('')
+      : '<option value="">Sin forma de pago disponible para reembolsar</option>';
+    if(formasDisponibles.some(f=>f.forma_pago_id===valorPrevio)) $('mv-ajuste-forma').value = valorPrevio;
   } else {
     $('mv-ajuste-pago').style.display = 'none';
   }
@@ -2224,6 +2266,13 @@ $('mv-guardar').addEventListener('click', async ()=>{
   if(Math.abs(diferencia) > 0.005){
     const formaPagoId = $('mv-ajuste-forma').value;
     if(!formaPagoId){ $('mv-error').innerHTML = '<div class="msg-error">Elige la forma de pago del ajuste.</div>'; return; }
+    if(diferencia < 0){
+      const neto = netoPorForma(mvDatos.pagos).find(f=>f.forma_pago_id===formaPagoId);
+      if(!neto || neto.neto + 0.005 < Math.abs(diferencia)){
+        $('mv-error').innerHTML = '<div class="msg-error">No se puede reembolsar más de lo que se pagó con esa forma de pago.</div>';
+        return;
+      }
+    }
     ajustePago = { forma_pago_id: formaPagoId, monto: diferencia, referencia: 'Ajuste por modificación de ticket ' + mvDatos.folio };
   }
   $('mv-guardar').disabled = true;
@@ -2295,6 +2344,10 @@ async function abrirDevolverVenta(ventaId){
   $('dv-titulo').textContent = `Devolver artículos — ${data.folio}`;
   $('dv-motivo').value = '';
   $('dv-error').innerHTML = '';
+  const formasDisponibles = netoPorForma(data.pagos);
+  $('dv-forma').innerHTML = formasDisponibles.length
+    ? formasDisponibles.map(f=>`<option value="${f.forma_pago_id}">${f.nombre} (disponible: ${money(f.neto)})</option>`).join('')
+    : '<option value="">Sin forma de pago disponible para reembolsar</option>';
   $('dv-body').innerHTML = data.lineas.map((l,i)=>{
     const disponible = l.cantidad - (l.cantidad_devuelta||0);
     return `<tr>
@@ -2331,9 +2384,17 @@ $('dv-confirmar').addEventListener('click', async ()=>{
     if(cant > 0) lineas.push({ venta_detalle_id: dvDatos.lineas[i].venta_detalle_id, cantidad: cant });
   });
   if(!lineas.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura al menos una cantidad a devolver.</div>'; return; }
+  const formaPagoId = $('dv-forma').value;
+  if(!formaPagoId){ $('dv-error').innerHTML = '<div class="msg-error">Elige con qué forma de pago se va a reembolsar.</div>'; return; }
+  const totalDevolver = renderDevolverTotal();
+  const neto = netoPorForma(dvDatos.pagos).find(f=>f.forma_pago_id===formaPagoId);
+  if(!neto || neto.neto + 0.005 < totalDevolver){
+    $('dv-error').innerHTML = '<div class="msg-error">No se puede devolver más de lo que se pagó con esa forma de pago.</div>';
+    return;
+  }
   $('dv-confirmar').disabled = true;
   const { error } = await sb.rpc('devolver_venta', {
-    p_venta_id: dvVentaId, p_lineas: lineas, p_motivo: motivo,
+    p_venta_id: dvVentaId, p_lineas: lineas, p_motivo: motivo, p_forma_pago_id: formaPagoId,
     p_sesion_caja_actual_id: state.sesionCaja.id, p_autorizado_por: dvAutorizadoPor,
   });
   $('dv-confirmar').disabled = false;

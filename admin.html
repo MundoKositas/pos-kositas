@@ -460,7 +460,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.6.005';
+const APP_VERSION = '1.6.006';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -778,6 +778,13 @@ async function iniciarSesionApp(){
   renderReporteChecks();
   renderActualizarPreciosChecks();
   mostrarPantalla('pantalla-admin');
+
+  // Si se llegó aquí desde el link "Editar producto" de POS (admin.html?variante=<id>), abre
+  // directamente la ficha de ese producto sin que el usuario tenga que buscarlo en el catálogo.
+  const varianteUrl = new URLSearchParams(window.location.search).get('variante');
+  if(varianteUrl && state.productos.some(p=>p.varianteId===varianteUrl)){
+    abrirProducto(varianteUrl);
+  }
 }
 
 function mostrarError(msg){
