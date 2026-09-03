@@ -495,11 +495,10 @@
         </div>
       </div>
       <p class="nota" id="prod-resumen-precio" style="margin:6px 0 0;"></p>
-    </div>
-
-    <div class="fila" id="prod-xml-pendiente-banner" style="display:none;background:#f0f7f2;border:1px solid var(--verde);border-radius:6px;padding:10px;margin-bottom:10px;justify-content:space-between;align-items:center;gap:10px;">
-      <span id="prod-xml-pendiente-texto" style="font-weight:600;"></span>
-      <button type="button" class="btn-gris" id="prod-xml-pendiente-omitir">Cancelar (volver a buscarlo)</button>
+      <div class="fila" id="prod-xml-pendiente-banner" style="display:none;background:#f0f7f2;border:1px solid var(--verde);border-radius:6px;padding:10px;margin-top:8px;justify-content:space-between;align-items:center;gap:10px;">
+        <span id="prod-xml-pendiente-texto" style="font-weight:600;"></span>
+        <button type="button" class="btn-gris" id="prod-xml-pendiente-omitir">Cancelar (volver a buscarlo)</button>
+      </div>
     </div>
 
     <div class="tabs" id="prod-tabs" style="margin-bottom:6px;">
@@ -709,7 +708,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.7.003';
+const APP_VERSION = '1.7.005';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -845,6 +844,7 @@ const state = {
   sucursales: [], almacenes: [], proveedores: [], usuariosEmpresa: [], permisosInventario: [],
   compraLineas: [], ajusteLineas: [], traspLineas: [],
   xmlPendientes: [], xmlPendientesTotalLote: 0, xmlPendienteActivo: false, xmlProveedorId: null,
+  xmlCfdiUuid: null,
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -1659,6 +1659,17 @@ function irAPanelDatos(){
   $('prod-panel-kardex').style.display = 'none';
 }
 
+// El título vive en el encabezado sticky del modal (siempre visible, aunque se baje a precios o
+// códigos de barra) y se actualiza en vivo mientras se escribe el nombre — así, dando de alta varios
+// productos seguidos (por ejemplo desde el flujo de XML), nunca se pierde de vista cuál se está
+// capturando (pedido de Adrián).
+function actualizarTituloProducto(){
+  const nombre = $('prod-nombre').value.trim();
+  const prefijo = state.varianteEditId ? 'Editar producto' : 'Nuevo producto';
+  $('producto-titulo').textContent = nombre ? `${prefijo} — ${nombre}` : prefijo;
+}
+$('prod-nombre').addEventListener('input', actualizarTituloProducto);
+
 function abrirProducto(varianteId){
   // Reset del flujo de "altas pendientes de XML" — solo se reactiva explícitamente desde
   // el handler de "xml-asociar-dar-alta", justo después de llamar a esta función. Cualquier otro camino que
@@ -1672,8 +1683,8 @@ function abrirProducto(varianteId){
   state.imagenUrlActual = p?.imagenUrl || null;
   state.imagenUrlNueva = null;
   $('prod-error').innerHTML = '';
-  $('producto-titulo').textContent = p ? `Editar producto — ${p.nombre}` : 'Nuevo producto';
   $('prod-nombre').value = p?.nombre || '';
+  actualizarTituloProducto();
   llenarSelectMarcas(p?.marca || '');
   $('prod-clave-sat').value = p?.claveSat || '';
   $('prod-minimo').value = p?.minimo ?? 0;
@@ -2563,6 +2574,7 @@ function prepararPantallaCompras(){
   if(!$('compra-fecha').value) $('compra-fecha').value = fechaLocalISO();
   $('compra-con-impuestos').checked = state.desglosarImpuestos === false;
   state.compraLineas = [];
+  state.xmlCfdiUuid = null;
   renderLineasCompra();
   buscadorProducto('compra-buscar-producto', 'compra-resultados-busqueda', agregarLineaCompra, (q)=>{
     $('compra-producto-no-encontrado').style.display = 'block';
@@ -2680,6 +2692,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
     usuario_id: state.usuario.id,
     origen: 'manual',
     lista_publico_id: listaPublica ? listaPublica.id : null,
+    cfdi_uuid: state.xmlCfdiUuid || null,
     lineas: state.compraLineas.map(l=>({
       variante_id: l.varianteId, cantidad: Number(l.cantidad)||0, costo_unitario: Number(l.costoUnitario)||0,
       precio_publico: l.precioPublico != null && l.precioPublico !== '' ? Number(l.precioPublico) : null,
@@ -2690,6 +2703,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   $('compra-registrar').disabled = false;
   if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
   state.compraLineas = [];
+  state.xmlCfdiUuid = null;
   $('compra-folio').value = '';
   renderLineasCompra();
   await cargarProductos();
@@ -2739,6 +2753,20 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
     const fecha = (comprobante.getAttribute('Fecha') || '').slice(0,10) || fechaLocalISO();
     const conceptos = Array.from(doc.querySelectorAll('Concepto'));
     if(!conceptos.length) throw new Error('El XML no trae ningún concepto (Conceptos vacío) — revisa que sea un CFDI de compra.');
+
+    // El UUID del Timbre Fiscal Digital es el identificador único del CFDI (lo asigna el SAT al
+    // timbrar) — se usa para detectar si este mismo XML ya se registró antes, sin depender del folio
+    // (que un proveedor podría repetir) ni de que el usuario recuerde haberlo subido ya.
+    const timbre = doc.querySelector('TimbreFiscalDigital');
+    const cfdiUuid = (timbre?.getAttribute('UUID') || '').trim();
+    if(cfdiUuid){
+      const { data: yaRegistrada } = await sb.from('compras').select('id, folio_documento, fecha_compra')
+        .eq('empresa_id', state.empresaId).eq('cfdi_uuid', cfdiUuid).maybeSingle();
+      if(yaRegistrada){
+        throw new Error(`Esta factura ya fue registrada antes (folio ${yaRegistrada.folio_documento || 's/folio'}, fecha ${yaRegistrada.fecha_compra}) — no se volvió a leer para evitar duplicar el inventario.`);
+      }
+    }
+    state.xmlCfdiUuid = cfdiUuid || null;
 
     // Proveedor primero: se resuelve/da de alta ANTES de emparejar conceptos, para poder consultar
     // sus referencias ya guardadas de facturas anteriores (proveedor_producto_referencias) — así,
@@ -2867,6 +2895,7 @@ $('xml-asociar-dar-alta').addEventListener('click', ()=>{
   abrirProducto(null); // ojo: resetea state.xmlPendienteActivo a false — se activa DESPUÉS, no antes
   state.xmlPendienteActivo = true;
   $('prod-nombre').value = pend.descripcion || '';
+  actualizarTituloProducto();
   $('prod-clave-sat').value = pend.claveProdServ || '';
   if(pend.tasaXml > 0){
     const impMatch = state.impuestos.find(i=>i.tipo_factor==='tasa' && Math.abs(Number(i.tasa)-pend.tasaXml) < 0.001);
