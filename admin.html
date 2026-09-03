@@ -708,7 +708,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.7.005';
+const APP_VERSION = '1.7.007';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1080,6 +1080,11 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     document.querySelectorAll('.tab-panel').forEach(p=>p.style.display='none');
     btn.classList.add('activo');
     $(btn.dataset.tab).style.display='block';
+    // Compras e Inventario solo se "preparaban" una vez al iniciar sesión, así que si el usuario
+    // salía y volvía a entrar veía la ficha (y el estado del XML) de la última vez. Ahora cada vez
+    // que se entra a la pestaña se reinicia limpio.
+    if(btn.dataset.tab === 'tab-compras') prepararPantallaCompras();
+    if(btn.dataset.tab === 'tab-inventario') prepararPantallaInventario();
   });
 });
 
@@ -1116,18 +1121,93 @@ async function cargarCatalogosBase(){
   state.marcas = marcas || [];
 
   llenarSelect('prod-categoria', state.categorias, c=>c.id, c=>c.nombre);
+  habilitarComboBuscable('prod-categoria');
   $('prod-categoria').addEventListener('change', ()=>{
     const lineasFiltradas = state.lineas.filter(l=>l.categoria_id === $('prod-categoria').value);
     llenarSelect('prod-linea', lineasFiltradas, l=>l.id, l=>l.nombre);
+    habilitarComboBuscable('prod-linea');
   });
   $('prod-categoria').dispatchEvent(new Event('change'));
   llenarSelect('prod-unidad', state.unidades, u=>u.id, u=>`${u.descripcion} (${u.clave})`);
+  habilitarComboBuscable('prod-unidad');
 
   llenarSelectConTodas('cat-filtro-categoria', state.categorias, c=>c.id, c=>c.nombre);
   llenarSelectConTodas('cat-filtro-linea', state.lineas, l=>l.id, l=>l.nombre);
 }
 function llenarSelect(id, items, valFn, textFn){
   $(id).innerHTML = items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
+}
+// ---------- COMBOS BUSCABLES (selects con catálogos que van creciendo: Proveedor, Marca, Categoría,
+// Línea de artículo, Unidad de medida) ----------
+// Adrián: "que puedan auto filtrar lo que estén escribiendo... conforme incrementen los registros se
+// complica la selección". Convierte un <select> ya poblado en un combo con caja de texto que filtra
+// las opciones por cualquier parte del texto (no solo por la letra inicial, como el filtro nativo del
+// navegador). El <select> original se oculta pero se queda como la fuente de verdad: todo el código
+// existente que lee o asigna su .value, o que escucha su evento 'change', sigue funcionando igual sin
+// tocarlo. Repoblar el select después (llenarSelect, innerHTML, etc.) no requiere volver a llamar esta
+// función para que el buscador vea las opciones nuevas — relee las <option> del select cada vez que se
+// abre — pero si el CÓDIGO asigna select.value directamente (sin pasar por el buscador), hay que llamar
+// refrescarComboBuscable(id) después para que el texto mostrado quede sincronizado con esa selección.
+function habilitarComboBuscable(selectId){
+  const select = $(selectId);
+  if(select.dataset.comboListo){ refrescarComboBuscable(selectId); return; }
+  select.dataset.comboListo = '1';
+  select.style.display = 'none';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.placeholder = 'Escribe para buscar…';
+  input.id = selectId + '-buscar';
+  const resultados = document.createElement('div');
+  resultados.className = 'resultados';
+  resultados.id = selectId + '-resultados';
+  select.insertAdjacentElement('afterend', resultados);
+  select.insertAdjacentElement('afterend', input);
+
+  const render = (q)=>{
+    const qLower = q.trim().toLowerCase();
+    const opciones = Array.from(select.options);
+    const filtradas = qLower ? opciones.filter(o=>o.text.toLowerCase().includes(qLower)) : opciones;
+    resultados.innerHTML = filtradas.slice(0,50).map(o=>`<div class="resultado-item" data-valor="${o.value}"><span>${o.text}</span></div>`).join('')
+      || '<div class="resultado-item">Sin resultados</div>';
+    resultados.querySelectorAll('.resultado-item[data-valor]').forEach(el=>{
+      // mousedown (no click) para que corra ANTES del blur del input — si no, el blur cierra la
+      // lista y el click nunca llega al elemento.
+      el.addEventListener('mousedown', (e)=>{
+        e.preventDefault();
+        select.value = el.dataset.valor;
+        select.dispatchEvent(new Event('change'));
+        refrescarComboBuscable(selectId);
+        resultados.innerHTML = '';
+        input.blur();
+      });
+    });
+  };
+  input.addEventListener('focus', ()=>{ input.select(); render(''); });
+  input.addEventListener('input', ()=>render(input.value));
+  input.addEventListener('keydown', e=>{
+    if(e.key === 'Escape'){ resultados.innerHTML=''; input.blur(); }
+    if(e.key !== 'Enter') return;
+    e.preventDefault();
+    const q = input.value.trim().toLowerCase();
+    const coincidencias = Array.from(select.options).filter(o=>o.text.toLowerCase().includes(q));
+    if(coincidencias.length === 1){
+      select.value = coincidencias[0].value;
+      select.dispatchEvent(new Event('change'));
+      refrescarComboBuscable(selectId);
+      resultados.innerHTML = '';
+      input.blur();
+    }
+  });
+  input.addEventListener('blur', ()=>{ setTimeout(()=>{ resultados.innerHTML=''; refrescarComboBuscable(selectId); }, 150); });
+  refrescarComboBuscable(selectId);
+}
+function refrescarComboBuscable(selectId){
+  const input = $(selectId + '-buscar');
+  if(!input) return;
+  const select = $(selectId);
+  const actual = select.options[select.selectedIndex];
+  input.value = actual ? actual.text : '';
 }
 function llenarSelectConTodas(id, items, valFn, textFn){
   const valorActual = $(id).value;
@@ -1149,6 +1229,7 @@ function llenarSelectMarcas(valorSeleccionado){
   }
   $('prod-marca').innerHTML = html;
   $('prod-marca').value = valorSeleccionado || '';
+  habilitarComboBuscable('prod-marca');
   $('prod-marca-nueva').style.display = 'none';
   $('prod-marca-nueva-error').innerHTML = '';
 }
@@ -1164,6 +1245,7 @@ $('prod-marca').addEventListener('change', ()=>{
 $('prod-marca-nueva-cancelar').addEventListener('click', ()=>{
   $('prod-marca-nueva').style.display = 'none';
   $('prod-marca').value = '';
+  refrescarComboBuscable('prod-marca');
 });
 $('prod-marca-nueva-guardar').addEventListener('click', async ()=>{
   const nombre = $('prod-marca-nueva-nombre').value.trim();
@@ -1350,12 +1432,19 @@ function agruparPorCategoriaLinea(filas){
 // {filas, tipos} — tipos[i] describe cada fila para que el exportador la formatee (colores/negritas).
 // Deja un renglón en blanco (tipo 'espacio') después de cada Subtotal línea y cada Subtotal
 // categoría, para que el reporte impreso se lea con aire entre grupos (pedido por Adrián).
-function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols){
+// mostrarConteo (opcional, default false): agrega "— N producto(s)" a las etiquetas de Subtotal
+// línea/categoría y TOTAL GENERAL — usado por el Reporte de lista de precios, donde las columnas son
+// precios unitarios por lista (sumarlas entre productos distintos no significa nada, a diferencia de
+// Stock o Cantidad de resurtido), así que el conteo de productos es el número que sí tiene sentido
+// mostrar en cada grupo.
+function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols, mostrarConteo){
   const filas = []; const tipos = [];
   const totalGeneral = new Array(numCols-1).fill(0);
+  let conteoGeneral = 0;
   grupos.forEach(g=>{
     filas.push([`Categoría: ${g.categoria}`, ...new Array(numCols-1).fill('')]); tipos.push('grupo');
     const subtotalCategoria = new Array(numCols-1).fill(0);
+    let conteoCategoria = 0;
     g.lineas.forEach(l=>{
       filas.push([`Línea: ${l.linea}`, ...new Array(numCols-1).fill('')]); tipos.push('subgrupo');
       const subtotalLinea = new Array(numCols-1).fill(0);
@@ -1365,19 +1454,21 @@ function filasAgrupadasConSubtotales(grupos, filaProducto, columnasSuma, numCols
         columnasSuma.forEach(i=>{ subtotalLinea[i-1] += Number(fila[i])||0; });
       });
       const filaSub = new Array(numCols).fill('');
-      filaSub[0] = `Subtotal línea "${l.linea}"`;
+      filaSub[0] = `Subtotal línea "${l.linea}"${mostrarConteo ? ` — ${l.filas.length} producto(s)` : ''}`;
       columnasSuma.forEach(i=>{ filaSub[i] = redondear2(subtotalLinea[i-1]); subtotalCategoria[i-1] += subtotalLinea[i-1]; });
       filas.push(filaSub); tipos.push('subtotal');
       filas.push(new Array(numCols).fill('')); tipos.push('espacio');
+      conteoCategoria += l.filas.length;
     });
     const filaSubCat = new Array(numCols).fill('');
-    filaSubCat[0] = `Subtotal categoría "${g.categoria}"`;
+    filaSubCat[0] = `Subtotal categoría "${g.categoria}"${mostrarConteo ? ` — ${conteoCategoria} producto(s)` : ''}`;
     columnasSuma.forEach(i=>{ filaSubCat[i] = redondear2(subtotalCategoria[i-1]); totalGeneral[i-1] += subtotalCategoria[i-1]; });
     filas.push(filaSubCat); tipos.push('subtotalCategoria');
     filas.push(new Array(numCols).fill('')); tipos.push('espacio');
+    conteoGeneral += conteoCategoria;
   });
   const filaTotal = new Array(numCols).fill('');
-  filaTotal[0] = 'TOTAL GENERAL';
+  filaTotal[0] = `TOTAL GENERAL${mostrarConteo ? ` — ${conteoGeneral} producto(s)` : ''}`;
   columnasSuma.forEach(i=>{ filaTotal[i] = redondear2(totalGeneral[i-1]); });
   filas.push(filaTotal); tipos.push('total');
   return { filas, tipos };
@@ -1708,11 +1799,15 @@ function abrirProducto(varianteId){
 
   if(p){
     $('prod-categoria').value = state.lineas.find(l=>l.id===p.lineaArticuloId)?.categoria_id || state.categorias[0]?.id || '';
+    refrescarComboBuscable('prod-categoria');
     $('prod-categoria').dispatchEvent(new Event('change'));
     $('prod-linea').value = p.lineaArticuloId || '';
+    refrescarComboBuscable('prod-linea');
     $('prod-unidad').value = p.unidadMedidaId || '';
+    refrescarComboBuscable('prod-unidad');
   } else {
     $('prod-categoria').selectedIndex = 0;
+    refrescarComboBuscable('prod-categoria');
     $('prod-categoria').dispatchEvent(new Event('change'));
   }
 
@@ -2389,47 +2484,56 @@ function renderReporteChecks(){
 }
 $('reporte-con-impuestos').addEventListener('change', renderReporte);
 
-function renderReporte(){
-  const listaIds = Array.from(document.querySelectorAll('.chk-reporte-lista:checked')).map(chk=>chk.value);
-  const listas = state.listasPrecio.filter(l=>listaIds.includes(l.id));
-  const conImpuestos = $('reporte-con-impuestos').checked;
-  $('reporte-encabezado').innerHTML = '<th>Producto</th>' + listas.map(l=>`<th class="num">${l.nombre}${conImpuestos?' (con imp.)':' (sin imp.)'}</th>`).join('');
-  const productosOrdenados = [...state.productos].sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  $('reporte-tabla-body').innerHTML = productosOrdenados.map(p=>{
+// A petición de Adrián: agrupado por Categoría → Línea de artículo (mismo patrón que Existencias/
+// Resurtido), con un renglón en blanco después de cada grupo y, ya que las columnas de precio son
+// valores UNITARIOS por lista (sumarlos entre productos no significa nada), el "subtotal" de cada
+// grupo es el conteo de productos en vez de una suma en pesos (ver mostrarConteo en
+// filasAgrupadasConSubtotales).
+function filasBaseReportePrecios(listas, conImpuestos){
+  return state.productos.map(p=>{
+    const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
+    const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
     const tasaProducto = p.impuestos.reduce((s,i)=>s+i.tasa, 0);
     const celdas = listas.map(l=>{
       const precio = p.precios.find(pr=>pr.listaPrecioId===l.id);
-      if(!precio) return `<td class="num">—</td>`;
-      const valor = conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : precio.precio;
-      return `<td class="num">${money(valor)}</td>`;
-    }).join('');
-    return `<tr><td>${p.nombre}${p.marca?` <span class="nota">(${p.marca})</span>`:''}</td>${celdas}</tr>`;
-  }).join('');
+      if(!precio) return ''; // sin precio en esa lista
+      return conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : redondear2(precio.precio);
+    });
+    return {
+      lineaNombre: linea?.nombre, categoriaNombre: categoria?.nombre,
+      producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, celdas,
+    };
+  }).sort((a,b)=>a.producto.localeCompare(b.producto));
 }
-
-// ---------- EXPORTAR REPORTE DE PRECIOS (PDF / Excel) ----------
 // Recalcula las mismas filas que se ven en pantalla (mismas listas marcadas, mismo modo con/sin
-// impuestos) para que lo exportado siempre coincida con lo que el usuario está viendo. Las columnas
-// de precio se regresan como número (no como texto ya formateado con "$") para que cada exportador
-// pueda alinearlas a la derecha con el mecanismo nativo de cada formato (ver exportarReporteExcel/PDF).
+// impuestos) para que lo exportado siempre coincida con lo que el usuario está viendo.
 function datosReporteActual(){
   const listaIds = Array.from(document.querySelectorAll('.chk-reporte-lista:checked')).map(chk=>chk.value);
   const listas = state.listasPrecio.filter(l=>listaIds.includes(l.id));
   const conImpuestos = $('reporte-con-impuestos').checked;
-  const productosOrdenados = [...state.productos].sort((a,b)=>a.nombre.localeCompare(b.nombre));
   const encabezados = ['Producto', ...listas.map(l=>`${l.nombre}${conImpuestos?' (con imp.)':' (sin imp.)'}`)];
-  const filas = productosOrdenados.map(p=>{
-    const tasaProducto = p.impuestos.reduce((s,i)=>s+i.tasa, 0);
-    const nombreCol = p.marca ? `${p.nombre} (${p.marca})` : p.nombre;
-    const celdas = listas.map(l=>{
-      const precio = p.precios.find(pr=>pr.listaPrecioId===l.id);
-      if(!precio) return null; // sin precio en esa lista — cada exportador decide cómo mostrarlo (ej. "—")
-      return conImpuestos ? redondear2(precio.precio * (1+tasaProducto)) : redondear2(precio.precio);
-    });
-    return [nombreCol, ...celdas];
-  });
-  return { encabezados, filas, conImpuestos };
+  const grupos = agruparPorCategoriaLinea(filasBaseReportePrecios(listas, conImpuestos));
+  const { filas, tipos } = filasAgrupadasConSubtotales(
+    grupos, f=>[f.producto, ...f.celdas], [], encabezados.length, true
+  );
+  return { encabezados, filas, tipos, conImpuestos };
 }
+function renderReporte(){
+  const { encabezados, filas, tipos } = datosReporteActual();
+  $('reporte-encabezado').innerHTML = `<th>${encabezados[0]}</th>` +
+    encabezados.slice(1).map(h=>`<th class="num">${h}</th>`).join('');
+  $('reporte-tabla-body').innerHTML = filas.map((fila, i)=>{
+    const tipo = tipos[i];
+    if(tipo === 'espacio') return `<tr><td colspan="${encabezados.length}" style="height:12px;border:none;"></td></tr>`;
+    if(tipo === 'grupo') return `<tr><td colspan="${encabezados.length}" style="font-weight:700;background:#f3f4f6;">${fila[0]}</td></tr>`;
+    if(tipo === 'subgrupo') return `<tr><td colspan="${encabezados.length}" style="font-weight:600;">${fila[0]}</td></tr>`;
+    if(tipo === 'subtotal' || tipo === 'subtotalCategoria' || tipo === 'total') return `<tr><td colspan="${encabezados.length}" style="font-weight:700;">${fila[0]}</td></tr>`;
+    const celdas = fila.slice(1).map(v=>`<td class="num">${(v==null||v==='') ? '—' : money(v)}</td>`).join('');
+    return `<tr><td>${fila[0]}</td>${celdas}</tr>`;
+  }).join('');
+}
+
+// ---------- EXPORTAR REPORTE DE PRECIOS (PDF / Excel) ----------
 $('reporte-exportar').addEventListener('click', async ()=>{
   const formato = $('reporte-formato-exportar').value;
   if(formato === 'pdf') await exportarReportePDF(); else exportarReporteExcel();
@@ -2451,50 +2555,24 @@ async function logoComoDataUrl(){
     });
   } catch(err){ return null; }
 }
+// Mismos exportadores agrupados que usan Existencias/Resurtido — así el Reporte de precios exportado
+// también queda agrupado por Categoría/Línea con conteo de productos y renglón en blanco entre grupos.
 function exportarReporteExcel(){
-  const { encabezados, filas } = datosReporteActual();
-  // Las columnas de precio se escriben como número real de Excel (no texto con "$"), con formato de
-  // moneda vía el formato de celda (.z) — así Excel las alinea a la derecha de forma nativa, igual
-  // que cualquier columna numérica, sin depender de estilos de celda (que la versión gratuita de
-  // SheetJS no soporta escribir).
-  const datos = [encabezados, ...filas.map(fila => fila.map((v,i)=> i===0 ? v : (v==null ? '—' : v)))];
-  const ws = XLSX.utils.aoa_to_sheet(datos);
-  const rango = XLSX.utils.decode_range(ws['!ref']);
-  for(let f=1; f<=rango.e.r; f++){
-    for(let c=1; c<=rango.e.c; c++){
-      const celda = ws[XLSX.utils.encode_cell({r:f, c})];
-      if(celda && celda.t === 'n') celda.z = '"$"#,##0.00';
-    }
-  }
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Reporte de precios');
+  const { encabezados, filas, tipos } = datosReporteActual();
+  const columnasMoneda = encabezados.slice(1).map((_,i)=>i+1); // todas las columnas de lista de precio son dinero
   const fecha = fechaLocalISO();
-  XLSX.writeFile(wb, `reporte_precios_${fecha}.xlsx`);
+  exportarExcelAgrupado(`reporte_precios_${fecha}.xlsx`, 'Reporte de precios', encabezados, filas, tipos, columnasMoneda);
 }
 async function exportarReportePDF(){
-  const { encabezados, filas, conImpuestos } = datosReporteActual();
-  const cuerpo = filas.map(fila => fila.map((v,i)=> i===0 ? v : (v==null ? '—' : money(v))));
-  // columnStyles alinea a la derecha todas las columnas de precio (todas menos la 0, "Producto"),
-  // tanto en el encabezado como en el cuerpo de la tabla.
-  const columnStyles = {};
-  for(let i=1; i<encabezados.length; i++) columnStyles[i] = { halign: 'right' };
-  const logoDataUrl = await logoComoDataUrl();
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: encabezados.length > 4 ? 'landscape' : 'portrait' });
-  const margenTexto = logoDataUrl ? 34 : 14; // deja espacio para el logotipo a la izquierda del título
-  if(logoDataUrl){
-    try{ doc.addImage(logoDataUrl, 'PNG', 14, 8, 16, 16); } catch(err){ /* si el formato no es compatible, se omite el logotipo sin interrumpir la exportación */ }
-  }
-  doc.setFontSize(14);
-  doc.text(`Reporte de lista de precios — ${state.empresaNombre || ''}`, margenTexto, 16);
-  doc.setFontSize(10);
-  doc.text(`Generado: ${new Date().toLocaleString('es-MX')} — Precios ${conImpuestos?'con':'sin'} impuestos`, margenTexto, 22);
-  doc.autoTable({
-    head: [encabezados], body: cuerpo, startY: 28,
-    styles: { fontSize: 8 }, headStyles: { fillColor: [29, 95, 168] }, columnStyles,
-  });
+  const { encabezados, filas, tipos, conImpuestos } = datosReporteActual();
+  const columnasMoneda = encabezados.slice(1).map((_,i)=>i+1);
   const fecha = fechaLocalISO();
-  doc.save(`reporte_precios_${fecha}.pdf`);
+  await exportarPDFAgrupado(
+    `reporte_precios_${fecha}.pdf`,
+    `Reporte de lista de precios — ${state.empresaNombre || ''}`,
+    `Generado: ${new Date().toLocaleString('es-MX')} — Precios ${conImpuestos?'con':'sin'} impuestos`,
+    encabezados, filas, tipos, columnasMoneda
+  );
 }
 
 // ============================================================================================
@@ -2512,7 +2590,14 @@ async function exportarReportePDF(){
 // formatoCosto(producto) es opcional — cómo mostrar "Último costo" en los resultados (por default,
 // siempre sin impuestos); Compras lo usa para respetar el checkbox "con impuestos".
 function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados, formatoCosto){
-  const input = $(inputId);
+  // Las pantallas que usan este buscador (Compras, Ajustes, Traspasos, asociar XML) se re-preparan
+  // cada vez que se entra a su pestaña, así que esta función puede llamarse varias veces sobre el
+  // mismo <input> en la misma sesión. Sin este clon, cada llamada apilaría listeners nuevos encima de
+  // los anteriores (input duplicado, Enter agregando la línea varias veces, etc.). Clonar el nodo
+  // (conserva el id) descarta cualquier listener previamente pegado a él, del buscador o de fuera.
+  const original = $(inputId);
+  const input = original.cloneNode(true);
+  original.parentNode.replaceChild(input, original);
   const costoTexto = (p)=>{
     const v = formatoCosto ? formatoCosto(p) : p.costo;
     return v!=null ? money(v) : '—';
@@ -2571,10 +2656,17 @@ function llenarSelectAlmacenes(id, incluirVacio){
 function prepararPantallaCompras(){
   renderProveedorSelect();
   llenarSelectAlmacenes('compra-almacen', false);
-  if(!$('compra-fecha').value) $('compra-fecha').value = fechaLocalISO();
+  $('compra-fecha').value = fechaLocalISO();
+  $('compra-folio').value = '';
   $('compra-con-impuestos').checked = state.desglosarImpuestos === false;
+  $('compra-xml-estado').innerHTML = '';
+  $('compra-error').innerHTML = '';
   state.compraLineas = [];
   state.xmlCfdiUuid = null;
+  state.xmlPendientes = [];
+  state.xmlPendientesTotalLote = 0;
+  state.xmlPendienteActivo = false;
+  state.xmlProveedorId = null;
   renderLineasCompra();
   buscadorProducto('compra-buscar-producto', 'compra-resultados-busqueda', agregarLineaCompra, (q)=>{
     $('compra-producto-no-encontrado').style.display = 'block';
@@ -2592,6 +2684,7 @@ function renderProveedorSelect(){
   $('compra-proveedor').innerHTML = '<option value="">(sin proveedor)</option>' +
     state.proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
   if(valorPrevio && state.proveedores.some(p=>p.id===valorPrevio)) $('compra-proveedor').value = valorPrevio;
+  habilitarComboBuscable('compra-proveedor');
 }
 $('compra-proveedor-nuevo-abrir').addEventListener('click', ()=>{
   $('compra-proveedor-nuevo').style.display = 'flex';
@@ -2608,6 +2701,7 @@ $('compra-proveedor-nuevo-guardar').addEventListener('click', async ()=>{
   state.proveedores = proveedores || [];
   renderProveedorSelect();
   $('compra-proveedor').value = data;
+  refrescarComboBuscable('compra-proveedor');
   $('compra-proveedor-nuevo').style.display = 'none';
 });
 
@@ -2776,13 +2870,13 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
     let proveedorId = null;
     if(nombreEmisor){
       const yaExiste = state.proveedores.find(p=>p.nombre.trim().toLowerCase() === nombreEmisor.trim().toLowerCase());
-      if(yaExiste){ proveedorId = yaExiste.id; $('compra-proveedor').value = yaExiste.id; }
+      if(yaExiste){ proveedorId = yaExiste.id; $('compra-proveedor').value = yaExiste.id; refrescarComboBuscable('compra-proveedor'); }
       else {
         const { data } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre: nombreEmisor, rfc: rfcEmisor } });
         const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
         state.proveedores = proveedores || [];
         renderProveedorSelect();
-        if(data){ proveedorId = data; $('compra-proveedor').value = data; }
+        if(data){ proveedorId = data; $('compra-proveedor').value = data; refrescarComboBuscable('compra-proveedor'); }
       }
     }
     let referencias = new Map(); // no_identificacion -> variante_id, de facturas anteriores de este proveedor
@@ -2960,7 +3054,9 @@ function prepararPantallaInventario(){
 
   if(puedeAjustar){
     llenarSelectAlmacenes('ajuste-almacen', false);
-    if(!$('ajuste-fecha').value) $('ajuste-fecha').value = fechaLocalISO();
+    $('ajuste-fecha').value = fechaLocalISO();
+    $('ajuste-motivo').value = '';
+    $('ajuste-error').innerHTML = '';
     state.ajusteLineas = [];
     renderLineasAjuste();
     buscadorProducto('ajuste-buscar-producto', 'ajuste-resultados-busqueda', agregarLineaAjuste);
@@ -2968,6 +3064,8 @@ function prepararPantallaInventario(){
   if(puedeTraspasar){
     llenarSelectAlmacenes('trasp-origen', false);
     llenarSelectAlmacenes('trasp-destino', false);
+    $('trasp-notas').value = '';
+    $('trasp-error').innerHTML = '';
     state.traspLineas = [];
     renderLineasTraspaso();
     buscadorProducto('trasp-buscar-producto', 'trasp-resultados-busqueda', agregarLineaTraspaso);
