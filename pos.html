@@ -418,15 +418,31 @@
       <select id="abono-cliente"></select>
     </div>
     <p class="nota" id="abono-saldo-nota"></p>
-    <div class="campo"><label>Monto</label><input type="text" inputmode="decimal" id="abono-monto" class="money-input"></div>
+    <div class="campo"><label>Monto recibido</label><input type="text" inputmode="decimal" id="abono-monto" class="money-input"></div>
     <div class="campo"><label>Forma de pago</label><select id="abono-forma-pago"></select></div>
     <div class="campo"><label>Referencia (opcional)</label><input type="text" id="abono-referencia" placeholder="Ej. núm. de autorización de tarjeta"></div>
-    <p class="nota">Si la forma de pago es Efectivo, este abono se suma al corte de caja de esta sesión.</p>
+    <div id="abono-aplicado-nota" class="totales" style="display:none;margin:0 0 10px;">
+      <div class="linea"><span>Aplicado a la deuda</span><span id="abono-aplicado-monto">$0.00</span></div>
+      <div class="linea monto-grande"><span>Cambio a dar</span><span id="abono-cambio-monto">$0.00</span></div>
+    </div>
+    <p class="nota">Si la forma de pago es Efectivo, lo aplicado a la deuda se suma al corte de caja de esta sesión. Si recibes más de lo que debe, el resto se devuelve como cambio (igual que en una venta) — con tarjeta u otra forma de pago no se puede recibir de más.</p>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="abono-cancelar">Cancelar <span class="tecla">F9</span></button>
       <button class="btn-primario" style="flex:1;" id="abono-confirmar">Registrar <span class="tecla">F10</span></button>
     </div>
     <div id="abono-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: comprobante de abono de cliente (Ronda 22, ajuste 2026-09-04) -->
+<div class="modal-fondo" id="modal-comprobante-abono">
+  <div class="modal">
+    <h2>Comprobante de abono</h2>
+    <div id="comprobante-abono-body" style="font-size:.9rem;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-secundario" style="flex:1;" id="comprobante-abono-imprimir">Imprimir</button>
+      <button class="btn-primario" style="flex:1;" id="comprobante-abono-cerrar">Cerrar</button>
+    </div>
   </div>
 </div>
 
@@ -556,12 +572,18 @@
 <script>
 const SUPABASE_URL = "https://vsfzkktmdwqkfbecmfcj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs";
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// storageKey propio: pos.html y admin.html viven en el mismo dominio (GitHub Pages) y, sin esto,
+// comparten la misma llave de localStorage que usa supabase-js por default — abrir sesión en una app
+// podía invalidar/pisar la sesión de la otra en otra pestaña ("permission denied for function..." al
+// quedar la sesión como anon sin que el usuario cerrara sesión). Reportado por Adrián el 2026-09-04.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { storageKey: 'sb-mundokositas-pos-auth' }
+});
 
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.5.001';
+const APP_VERSION = '1.5.003';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -611,7 +633,7 @@ function attachMoneyInput(el){
 
 const state = {
   usuario: null, rol: null,
-  empresaId: null, empresaNombre: '', desglosarImpuestos: true, logoUrl: '',
+  empresaId: null, empresaNombre: '', desglosarImpuestos: true, logoUrl: '', textoPagare: '',
   sucursalId: null, sucursalNombre: '',
   almacenId: null, cajaId: null, cajaNombre: '',
   // listaPrecioId: la lista de precios ACTIVA para el ticket en curso — arranca en la lista default
@@ -832,6 +854,7 @@ async function iniciarSesionApp(){
   state.empresaNombre = empresa.nombre_comercial;
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
   state.logoUrl = empresa.logo_url || '';
+  state.textoPagare = empresa.texto_pagare || '';
 
   const { data: sucursales } = await sb.from('sucursales').select('*').eq('empresa_id', empresa.id).eq('activo', true);
   if(!sucursales || sucursales.length===0){ mostrarError('La empresa no tiene sucursales activas.'); return; }
@@ -2204,7 +2227,12 @@ function mostrarTicket(ventaId, venta, desglose){
     </div>
     ${venta.tipo_venta === 'credito' ? `
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Venta a crédito — cargada a la cuenta de ${cliente?.nombre || 'cliente'}.</p>
-    <p class="nota">Entregar este ticket como pagaré, firmado por el cliente.</p>
+    <div style="margin-top:14px;border-top:1px dashed #000;padding-top:10px;">
+      <p style="margin:0;">${(state.textoPagare || 'Recibí de conformidad los artículos de este ticket por un total de {total}, a crédito, y me comprometo a pagar dicho importe a {empresa}.').replace('{total}', `<strong>${money(venta.total)}</strong>`).replace('{empresa}', `<strong>${state.empresaNombre}</strong>`)}</p>
+      <div style="margin:34px auto 0;border-top:1px solid #000;width:85%;"></div>
+      <p style="text-align:center;margin:4px 0 0;">Firma de conformidad</p>
+      <p style="text-align:center;margin:2px 0 0;">${cliente?.nombre || ''}</p>
+    </div>
     ` : `
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Forma de pago:</p>
     <div class="totales" style="margin-top:0;">
@@ -2229,6 +2257,11 @@ function reiniciarVenta(){
   // cajero no tiene el privilegio, aunque el mismo supervisor las haya dado hace un momento.
   state.listaPrecioAutorizadaPor = null;
   state.descuentoTicketAutorizadoPor = null;
+  // Ronda 22, ajuste 2026-09-04 (a petición de Adrián): cada venta nueva arranca con "Público en
+  // general" — el cliente elegido NO se queda seleccionado de una venta a la siguiente, para no
+  // arriesgar cargar una venta al cliente equivocado por descuido.
+  const publico = state.clientes.find(c=>c.es_publico_general);
+  if(publico){ state.clienteId = publico.id; $('sel-cliente').value = publico.id; actualizarNotaCreditoCliente(); }
   actualizarBloqueosPermisos();
   renderCarrito();
   renderPagos();
@@ -2778,16 +2811,48 @@ $('mov-confirmar').addEventListener('click', async ()=>{
 
 // ---------- RONDA 22: ABONO DE CLIENTE ----------
 // Solo clientes con saldo pendiente (Público en general nunca tiene saldo). El abono se topa del lado
-// del servidor (registrar_abono_cliente) contra el saldo actual del cliente, y si la forma de pago es
-// Efectivo, además se refleja como una entrada de caja_movimientos en la sesión abierta — decisión
-// confirmada por Adrián para que el corte del día lo incluya.
+// del servidor (registrar_abono_cliente) contra el saldo actual del cliente — pero si la forma de pago
+// es Efectivo y el cajero recibió de más, aquí (del lado del navegador) se calcula igual que en una
+// venta: se manda al servidor solo lo que sí se aplica a la deuda (nunca más de lo que debe) y el resto
+// se muestra como "Cambio a dar" para devolver, en vez de rechazar la operación. Con cualquier otra
+// forma de pago (Tarjeta) no se puede recibir de más — ahí si el monto excede el saldo, el servidor
+// rechaza (correcto: no hay forma de "dar cambio" con una tarjeta). Ajuste del 2026-09-04 a petición
+// de Adrián.
 attachMoneyInput($('abono-monto'));
 function clientesConSaldoPendiente(){ return state.clientes.filter(c => !c.es_publico_general && Number(c.saldo_actual) > 0); }
+function clienteAbonoSeleccionado(){ return state.clientes.find(x=>x.id===$('abono-cliente').value) || null; }
+function formaPagoAbonoEsEfectivo(){
+  const forma = state.formasPago.find(f=>f.id===$('abono-forma-pago').value);
+  return forma?.nombre === 'Efectivo';
+}
 function actualizarNotaSaldoAbono(){
-  const c = state.clientes.find(x=>x.id===$('abono-cliente').value);
+  const c = clienteAbonoSeleccionado();
   $('abono-saldo-nota').textContent = c ? `Saldo actual: ${money(c.saldo_actual)}` : '';
+  recalcularAplicadoAbono();
+}
+// Regresa {aplicado, cambio, saldoNuevo} para el monto recibido capturado, contra el saldo del
+// cliente elegido — aplicado nunca excede el saldo cuando la forma de pago es Efectivo.
+function calcularAplicadoAbono(){
+  const c = clienteAbonoSeleccionado();
+  const recibido = moneyInputValue($('abono-monto')) || 0;
+  const saldo = c ? Number(c.saldo_actual) : 0;
+  const esEfectivo = formaPagoAbonoEsEfectivo();
+  const aplicado = esEfectivo ? Math.min(recibido, saldo) : recibido;
+  const cambio = esEfectivo ? Math.max(0, redondear2(recibido - aplicado)) : 0;
+  return { aplicado: redondear2(aplicado), cambio, saldo };
+}
+function recalcularAplicadoAbono(){
+  const { aplicado, cambio } = calcularAplicadoAbono();
+  const mostrar = formaPagoAbonoEsEfectivo() && cambio > 0.001;
+  $('abono-aplicado-nota').style.display = mostrar ? 'block' : 'none';
+  if(mostrar){
+    $('abono-aplicado-monto').textContent = money(aplicado);
+    $('abono-cambio-monto').textContent = money(cambio);
+  }
 }
 $('abono-cliente').addEventListener('change', actualizarNotaSaldoAbono);
+$('abono-forma-pago').addEventListener('change', recalcularAplicadoAbono);
+$('abono-monto').addEventListener('input', recalcularAplicadoAbono);
 $('btn-abono-cliente').addEventListener('click', ()=>{
   const pendientes = clientesConSaldoPendiente();
   $('abono-error').innerHTML = '';
@@ -2810,17 +2875,19 @@ $('abono-cancelar').addEventListener('click', ()=>{ $('modal-abono').classList.r
 $('abono-confirmar').addEventListener('click', async ()=>{
   if($('abono-confirmar').disabled) return;
   $('abono-error').innerHTML = '';
-  const clienteId = $('abono-cliente').value;
-  const monto = moneyInputValue($('abono-monto'));
+  const cliente = clienteAbonoSeleccionado();
+  const recibido = moneyInputValue($('abono-monto'));
   const formaPagoId = $('abono-forma-pago').value;
-  if(!clienteId || monto<=0 || !formaPagoId){
+  if(!cliente || recibido<=0 || !formaPagoId){
     $('abono-error').innerHTML = '<div class="msg-error">Elige un cliente, captura un monto válido y la forma de pago.</div>';
     return;
   }
+  const { aplicado, cambio } = calcularAplicadoAbono();
+  const referencia = $('abono-referencia').value.trim() || null;
   $('abono-confirmar').disabled = true;
   const { error } = await sb.rpc('registrar_abono_cliente', {
-    p_cliente_id: clienteId, p_monto: monto, p_forma_pago_id: formaPagoId,
-    p_sesion_caja_id: state.sesionCaja.id, p_referencia: $('abono-referencia').value.trim() || null,
+    p_cliente_id: cliente.id, p_monto: aplicado, p_forma_pago_id: formaPagoId,
+    p_sesion_caja_id: state.sesionCaja.id, p_referencia: referencia,
   });
   $('abono-confirmar').disabled = false;
   if(error){
@@ -2828,8 +2895,35 @@ $('abono-confirmar').addEventListener('click', async ()=>{
     return;
   }
   $('modal-abono').classList.remove('activo');
+  mostrarComprobanteAbono(cliente, aplicado, cambio, recibido, formaPagoId, referencia);
   await cargarClientes();
 });
+
+// Comprobante imprimible del abono — mismo patrón que "Reimprimir ticket" (modal-reimprimir), no
+// toca el carrito ni el estado de la venta en curso.
+function mostrarComprobanteAbono(cliente, aplicado, cambio, recibido, formaPagoId, referencia){
+  const forma = state.formasPago.find(f=>f.id===formaPagoId);
+  const fecha = new Date().toLocaleString('es-MX');
+  const html = `
+    <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
+    <p>Cliente: ${cliente.nombre}<br>Recibió: ${state.usuario.nombre}</p>
+    <div class="totales">
+      <div class="linea"><span>Forma de pago</span><span>${forma?.nombre || ''}</span></div>
+      ${referencia ? `<div class="linea"><span>Referencia</span><span>${referencia}</span></div>` : ''}
+      <div class="linea monto-grande"><span>Abono aplicado</span><span>${money(aplicado)}</span></div>
+      ${cambio > 0.001 ? `
+      <div class="linea"><span>Recibido</span><span>${money(recibido)}</span></div>
+      <div class="linea"><span>Cambio</span><span>${money(cambio)}</span></div>
+      ` : ''}
+      <div class="linea total-final"><span>Saldo nuevo</span><span>${money(Math.max(0, Number(cliente.saldo_actual) - aplicado))}</span></div>
+    </div>
+  `;
+  $('comprobante-abono-body').innerHTML = html;
+  $('ticket-imprimible').innerHTML = html;
+  $('modal-comprobante-abono').classList.add('activo');
+}
+$('comprobante-abono-cerrar').addEventListener('click', ()=>{ $('modal-comprobante-abono').classList.remove('activo'); $('ticket-imprimible').innerHTML=''; });
+$('comprobante-abono-imprimir').addEventListener('click', ()=>window.print());
 
 // ---------- CERRAR CAJA ----------
 attachMoneyInput($('cierre-efectivo'));

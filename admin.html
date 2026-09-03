@@ -731,6 +731,12 @@
     <p class="nota" id="empresa-desglosar-impuestos-nota">Aplica a la búsqueda, el carrito, el cobro y el ticket del Punto de Venta (`pos.html`) — no afecta los precios que ves aquí en Admin, que tienen su propio interruptor "con impuestos" en Catálogo y Reporte de precios.</p>
     <div id="empresa-desglosar-impuestos-estado"></div>
 
+    <h3 style="margin-bottom:4px;border-top:1px solid var(--borde);padding-top:14px;">Pagaré de ventas a crédito (Ronda 22)</h3>
+    <p class="nota">Texto que se imprime en el ticket de una venta a crédito, arriba de la línea para la firma del cliente. Usa <code>{total}</code> y <code>{empresa}</code> donde quieras que aparezcan el importe y el nombre de la empresa — si lo dejas vacío, se usa un texto por default.</p>
+    <div class="campo"><textarea id="empresa-texto-pagare" rows="3" placeholder="Recibí de conformidad los artículos de este ticket por un total de {total}, a crédito, y me comprometo a pagar dicho importe a {empresa}."></textarea></div>
+    <button type="button" class="btn-secundario" id="empresa-texto-pagare-guardar">Guardar texto del pagaré</button>
+    <div id="empresa-texto-pagare-estado"></div>
+
     <button class="btn-gris" style="width:100%;margin-top:14px;" id="empresa-config-cerrar">Cerrar</button>
   </div>
 </div>
@@ -801,10 +807,16 @@
 <script>
 const SUPABASE_URL = "https://vsfzkktmdwqkfbecmfcj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs";
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// storageKey propio: pos.html y admin.html viven en el mismo dominio (GitHub Pages) y, sin esto,
+// comparten la misma llave de localStorage que usa supabase-js por default — abrir sesión en una app
+// podía invalidar/pisar la sesión de la otra en otra pestaña ("permission denied for function..." al
+// quedar la sesión como anon sin que el usuario cerrara sesión). Reportado por Adrián el 2026-09-04.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { storageKey: 'sb-mundokositas-admin-auth' }
+});
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.8.001';
+const APP_VERSION = '1.8.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -933,7 +945,7 @@ const state = {
   catalogoOrden: [], indiceCatalogo: -1,
   formSnapshot: '', marcas: [],
   catalogoPagina: 1, catalogoPorPagina: 50,
-  logoUrl: '', desglosarImpuestos: true,
+  logoUrl: '', desglosarImpuestos: true, textoPagare: '',
   // Ronda 21 (Compras/Inventarios): sucursales/almacenes/proveedores/usuarios de la empresa,
   // permisos del módulo "inventario" del usuario actual, y las líneas en construcción de cada
   // formulario tipo ticket (compra, ajuste de salida, traspaso).
@@ -1010,6 +1022,8 @@ $('btn-config-empresa').addEventListener('click', ()=>{
   $('empresa-logo-archivo').value = '';
   $('empresa-desglosar-impuestos').checked = state.desglosarImpuestos;
   $('empresa-desglosar-impuestos-estado').innerHTML = '';
+  $('empresa-texto-pagare').value = state.textoPagare || '';
+  $('empresa-texto-pagare-estado').innerHTML = '';
   $('modal-empresa-config').classList.add('activo');
 });
 $('empresa-config-cerrar').addEventListener('click', ()=>{ $('modal-empresa-config').classList.remove('activo'); });
@@ -1030,6 +1044,21 @@ $('empresa-desglosar-impuestos').addEventListener('change', async ()=>{
   }
   state.desglosarImpuestos = nuevoValor;
   $('empresa-desglosar-impuestos-estado').innerHTML = '<p class="nota">Guardado — se aplica la próxima vez que se abra o se recargue el Punto de Venta.</p>';
+});
+
+// ---------- TEXTO DEL PAGARÉ EN VENTAS A CRÉDITO (empresas.texto_pagare) — Ronda 22, ajuste 2026-09-04 ----------
+// Texto libre que pos.html imprime en el ticket de una venta a crédito, arriba de la línea de firma.
+// Soporta los placeholders {total} y {empresa}. Si queda vacío/null, pos.html usa un texto por default.
+$('empresa-texto-pagare-guardar').addEventListener('click', async ()=>{
+  const nuevoValor = $('empresa-texto-pagare').value.trim();
+  $('empresa-texto-pagare-estado').innerHTML = '<p class="nota">Guardando…</p>';
+  const { error } = await sb.from('empresas').update({ texto_pagare: nuevoValor || null }).eq('id', state.empresaId);
+  if(error){
+    $('empresa-texto-pagare-estado').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  state.textoPagare = nuevoValor;
+  $('empresa-texto-pagare-estado').innerHTML = '<p class="nota">Guardado — se aplica la próxima vez que se abra o se recargue el Punto de Venta.</p>';
 });
 
 function convertirImagenAPng(archivo){
@@ -1115,6 +1144,7 @@ async function iniciarSesionApp(){
   state.empresaNombre = empresa.nombre_comercial;
   state.logoUrl = empresa.logo_url || '';
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
+  state.textoPagare = empresa.texto_pagare || '';
 
   const { data: almacenesActivos } = await sb.from('almacenes').select('*').eq('activo', true);
   state.almacenId = almacenesActivos?.[0]?.id || null;
@@ -1191,6 +1221,10 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     // que se entra a la pestaña se reinicia limpio.
     if(btn.dataset.tab === 'tab-compras') prepararPantallaCompras();
     if(btn.dataset.tab === 'tab-inventario') prepararPantallaInventario();
+    // Ronda 22, ajuste: Clientes se cargaba solo una vez al iniciar sesión — si se registraba una
+    // venta a crédito o un abono desde el POS (otra pestaña/sesión), el saldo se veía desactualizado
+    // hasta recargar el navegador. Ahora se refresca cada vez que se entra a la pestaña.
+    if(btn.dataset.tab === 'tab-clientes') refrescarPantallaClientes();
   });
 });
 
@@ -3388,6 +3422,12 @@ $('tr-cancelar').addEventListener('click', async ()=>{
 });
 
 // ---------- RONDA 22: CLIENTES / CxC ----------
+async function refrescarPantallaClientes(){
+  const { data: clientes } = await sb.from('clientes').select('*').order('es_publico_general', {ascending:false}).order('nombre');
+  state.clientes = clientes || [];
+  renderClientesTabla();
+  renderCxcTabla();
+}
 document.querySelectorAll('#cli-tabs .tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#cli-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
