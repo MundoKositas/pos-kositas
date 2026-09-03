@@ -583,7 +583,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.5.003';
+const APP_VERSION = '1.5.004';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1338,8 +1338,14 @@ function actualizarNotaCreditoCliente(){
 function aplicarClienteSeleccionado(){
   state.clienteId = $('sel-cliente').value;
   const c = clienteSeleccionado();
+  // Ronda 22, ajuste 2026-09-04: si el cliente elegido tiene lista de precio propia, se propone esa;
+  // si NO tiene (incluye "Público en general", que normalmente no trae lista_precio_default_id), se
+  // regresa a la lista de precio predeterminada de la sucursal — antes se quedaba pegada la lista del
+  // cliente anterior porque este "else" no existía.
   if(c && c.lista_precio_default_id && state.listasPrecio?.some(l=>l.id===c.lista_precio_default_id)){
     aplicarListaPrecioTicket(c.lista_precio_default_id);
+  } else if(state.listaPrecioDefaultId){
+    aplicarListaPrecioTicket(state.listaPrecioDefaultId);
   }
   actualizarNotaCreditoCliente();
   if(typeof recalcularTotales === 'function') recalcularTotales();
@@ -2229,7 +2235,7 @@ function mostrarTicket(ventaId, venta, desglose){
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Venta a crédito — cargada a la cuenta de ${cliente?.nombre || 'cliente'}.</p>
     <div style="margin-top:14px;border-top:1px dashed #000;padding-top:10px;">
       <p style="margin:0;">${(state.textoPagare || 'Recibí de conformidad los artículos de este ticket por un total de {total}, a crédito, y me comprometo a pagar dicho importe a {empresa}.').replace('{total}', `<strong>${money(venta.total)}</strong>`).replace('{empresa}', `<strong>${state.empresaNombre}</strong>`)}</p>
-      <div style="margin:34px auto 0;border-top:1px solid #000;width:85%;"></div>
+      <div style="margin:64px auto 0;border-top:1px solid #000;width:85%;"></div>
       <p style="text-align:center;margin:4px 0 0;">Firma de conformidad</p>
       <p style="text-align:center;margin:2px 0 0;">${cliente?.nombre || ''}</p>
     </div>
@@ -2261,7 +2267,13 @@ function reiniciarVenta(){
   // general" — el cliente elegido NO se queda seleccionado de una venta a la siguiente, para no
   // arriesgar cargar una venta al cliente equivocado por descuido.
   const publico = state.clientes.find(c=>c.es_publico_general);
-  if(publico){ state.clienteId = publico.id; $('sel-cliente').value = publico.id; actualizarNotaCreditoCliente(); }
+  if(publico){
+    $('sel-cliente').value = publico.id;
+    // aplicarClienteSeleccionado() también regresa la lista de precios a la predeterminada de la
+    // sucursal cuando el cliente (Público en general) no trae una propia — antes "Nueva venta" solo
+    // reasignaba state.clienteId y dejaba pegada la lista de precio del cliente anterior.
+    aplicarClienteSeleccionado();
+  }
   actualizarBloqueosPermisos();
   renderCarrito();
   renderPagos();
