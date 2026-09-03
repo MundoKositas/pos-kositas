@@ -96,6 +96,7 @@
   </div>
   <div class="acciones">
     <button class="btn-secundario" id="btn-movimiento-caja">Movimiento de caja</button>
+    <button class="btn-secundario" id="btn-abono-cliente">Abono de cliente</button>
     <button class="btn-secundario" id="btn-actualizar-catalogo">Actualizar catálogo</button>
     <button class="btn-secundario" id="btn-reportes">Reportes</button>
     <button class="btn-secundario" id="btn-ventas-dia">Ventas del día</button>
@@ -184,6 +185,7 @@
       <div class="card">
         <h2>Cliente</h2>
         <select id="sel-cliente"></select>
+        <p class="nota" id="cliente-credito-nota" style="margin:6px 0 0;display:none;"></p>
         <p class="nota" style="margin:10px 0 4px;">Lista de precios del ticket</p>
         <div style="display:flex;gap:6px;align-items:center;">
           <select id="sel-lista-precio" style="flex:1;"></select>
@@ -211,6 +213,7 @@
           <div class="linea monto-grande"><span>Cambio a dar</span><span id="tot-cambio">$0.00</span></div>
         </div>
         <button class="btn-primario" id="btn-cobrar" style="width:100%;margin-top:10px;padding:14px;font-size:1.05rem;" disabled>Cobrar <span class="tecla">F4</span></button>
+        <button class="btn-secundario" id="btn-credito-cliente" style="width:100%;margin-top:8px;" disabled>💳 Cargar a crédito del cliente</button>
         <div id="cobro-error"></div>
       </div>
     </div>
@@ -406,6 +409,27 @@
   </div>
 </div>
 
+<!-- MODAL: abono de cliente (Ronda 22 — Clientes/CxC) -->
+<div class="modal-fondo" id="modal-abono">
+  <div class="modal">
+    <h2>Abono de cliente</h2>
+    <div class="campo">
+      <label>Cliente</label>
+      <select id="abono-cliente"></select>
+    </div>
+    <p class="nota" id="abono-saldo-nota"></p>
+    <div class="campo"><label>Monto</label><input type="text" inputmode="decimal" id="abono-monto" class="money-input"></div>
+    <div class="campo"><label>Forma de pago</label><select id="abono-forma-pago"></select></div>
+    <div class="campo"><label>Referencia (opcional)</label><input type="text" id="abono-referencia" placeholder="Ej. núm. de autorización de tarjeta"></div>
+    <p class="nota">Si la forma de pago es Efectivo, este abono se suma al corte de caja de esta sesión.</p>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="abono-cancelar">Cancelar <span class="tecla">F9</span></button>
+      <button class="btn-primario" style="flex:1;" id="abono-confirmar">Registrar <span class="tecla">F10</span></button>
+    </div>
+    <div id="abono-error"></div>
+  </div>
+</div>
+
 <!-- MODAL: cerrar caja -->
 <div class="modal-fondo" id="modal-cerrar-caja">
   <div class="modal">
@@ -537,7 +561,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.4.007';
+const APP_VERSION = '1.5.001';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -689,6 +713,7 @@ habilitarEnterSecuencial($('card-seleccion'), $('btn-continuar-seleccion'));
 habilitarEnterSecuencial($('card-abrir-caja'), $('btn-abrir-caja'));
 habilitarEnterSecuencial($('card-cobro'), $('btn-cobrar'));
 habilitarEnterSecuencial($('modal-movimiento'), $('mov-confirmar'));
+habilitarEnterSecuencial($('modal-abono'), $('abono-confirmar'));
 habilitarEnterSecuencial($('modal-cerrar-caja'), $('cierre-confirmar'));
 
 // ---------- TECLAS DE FUNCIÓN (para operar el cobro sin mouse) ----------
@@ -958,6 +983,11 @@ function actualizarBloqueosPermisos(){
   $('btn-autorizar-lista-ticket').style.display = puedeListaTicket ? 'none' : 'inline-block';
   const puedeDescTicket = tienePermiso('pos.aplicar_descuento') || !!state.descuentoTicketAutorizadoPor;
   $('btn-descuento-ticket').textContent = puedeDescTicket ? '% Descuento a toda la venta' : '🔒 Descuento a toda la venta';
+  // Ronda 22: el candado aquí es solo indicativo (si el cajero no tiene pos.vender_credito, o si el
+  // importe excede el crédito disponible del cliente, el clic de todos modos pide PIN) — nunca refleja
+  // con certeza si hará falta PIN o no, porque eso depende del total del ticket en ese momento.
+  $('btn-credito-cliente').textContent = tienePermiso('pos.vender_credito')
+    ? '💳 Cargar a crédito del cliente' : '🔒 Cargar a crédito del cliente';
 }
 
 // Abre el modal de PIN y regresa una Promise: {usuarioId, nombre} del supervisor si el PIN fue
@@ -1005,12 +1035,14 @@ $('btn-autorizar-lista-ticket').addEventListener('click', async ()=>{
 // muestre los precios de la nueva lista) y re-cotiza cada línea del carrito que NO tenga su propia
 // lista fijada (linea.listaPrecioId === null) — las líneas que sí tienen una lista propia (cambiadas
 // una por una, ver renderCarrito) se quedan como están, sin importar el cambio aquí.
-$('sel-lista-precio').addEventListener('change', ()=>{
-  state.listaPrecioId = $('sel-lista-precio').value;
+function aplicarListaPrecioTicket(id){
+  state.listaPrecioId = id;
+  $('sel-lista-precio').value = id;
   recalcularPreciosCatalogo();
   renderResultados(buscarInput.value.trim());
   renderCarrito();
-});
+}
+$('sel-lista-precio').addEventListener('change', ()=> aplicarListaPrecioTicket($('sel-lista-precio').value));
 
 // ---------- Descuento a toda la venta (ticket) ----------
 // Un descuento "a toda la venta" y un descuento puesto solo a un artículo son mutuamente excluyentes
@@ -1268,15 +1300,42 @@ function recalcularPreciosCatalogo(){
 }
 $('btn-actualizar-catalogo').addEventListener('click', async ()=>{ await cargarCatalogo(); renderResultados(buscarInput.value.trim()); renderCarrito(); });
 
+// Ronda 22: crédito disponible del cliente elegido (limite_credito - saldo_actual, nunca negativo en
+// pantalla) y su lista de precio por default — se propone sola al elegir cliente, pero el cajero la
+// puede seguir cambiando manualmente (mismo permiso/PIN de siempre en sel-lista-precio).
+function clienteSeleccionado(){ return state.clientes.find(c=>c.id===state.clienteId) || null; }
+function creditoDisponibleCliente(cliente){ return Math.max(0, Number(cliente.limite_credito) - Number(cliente.saldo_actual)); }
+function actualizarNotaCreditoCliente(){
+  const c = clienteSeleccionado();
+  const nota = $('cliente-credito-nota');
+  if(!c || c.es_publico_general){ nota.style.display = 'none'; return; }
+  nota.style.display = 'block';
+  nota.textContent = `Saldo actual: ${money(c.saldo_actual)} · Límite de crédito: ${money(c.limite_credito)} · Disponible: ${money(creditoDisponibleCliente(c))}`;
+}
+function aplicarClienteSeleccionado(){
+  state.clienteId = $('sel-cliente').value;
+  const c = clienteSeleccionado();
+  if(c && c.lista_precio_default_id && state.listasPrecio?.some(l=>l.id===c.lista_precio_default_id)){
+    aplicarListaPrecioTicket(c.lista_precio_default_id);
+  }
+  actualizarNotaCreditoCliente();
+  if(typeof recalcularTotales === 'function') recalcularTotales();
+}
 async function cargarClientes(){
   const { data } = await sb.from('clientes').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('es_publico_general', {ascending:false});
   state.clientes = data || [];
   llenarSelect('sel-cliente', state.clientes, c=>c.id, c=>c.nombre);
-  const publico = state.clientes.find(c=>c.es_publico_general);
-  state.clienteId = publico ? publico.id : (state.clientes[0]?.id || null);
+  // Si ya había un cliente elegido (ej. al refrescar saldos después de una venta a crédito), se
+  // respeta esa selección — solo se recae a "Público en general" en la carga inicial de la sesión.
+  const seleccionSigueValida = state.clienteId && state.clientes.some(c=>c.id===state.clienteId);
+  if(!seleccionSigueValida){
+    const publico = state.clientes.find(c=>c.es_publico_general);
+    state.clienteId = publico ? publico.id : (state.clientes[0]?.id || null);
+  }
   if(state.clienteId) $('sel-cliente').value = state.clienteId;
-  $('sel-cliente').addEventListener('change', ()=>{ state.clienteId = $('sel-cliente').value; });
+  actualizarNotaCreditoCliente();
 }
+$('sel-cliente').addEventListener('change', aplicarClienteSeleccionado);
 
 async function cargarFormasPago(){
   const { data } = await sb.from('formas_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true);
@@ -1891,6 +1950,12 @@ function recalcularTotales(){
     : (faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '');
   $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth || sinPrecio;
   $('btn-agregar-pago').disabled = (pagado >= total - 0.001 && total > 0) || formasDisponiblesNuevaLinea().length===0;
+  // Ronda 22: "Cargar a crédito del cliente" no depende de haber capturado formas de pago (al
+  // contrario, se usa en vez de eso) — solo de que el carrito no esté vacío, que todo tenga precio,
+  // y de que el cliente elegido no sea "Público en general" (el resto de las reglas de negocio —
+  // permiso y límite — se validan hasta dar clic, porque dependen del cliente y del PIN).
+  const clienteActual = clienteSeleccionado();
+  $('btn-credito-cliente').disabled = state.carrito.length===0 || sinPrecio || !clienteActual || clienteActual.es_publico_general;
 }
 
 // ---------- PAGOS ----------
@@ -2010,11 +2075,10 @@ function resumenCambiosVenta(){
   return cambios;
 }
 
-$('btn-cobrar').addEventListener('click', async ()=>{
-  $('cobro-error').innerHTML = '';
-  $('btn-cobrar').disabled = true;
+// Arma el detalle de línea y el encabezado de la venta — compartido entre "Cobrar" (contado, con
+// split de formas de pago) y "Cargar a crédito del cliente" (Ronda 22, sin forma de pago real).
+function construirDetalleYVentaBase(tipoVenta){
   const { subtotal, impuesto, desglose, total } = calcularTotales();
-
   // Cada línea manda su propio arreglo de impuestos (0 a N), tal como estén configurados
   // para ese producto en el catálogo — nunca un solo impuesto fijo por línea.
   const payloadDetalle = state.carrito.map(l=>{
@@ -2026,13 +2090,34 @@ $('btn-cobrar').addEventListener('click', async ()=>{
     };
   });
   const descuentoTotalVenta = redondear2(state.carrito.reduce((s,l,i)=>s + payloadDetalle[i].descuento_unitario * l.cantidad, 0));
-
   const payloadVenta = {
     empresa_id: state.empresaId, sucursal_id: state.sucursalId, caja_id: state.cajaId,
     sesion_caja_id: state.sesionCaja.id, cliente_id: state.clienteId, usuario_id: state.usuario.id,
     lista_precio_id: state.listaPrecioId, periodo_operacion_id: state.periodoOperacionId,
-    tipo_venta: 'contado', subtotal, descuento_total: descuentoTotalVenta, impuesto_total: impuesto, total,
+    tipo_venta: tipoVenta, subtotal, descuento_total: descuentoTotalVenta, impuesto_total: impuesto, total,
   };
+  return { subtotal, impuesto, desglose, total, payloadDetalle, payloadVenta };
+}
+
+async function finalizarVentaRegistrada(ventaId, payloadVenta, desglose){
+  const cambios = resumenCambiosVenta();
+  if(cambios.length){
+    try{
+      await sb.from('auditoria').insert({
+        empresa_id: state.empresaId, usuario_id: state.usuario.id, tabla: 'ventas',
+        registro_id: ventaId, accion: 'editar', datos_nuevos: { cambios },
+      });
+    } catch(err){ console.error('No se pudo registrar la bitácora de auditoría de esta venta (la venta sí se registró):', err); }
+  }
+  mostrarTicket(ventaId, payloadVenta, desglose);
+  await cargarCatalogo(); // refrescar stock
+  await cargarClientes(); // refrescar saldo_actual/crédito disponible (venta a crédito) sin perder la selección
+}
+
+$('btn-cobrar').addEventListener('click', async ()=>{
+  $('cobro-error').innerHTML = '';
+  $('btn-cobrar').disabled = true;
+  const { desglose, payloadDetalle, payloadVenta } = construirDetalleYVentaBase('contado');
   const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
 
   const { data: ventaId, error } = await sb.rpc('registrar_venta', {
@@ -2045,18 +2130,48 @@ $('btn-cobrar').addEventListener('click', async ()=>{
     return;
   }
 
-  const cambios = resumenCambiosVenta();
-  if(cambios.length){
-    try{
-      await sb.from('auditoria').insert({
-        empresa_id: state.empresaId, usuario_id: state.usuario.id, tabla: 'ventas',
-        registro_id: ventaId, accion: 'editar', datos_nuevos: { cambios },
-      });
-    } catch(err){ console.error('No se pudo registrar la bitácora de auditoría de esta venta (la venta sí se registró):', err); }
+  await finalizarVentaRegistrada(ventaId, payloadVenta, desglose);
+});
+
+// ---------- Ronda 22: venta a crédito del cliente ----------
+// Requiere: cliente distinto de "Público en general", y que el importe no exceda el crédito
+// disponible del cliente SIN autorización de supervisor — si lo excede, siempre se pide PIN
+// (pos.vender_credito), sin importar si el cajero ya tiene el permiso de por sí (misma idea que el
+// resto del Bloque A/B: el permiso evita el PIN para el caso normal, no para el caso de riesgo).
+// Si el cajero no tiene el permiso pos.vender_credito, también se pide PIN para poder usar esta
+// opción, aunque el importe sí quepa en el crédito disponible.
+$('btn-credito-cliente').addEventListener('click', async ()=>{
+  $('cobro-error').innerHTML = '';
+  const cliente = clienteSeleccionado();
+  if(!cliente || cliente.es_publico_general){
+    $('cobro-error').innerHTML = '<div class="msg-error">Selecciona un cliente registrado (no "Público en general") para vender a crédito.</div>';
+    return;
+  }
+  const { subtotal, impuesto, desglose, payloadDetalle, payloadVenta, total } = construirDetalleYVentaBase('credito');
+  const excedeLimite = total > creditoDisponibleCliente(cliente) + 0.001;
+  let autorizadoPor = null;
+
+  if(excedeLimite || !tienePermiso('pos.vender_credito')){
+    const etiqueta = excedeLimite
+      ? `esta venta a crédito excede el disponible de ${cliente.nombre} (disponible: ${money(creditoDisponibleCliente(cliente))}, venta: ${money(total)})`
+      : 'vender a crédito';
+    const resultado = await pedirAutorizacionSupervisor('pos.vender_credito', etiqueta);
+    if(!resultado) return;
+    autorizadoPor = resultado.usuarioId;
   }
 
-  mostrarTicket(ventaId, payloadVenta, desglose);
-  await cargarCatalogo(); // refrescar stock
+  $('btn-credito-cliente').disabled = true;
+  const { data: ventaId, error } = await sb.rpc('registrar_venta', {
+    p_venta: payloadVenta, p_detalle: payloadDetalle, p_pagos: [], p_autorizado_por: autorizadoPor
+  });
+  $('btn-credito-cliente').disabled = false;
+
+  if(error){
+    $('cobro-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+
+  await finalizarVentaRegistrada(ventaId, payloadVenta, desglose);
 });
 
 function mostrarTicket(ventaId, venta, desglose){
@@ -2087,11 +2202,16 @@ function mostrarTicket(ventaId, venta, desglose){
       ` : ''}
       <div class="linea total-final"><span>Total${state.desglosarImpuestos ? '' : ' (impuestos incluidos)'}</span><span>${money(venta.total)}</span></div>
     </div>
+    ${venta.tipo_venta === 'credito' ? `
+    <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Venta a crédito — cargada a la cuenta de ${cliente?.nombre || 'cliente'}.</p>
+    <p class="nota">Entregar este ticket como pagaré, firmado por el cliente.</p>
+    ` : `
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Forma de pago:</p>
     <div class="totales" style="margin-top:0;">
       ${filasPagos}
       <div class="linea monto-grande" style="border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;"><span>Cambio</span><span>${money(cambioTotal)}</span></div>
     </div>
+    `}
   `;
   $('ticket-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
@@ -2654,6 +2774,61 @@ $('mov-confirmar').addEventListener('click', async ()=>{
   $('modal-movimiento').classList.remove('activo');
   $('mov-monto').value=''; $('mov-motivo').value='';
   $('mov-confirmar').disabled = false;
+});
+
+// ---------- RONDA 22: ABONO DE CLIENTE ----------
+// Solo clientes con saldo pendiente (Público en general nunca tiene saldo). El abono se topa del lado
+// del servidor (registrar_abono_cliente) contra el saldo actual del cliente, y si la forma de pago es
+// Efectivo, además se refleja como una entrada de caja_movimientos en la sesión abierta — decisión
+// confirmada por Adrián para que el corte del día lo incluya.
+attachMoneyInput($('abono-monto'));
+function clientesConSaldoPendiente(){ return state.clientes.filter(c => !c.es_publico_general && Number(c.saldo_actual) > 0); }
+function actualizarNotaSaldoAbono(){
+  const c = state.clientes.find(x=>x.id===$('abono-cliente').value);
+  $('abono-saldo-nota').textContent = c ? `Saldo actual: ${money(c.saldo_actual)}` : '';
+}
+$('abono-cliente').addEventListener('change', actualizarNotaSaldoAbono);
+$('btn-abono-cliente').addEventListener('click', ()=>{
+  const pendientes = clientesConSaldoPendiente();
+  $('abono-error').innerHTML = '';
+  if(!pendientes.length){
+    $('abono-error').innerHTML = '<div class="msg-error">Ningún cliente tiene saldo pendiente en este momento.</div>';
+    $('modal-abono').classList.add('activo');
+    $('abono-cliente').innerHTML = '';
+    $('abono-confirmar').disabled = true;
+    return;
+  }
+  $('abono-confirmar').disabled = false;
+  llenarSelect('abono-cliente', pendientes, c=>c.id, c=>`${c.nombre} — saldo ${money(c.saldo_actual)}`);
+  llenarSelect('abono-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
+  $('abono-monto').value=''; $('abono-referencia').value='';
+  actualizarNotaSaldoAbono();
+  $('modal-abono').classList.add('activo');
+  $('abono-monto').focus();
+});
+$('abono-cancelar').addEventListener('click', ()=>{ $('modal-abono').classList.remove('activo'); });
+$('abono-confirmar').addEventListener('click', async ()=>{
+  if($('abono-confirmar').disabled) return;
+  $('abono-error').innerHTML = '';
+  const clienteId = $('abono-cliente').value;
+  const monto = moneyInputValue($('abono-monto'));
+  const formaPagoId = $('abono-forma-pago').value;
+  if(!clienteId || monto<=0 || !formaPagoId){
+    $('abono-error').innerHTML = '<div class="msg-error">Elige un cliente, captura un monto válido y la forma de pago.</div>';
+    return;
+  }
+  $('abono-confirmar').disabled = true;
+  const { error } = await sb.rpc('registrar_abono_cliente', {
+    p_cliente_id: clienteId, p_monto: monto, p_forma_pago_id: formaPagoId,
+    p_sesion_caja_id: state.sesionCaja.id, p_referencia: $('abono-referencia').value.trim() || null,
+  });
+  $('abono-confirmar').disabled = false;
+  if(error){
+    $('abono-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  $('modal-abono').classList.remove('activo');
+  await cargarClientes();
 });
 
 // ---------- CERRAR CAJA ----------

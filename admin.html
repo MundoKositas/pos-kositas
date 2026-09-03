@@ -132,6 +132,7 @@
     <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
+    <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
   </div>
@@ -245,6 +246,62 @@
           <thead><tr id="reporte-encabezado"><th>Producto</th></tr></thead>
           <tbody id="reporte-tabla-body"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB CLIENTES (Ronda 22 — Clientes/CxC) -->
+  <div class="tab-panel" id="tab-clientes" style="display:none;">
+    <div class="tabs" id="cli-tabs" style="margin-bottom:14px;">
+      <button type="button" class="tab-btn activo" data-clitab="cli-panel-clientes">Clientes</button>
+      <button type="button" class="tab-btn" data-clitab="cli-panel-cxc">Cuentas por cobrar</button>
+    </div>
+
+    <div id="cli-panel-clientes">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;flex-wrap:wrap;">
+          <div class="col" style="min-width:220px;">
+            <label>Buscar</label>
+            <input type="text" id="cli-buscar" placeholder="Nombre, teléfono o RFC…">
+          </div>
+          <button class="btn-primario" id="btn-nuevo-cliente">+ Nuevo cliente</button>
+        </div>
+        <div class="tabla-scroll" style="margin-top:14px;">
+          <table>
+            <thead><tr>
+              <th>Nombre</th><th>Teléfono</th><th>RFC</th><th>Lista de precio default</th>
+              <th class="num">Límite de crédito</th><th class="num">Saldo actual</th><th>Estado</th><th></th>
+            </tr></thead>
+            <tbody id="clientes-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="clientes-vacio" style="display:none;">No hay clientes que coincidan con la búsqueda.</p>
+      </div>
+    </div>
+
+    <div id="cli-panel-cxc" style="display:none;">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Cuentas por cobrar</h2>
+          <div class="fila" style="gap:8px;">
+            <select id="cxc-formato-exportar" style="width:auto;">
+              <option value="excel">Excel</option>
+              <option value="pdf">PDF</option>
+            </select>
+            <button type="button" class="btn-secundario" id="cxc-exportar">Exportar</button>
+          </div>
+        </div>
+        <p class="nota">Clientes con saldo pendiente (saldo actual mayor a $0), de mayor a menor saldo. Los abonos se registran desde el POS (pantalla de venta, "Abono de cliente") para que queden reflejados en el corte de caja de quien los recibe.</p>
+        <div class="tabla-scroll">
+          <table>
+            <thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Límite de crédito</th><th class="num">Saldo actual</th><th class="num">Disponible</th><th></th></tr></thead>
+            <tbody id="cxc-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="cxc-vacio" style="display:none;">No hay clientes con saldo pendiente.</p>
+        <div class="fila" style="justify-content:flex-end;margin-top:10px;border-top:1px solid #e5e7eb;padding-top:10px;">
+          <strong>Total por cobrar: <span id="cxc-total">$0.00</span></strong>
+        </div>
       </div>
     </div>
   </div>
@@ -483,6 +540,45 @@
   </div>
 </div>
 
+<!-- MODAL: alta/edición de cliente (Ronda 22) -->
+<div class="modal-fondo" id="modal-cliente">
+  <div class="modal">
+    <h2 id="cliente-titulo">Nuevo cliente</h2>
+    <div class="campo"><label>Nombre</label><input type="text" id="cliente-nombre"></div>
+    <div class="grid-2">
+      <div class="campo"><label>Teléfono</label><input type="text" id="cliente-telefono"></div>
+      <div class="campo"><label>RFC</label><input type="text" id="cliente-rfc"></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>Límite de crédito</label><input type="number" step="0.01" min="0" id="cliente-limite-credito" value="0"></div>
+      <div class="campo"><label>Lista de precio default</label><select id="cliente-lista-precio"><option value="">(usar la de la sucursal)</option></select></div>
+    </div>
+    <p class="nota">El cajero puede seguir cambiando la lista de precio del ticket manualmente al cobrar — esta es solo la que se propone automáticamente al seleccionar a este cliente.</p>
+    <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cliente-activo" checked style="width:auto;"> Activo</label></div>
+    <div id="cliente-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="cliente-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="cliente-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: estado de cuenta de un cliente (solo lectura — los abonos se registran desde el POS) -->
+<div class="modal-fondo" id="modal-estado-cuenta">
+  <div class="modal" style="max-width:640px;">
+    <h2 id="ec-titulo">Estado de cuenta</h2>
+    <p class="nota" id="ec-resumen"></p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
+        <tbody id="ec-tabla-body"></tbody>
+      </table>
+    </div>
+    <p class="nota" id="ec-vacio" style="display:none;">Este cliente no tiene movimientos todavía.</p>
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="ec-cerrar">Cerrar</button>
+  </div>
+</div>
+
 <!-- MODAL: producto -->
 <div class="modal-fondo" id="modal-producto">
   <div class="modal ancho" id="card-producto">
@@ -708,7 +804,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.7.007';
+const APP_VERSION = '1.8.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -842,6 +938,7 @@ const state = {
   // permisos del módulo "inventario" del usuario actual, y las líneas en construcción de cada
   // formulario tipo ticket (compra, ajuste de salida, traspaso).
   sucursales: [], almacenes: [], proveedores: [], usuariosEmpresa: [], permisosInventario: [],
+  clientes: [], clienteEditId: null,
   compraLineas: [], ajusteLineas: [], traspLineas: [],
   xmlPendientes: [], xmlPendientesTotalLote: 0, xmlPendienteActivo: false, xmlProveedorId: null,
   xmlCfdiUuid: null,
@@ -1055,6 +1152,15 @@ async function iniciarSesionApp(){
   renderListasPrecio();
   renderReporteChecks();
   renderActualizarPreciosChecks();
+
+  // Ronda 22: Clientes/CxC.
+  const { data: clientes } = await sb.from('clientes').select('*').order('es_publico_general', {ascending:false}).order('nombre');
+  state.clientes = clientes || [];
+  $('cliente-lista-precio').innerHTML = '<option value="">(usar la de la sucursal)</option>'
+    + state.listasPrecio.filter(l=>l.activo).map(l=>`<option value="${l.id}">${l.nombre}</option>`).join('');
+  renderClientesTabla();
+  renderCxcTabla();
+
   mostrarPantalla('pantalla-admin');
 
   // Si se llegó aquí desde el link "Editar producto" de POS (admin.html?variante=<id>), abre
@@ -3279,6 +3385,153 @@ $('tr-cancelar').addEventListener('click', async ()=>{
   $('modal-traspaso-recibir').classList.remove('activo');
   await cargarProductos();
   await cargarTraspasosPendientes();
+});
+
+// ---------- RONDA 22: CLIENTES / CxC ----------
+document.querySelectorAll('#cli-tabs .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#cli-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
+    btn.classList.add('activo');
+    ['cli-panel-clientes','cli-panel-cxc'].forEach(id=>{
+      $(id).style.display = (id === btn.dataset.clitab) ? 'block' : 'none';
+    });
+    if(btn.dataset.clitab === 'cli-panel-cxc') renderCxcTabla();
+  });
+});
+
+function nombreListaPrecioCliente(c){
+  if(!c.lista_precio_default_id) return '(la de la sucursal)';
+  const l = state.listasPrecio.find(x=>x.id===c.lista_precio_default_id);
+  return l ? l.nombre : '(la de la sucursal)';
+}
+function clientesFiltrados(){
+  const q = ($('cli-buscar').value || '').trim().toLowerCase();
+  if(!q) return state.clientes;
+  return state.clientes.filter(c =>
+    (c.nombre||'').toLowerCase().includes(q) ||
+    (c.telefono||'').toLowerCase().includes(q) ||
+    (c.rfc||'').toLowerCase().includes(q)
+  );
+}
+function renderClientesTabla(){
+  const items = clientesFiltrados();
+  $('clientes-vacio').style.display = items.length ? 'none' : 'block';
+  $('clientes-tabla-body').innerHTML = items.map(c=>`<tr>
+      <td>${c.nombre}${c.es_publico_general ? ' <span class="nota">(genérico)</span>' : ''}</td>
+      <td>${c.telefono || '—'}</td>
+      <td>${c.rfc || '—'}</td>
+      <td>${nombreListaPrecioCliente(c)}</td>
+      <td class="num">${c.es_publico_general ? '—' : money(c.limite_credito)}</td>
+      <td class="num">${c.es_publico_general ? '—' : money(c.saldo_actual)}</td>
+      <td>${c.activo ? 'Activo' : 'Inactivo'}</td>
+      <td>
+        <button type="button" class="btn-gris cli-editar" data-id="${c.id}" ${c.es_publico_general ? 'disabled' : ''}>Editar</button>
+        <button type="button" class="btn-gris cli-estado-cuenta" data-id="${c.id}">Estado de cuenta</button>
+      </td>
+    </tr>`).join('');
+  $('clientes-tabla-body').querySelectorAll('.cli-editar').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirCliente(btn.dataset.id));
+  });
+  $('clientes-tabla-body').querySelectorAll('.cli-estado-cuenta').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirEstadoCuenta(btn.dataset.id));
+  });
+}
+$('cli-buscar').addEventListener('input', renderClientesTabla);
+
+function abrirCliente(id){
+  const c = id ? state.clientes.find(x=>x.id===id) : null;
+  $('cliente-titulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
+  $('cliente-error').innerHTML = '';
+  $('cliente-nombre').value = c?.nombre || '';
+  $('cliente-telefono').value = c?.telefono || '';
+  $('cliente-rfc').value = c?.rfc || '';
+  $('cliente-limite-credito').value = c ? c.limite_credito : 0;
+  $('cliente-lista-precio').value = c?.lista_precio_default_id || '';
+  $('cliente-activo').checked = c ? c.activo : true;
+  state.clienteEditId = c?.id || null;
+  $('modal-cliente').classList.add('activo');
+}
+$('btn-nuevo-cliente').addEventListener('click', ()=>abrirCliente(null));
+$('cliente-cancelar').addEventListener('click', ()=>{ $('modal-cliente').classList.remove('activo'); });
+$('cliente-guardar').addEventListener('click', async ()=>{
+  $('cliente-error').innerHTML = '';
+  const nombre = $('cliente-nombre').value.trim();
+  if(!nombre){ $('cliente-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
+  const limite = Number($('cliente-limite-credito').value);
+  if(isNaN(limite) || limite < 0){ $('cliente-error').innerHTML = '<div class="msg-error">El límite de crédito debe ser un número mayor o igual a cero.</div>'; return; }
+  const payload = {
+    id: state.clienteEditId, empresa_id: state.empresaId, nombre,
+    telefono: $('cliente-telefono').value.trim(), rfc: $('cliente-rfc').value.trim(),
+    limite_credito: limite, lista_precio_default_id: $('cliente-lista-precio').value || null,
+    activo: $('cliente-activo').checked,
+  };
+  $('cliente-guardar').disabled = true;
+  const { error } = await sb.rpc('guardar_cliente', { p: payload });
+  $('cliente-guardar').disabled = false;
+  if(error){ $('cliente-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  const { data: clientes } = await sb.from('clientes').select('*').order('es_publico_general', {ascending:false}).order('nombre');
+  state.clientes = clientes || [];
+  renderClientesTabla();
+  renderCxcTabla();
+  $('modal-cliente').classList.remove('activo');
+});
+
+const nombreMovimientoCliente = (tipo) => tipo === 'cargo' ? 'Cargo (venta a crédito)' : 'Abono';
+async function abrirEstadoCuenta(id){
+  const c = state.clientes.find(x=>x.id===id);
+  if(!c) return;
+  $('ec-titulo').textContent = `Estado de cuenta — ${c.nombre}`;
+  $('ec-resumen').textContent = c.es_publico_general
+    ? 'Cliente genérico — no aplica límite de crédito ni saldo.'
+    : `Límite de crédito: ${money(c.limite_credito)} · Saldo actual: ${money(c.saldo_actual)} · Disponible: ${money(Math.max(0, c.limite_credito - c.saldo_actual))}`;
+  $('ec-tabla-body').innerHTML = '<tr><td colspan="4" class="nota">Cargando…</td></tr>';
+  $('modal-estado-cuenta').classList.add('activo');
+  const { data: movs, error } = await sb.from('cliente_movimientos').select('*').eq('cliente_id', id).order('fecha_hora', {ascending:false});
+  if(error){ $('ec-tabla-body').innerHTML = `<tr><td colspan="4" class="msg-error">${error.message}</td></tr>`; return; }
+  $('ec-vacio').style.display = (movs && movs.length) ? 'none' : 'block';
+  $('ec-tabla-body').innerHTML = (movs||[]).map(m=>`<tr>
+      <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
+      <td>${nombreMovimientoCliente(m.tipo)}</td>
+      <td>${m.referencia || '—'}</td>
+      <td class="num">${m.tipo === 'cargo' ? '+' : '-'}${money(m.monto)}</td>
+    </tr>`).join('');
+}
+$('ec-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta').classList.remove('activo'); });
+
+// ---- Cuentas por cobrar (clientes con saldo pendiente) ----
+function clientesConSaldo(){
+  return state.clientes.filter(c => !c.es_publico_general && Number(c.saldo_actual) > 0)
+    .sort((a,b)=> Number(b.saldo_actual) - Number(a.saldo_actual));
+}
+function renderCxcTabla(){
+  const items = clientesConSaldo();
+  $('cxc-vacio').style.display = items.length ? 'none' : 'block';
+  $('cxc-tabla-body').innerHTML = items.map(c=>`<tr>
+      <td>${c.nombre}</td><td>${c.telefono || '—'}</td>
+      <td class="num">${money(c.limite_credito)}</td>
+      <td class="num">${money(c.saldo_actual)}</td>
+      <td class="num">${money(Math.max(0, c.limite_credito - c.saldo_actual))}</td>
+      <td><button type="button" class="btn-gris cxc-estado-cuenta" data-id="${c.id}">Estado de cuenta</button></td>
+    </tr>`).join('');
+  $('cxc-tabla-body').querySelectorAll('.cxc-estado-cuenta').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirEstadoCuenta(btn.dataset.id));
+  });
+  $('cxc-total').textContent = money(items.reduce((s,c)=>s+Number(c.saldo_actual),0));
+}
+$('cxc-exportar').addEventListener('click', async ()=>{
+  const items = clientesConSaldo();
+  const encabezados = ['Cliente','Teléfono','Límite de crédito','Saldo actual','Disponible'];
+  // Reporte plano (sin agrupar por categoría/línea, a diferencia de existencias/resurtido/precios) —
+  // cada cliente es un renglón tipo 'producto', y el último renglón es el TOTAL GENERAL.
+  const filas = items.map(c=>[c.nombre, c.telefono || '—', Number(c.limite_credito)||0, Number(c.saldo_actual)||0, Math.max(0, Number(c.limite_credito)-Number(c.saldo_actual))]);
+  const tipos = items.map(()=>'producto');
+  filas.push(['TOTAL GENERAL', '', '', redondear2(items.reduce((s,c)=>s+Number(c.saldo_actual),0)), '']);
+  tipos.push('total');
+  if($('cxc-formato-exportar').value === 'excel'){
+    exportarExcelAgrupado(`cuentas_por_cobrar_${fechaLocalISO()}.xlsx`, 'CxC', encabezados, filas, tipos, [2,3,4]);
+  } else {
+    await exportarPDFAgrupado(`cuentas_por_cobrar_${fechaLocalISO()}.pdf`, 'Cuentas por cobrar', state.empresaNombre, encabezados, filas, tipos, [2,3,4], [2,3,4]);
+  }
 });
 
 // ---------- ARRANQUE ----------
