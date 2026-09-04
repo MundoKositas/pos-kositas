@@ -144,7 +144,7 @@
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
-    <button class="tab-btn" data-tab="tab-catalogos-base">Catálogos</button>
+    <button class="tab-btn" data-tab="tab-catalogos-base">Catálogos base</button>
   </div>
 
   <!-- TAB CATÁLOGO -->
@@ -542,17 +542,29 @@
     </div>
     <p class="nota" id="cfg-nota-super-admin" style="display:none;">Unidades de medida e Impuestos son catálogos compartidos por todo el sistema (no solo Mundo Kositas) — por eso solo Super Admin puede crearlos o editarlos; con otro rol se muestran de solo lectura.</p>
     <div class="card">
-      <div class="fila" style="justify-content:space-between;align-items:center;">
-        <h2 style="margin:0;" id="cfg-titulo">Marcas</h2>
+      <div class="fila" style="justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;">
+        <div class="col" style="min-width:220px;">
+          <label>Buscar</label>
+          <input type="text" id="cfg-buscar" placeholder="Escribe para filtrar…">
+        </div>
+        <h2 style="margin:0 auto 0 12px;" id="cfg-titulo">Marcas</h2>
         <button class="btn-primario" id="cfg-nuevo">+ Nuevo</button>
       </div>
-      <div class="tabla-scroll">
+      <div class="tabla-scroll" style="margin-top:14px;">
         <table>
           <thead id="cfg-thead"></thead>
           <tbody id="cfg-tabla-body"></tbody>
         </table>
       </div>
       <p class="nota" id="cfg-vacio" style="display:none;">Todavía no hay registros.</p>
+      <div class="fila" style="justify-content:flex-end;align-items:center;gap:8px;margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;">
+        <p class="nota" style="margin:0 auto 0 0;">Reporte del catálogo filtrado arriba:</p>
+        <select id="cfg-formato-exportar" style="width:auto;">
+          <option value="excel">Excel</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button type="button" class="btn-gris" id="cfg-exportar">Exportar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -979,7 +991,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.12.001';
+const APP_VERSION = '1.12.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4372,12 +4384,14 @@ const CATALOGOS_SIMPLES = {
     tabla: 'formas_pago', tituloPlural: 'Formas de pago', tituloSingular: 'forma de pago',
     campos: [
       { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'clave_sat', label:'Clave SAT (opcional)', tipo:'texto' },
       { id:'requiere_autorizacion', label:'Requiere autorización de un supervisor', tipo:'bool' },
       { id:'permite_multiple', label:'Se puede usar más de una vez en el mismo ticket', tipo:'bool' },
     ],
     tieneActivo: true, orden: 'nombre',
     columnas: [
       { label:'Nombre', valor:r=>r.nombre },
+      { label:'Clave SAT', valor:r=>r.clave_sat || '—' },
       { label:'Requiere autorización', valor:r=>r.requiere_autorizacion ? 'Sí' : 'No' },
       { label:'Se puede repetir en un ticket', valor:r=>r.permite_multiple ? 'Sí' : 'No' },
     ],
@@ -4412,9 +4426,17 @@ async function cargarYRenderCatalogoSimple(key){
   renderCatalogoSimple(key);
 }
 
+// Se guarda la última lista filtrada (ya con la búsqueda aplicada) para que "Exportar" saque
+// exactamente lo que se está viendo en pantalla, igual que el resto de reportes de la app.
+state.cfgFilasFiltradas = [];
 function renderCatalogoSimple(key){
   const cfg = CATALOGOS_SIMPLES[key];
-  const filas = state.cfgCache[key] || [];
+  const todas = state.cfgCache[key] || [];
+  const texto = $('cfg-buscar').value.trim().toLowerCase();
+  const filas = texto
+    ? todas.filter(r=>cfg.columnas.some(c=>String(c.valor(r)).toLowerCase().includes(texto)))
+    : todas;
+  state.cfgFilasFiltradas = filas;
   $('cfg-titulo').textContent = cfg.tituloPlural;
   const soloLectura = cfg.global && state.rol !== 'Super Admin';
   $('cfg-nuevo').style.display = soloLectura ? 'none' : '';
@@ -4423,6 +4445,7 @@ function renderCatalogoSimple(key){
   if(!filas.length){
     $('cfg-tabla-body').innerHTML = '';
     $('cfg-vacio').style.display = 'block';
+    $('cfg-vacio').textContent = texto ? 'No hay registros que coincidan con la búsqueda.' : 'Todavía no hay registros.';
     return;
   }
   $('cfg-vacio').style.display = 'none';
@@ -4434,14 +4457,33 @@ function renderCatalogoSimple(key){
   }).join('');
   $('cfg-tabla-body').querySelectorAll('.cfg-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalCfg(key, b.dataset.id)));
 }
+$('cfg-buscar').addEventListener('input', ()=>renderCatalogoSimple(state.cfgTabActivo));
 
 document.querySelectorAll('#cfg-tabs .tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#cfg-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
     btn.classList.add('activo');
     state.cfgTabActivo = btn.dataset.cfgtab;
+    $('cfg-buscar').value = '';
     cargarYRenderCatalogoSimple(state.cfgTabActivo);
   });
+});
+
+$('cfg-exportar').addEventListener('click', async ()=>{
+  const cfg = CATALOGOS_SIMPLES[state.cfgTabActivo];
+  const filas = state.cfgFilasFiltradas;
+  const encabezados = cfg.columnas.map(c=>c.label).concat(cfg.tieneActivo ? ['Estado'] : []);
+  const filasTabla = filas.map(r=>{
+    const fila = cfg.columnas.map(c=>c.valor(r));
+    if(cfg.tieneActivo) fila.push(r.activo ? 'Activo' : 'Inactivo');
+    return fila;
+  });
+  const tipos = filas.map(()=>'producto'); // sin agrupación — es un catálogo plano
+  if($('cfg-formato-exportar').value === 'excel'){
+    exportarExcelAgrupado(`${cfg.tabla}.xlsx`, cfg.tituloPlural, encabezados, filasTabla, tipos, []);
+  } else {
+    await exportarPDFAgrupado(`${cfg.tabla}.pdf`, cfg.tituloPlural, state.empresaNombre, encabezados, filasTabla, tipos, [], []);
+  }
 });
 
 function abrirModalCfg(key, id){
