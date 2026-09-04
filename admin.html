@@ -390,7 +390,7 @@
       </div>
       <div class="tabla-scroll" style="margin-top:10px;">
         <table>
-          <thead><tr><th>Fecha</th><th>Folio</th><th>Proveedor</th><th>Almacén</th><th>Capturó</th><th class="num">Total (con impuestos)</th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Folio</th><th>Proveedor</th><th>Almacén</th><th>Capturó</th><th class="num">Total (con impuestos)</th><th></th></tr></thead>
           <tbody id="compras-lista-body"></tbody>
         </table>
       </div>
@@ -766,6 +766,25 @@
   </div>
 </div>
 
+<!-- MODAL: detalle de una compra registrada (Ronda 24) -->
+<div class="modal-fondo" id="modal-compra-detalle">
+  <div class="modal" style="max-width:640px;">
+    <h2 style="margin-top:0;">Detalle de la compra</h2>
+    <p class="nota" id="cd-resumen">Cargando…</p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr></thead>
+        <tbody id="cd-tabla-body"></tbody>
+      </table>
+    </div>
+    <div class="totales" style="margin-top:10px;">
+      <div class="linea total-final"><span>Total de la compra</span><span id="cd-total">$0.00</span></div>
+    </div>
+    <p class="nota">La columna "Total (con impuestos)" de la lista de compras es un cálculo aparte para comparar contra la factura del proveedor — este total es el que se capturó al registrar la compra.</p>
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="cd-cerrar">Cerrar</button>
+  </div>
+</div>
+
 <!-- MODAL: lista de precio -->
 <div class="modal-fondo" id="modal-lista">
   <div class="modal ancho" id="card-lista">
@@ -832,7 +851,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.9.001';
+const APP_VERSION = '1.9.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2976,13 +2995,56 @@ async function cargarComprasLista(){
   $('compras-lista-body').innerHTML = compras.map(c=>`
     <tr>
       <td>${new Date(c.fecha_compra+'T00:00:00').toLocaleDateString('es-MX')}</td>
-      <td>${c.folio_documento}</td>
+      <td><a href="#" class="link-compra-detalle" data-id="${c.compra_id}" style="color:var(--azul);">${c.folio_documento}</a></td>
       <td>${c.proveedor}</td>
       <td>${c.almacen}</td>
       <td>${c.usuario}</td>
       <td class="num">${money(c.total_con_impuestos)}</td>
+      <td><button type="button" class="btn-gris cd-abrir" data-id="${c.compra_id}">Ver detalle</button></td>
     </tr>`).join('');
+  $('compras-lista-body').querySelectorAll('.link-compra-detalle, .cd-abrir').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.preventDefault(); abrirCompraDetalle(el.dataset.id); });
+  });
 }
+
+// Ronda 24: Adrián pidió poder ver qué productos incluía una compra ya registrada — antes "Compras
+// registradas" solo mostraba el renglón resumen (fecha/folio/proveedor/almacén/total), sin manera de
+// entrar al detalle. RLS de compra_detalle ya permite leerla directo (vía la política de "compras"),
+// así que no hizo falta ninguna RPC ni migración nueva — solo consultar las tablas.
+async function abrirCompraDetalle(compraId){
+  $('cd-resumen').textContent = 'Cargando…';
+  $('cd-tabla-body').innerHTML = '';
+  $('cd-total').textContent = '$0.00';
+  $('modal-compra-detalle').classList.add('activo');
+
+  const [{ data: compra, error: errCompra }, { data: lineas, error: errLineas }] = await Promise.all([
+    sb.from('compras').select('*, proveedores(nombre), almacenes(nombre), usuarios(nombre)').eq('id', compraId).single(),
+    sb.from('compra_detalle').select('cantidad, costo_unitario, importe, variantes(nombre_variante, productos(nombre))').eq('compra_id', compraId),
+  ]);
+  if(errCompra || errLineas){
+    $('cd-resumen').textContent = `Error al cargar el detalle: ${(errCompra||errLineas).message}`;
+    return;
+  }
+  const nombreLinea = (v) => {
+    const prod = v?.variantes?.productos?.nombre || '(producto no encontrado)';
+    const variante = v?.variantes?.nombre_variante;
+    return (variante && variante !== 'Único') ? `${prod} — ${variante}` : prod;
+  };
+  $('cd-resumen').innerHTML = `Folio: <strong>${compra.folio_documento || '(sin folio)'}</strong> · Fecha: ${new Date(compra.fecha_compra+'T00:00:00').toLocaleDateString('es-MX')}<br>`
+    + `Proveedor: ${compra.proveedores?.nombre || '(sin proveedor)'} · Almacén: ${compra.almacenes?.nombre || '—'} · Capturó: ${compra.usuarios?.nombre || '—'}`;
+  const filas = lineas || [];
+  $('cd-tabla-body').innerHTML = filas.map(l=>`<tr>
+      <td>${nombreLinea(l)}</td>
+      <td class="num">${l.cantidad}</td>
+      <td class="num">${money(l.costo_unitario)}</td>
+      <td class="num">${money(l.importe)}</td>
+    </tr>`).join('');
+  // El total del detalle sin impuestos debe cuadrar con compras.total (capturado sin impuestos); la
+  // columna "Total (con impuestos)" de la lista es la que sí calcula impuestos — aquí se muestra el
+  // total real de la compra tal como se guardó, para que cuadre con lo que Adrián capturó.
+  $('cd-total').textContent = money(compra.total);
+}
+$('cd-cerrar').addEventListener('click', ()=>{ $('modal-compra-detalle').classList.remove('activo'); });
 
 // ---------------------------------------------------------------------------------------------
 // XML DE FACTURA (CFDI) — carga automática de proveedor/folio/fecha/líneas
