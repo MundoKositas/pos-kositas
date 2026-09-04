@@ -144,6 +144,7 @@
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
+    <button class="tab-btn" data-tab="tab-catalogos-base">Catálogos</button>
   </div>
 
   <!-- TAB CATÁLOGO -->
@@ -525,6 +526,46 @@
         </div>
         <p class="nota" id="trasp-lista-vacio" style="display:none;">No hay traspasos en ese rango.</p>
       </div>
+    </div>
+  </div>
+
+  <!-- TAB CATÁLOGOS BASE (Ronda 30) -->
+  <div class="tab-panel" id="tab-catalogos-base" style="display:none;">
+    <div class="tabs" id="cfg-tabs" style="margin-bottom:14px;">
+      <button type="button" class="tab-btn activo" data-cfgtab="marcas">Marcas</button>
+      <button type="button" class="tab-btn" data-cfgtab="categorias">Categorías</button>
+      <button type="button" class="tab-btn" data-cfgtab="lineas">Líneas de artículo</button>
+      <button type="button" class="tab-btn" data-cfgtab="unidades">Unidades de medida</button>
+      <button type="button" class="tab-btn" data-cfgtab="impuestos">Impuestos</button>
+      <button type="button" class="tab-btn" data-cfgtab="formas_pago">Formas de pago</button>
+      <button type="button" class="tab-btn" data-cfgtab="condiciones_pago">Condiciones de pago</button>
+    </div>
+    <p class="nota" id="cfg-nota-super-admin" style="display:none;">Unidades de medida e Impuestos son catálogos compartidos por todo el sistema (no solo Mundo Kositas) — por eso solo Super Admin puede crearlos o editarlos; con otro rol se muestran de solo lectura.</p>
+    <div class="card">
+      <div class="fila" style="justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;" id="cfg-titulo">Marcas</h2>
+        <button class="btn-primario" id="cfg-nuevo">+ Nuevo</button>
+      </div>
+      <div class="tabla-scroll">
+        <table>
+          <thead id="cfg-thead"></thead>
+          <tbody id="cfg-tabla-body"></tbody>
+        </table>
+      </div>
+      <p class="nota" id="cfg-vacio" style="display:none;">Todavía no hay registros.</p>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: catálogo simple (Marcas/Categorías/Líneas/Unidades/Impuestos/Formas de pago/Condiciones de pago — Ronda 30) -->
+<div class="modal-fondo" id="modal-cfg">
+  <div class="modal">
+    <h2 id="cfg-modal-titulo">Nuevo</h2>
+    <div id="cfg-modal-campos"></div>
+    <div id="cfg-modal-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="cfg-modal-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="cfg-modal-guardar">Guardar</button>
     </div>
   </div>
 </div>
@@ -938,7 +979,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.11.002';
+const APP_VERSION = '1.12.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1397,6 +1438,7 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     // venta a crédito o un abono desde el POS (otra pestaña/sesión), el saldo se veía desactualizado
     // hasta recargar el navegador. Ahora se refresca cada vez que se entra a la pestaña.
     if(btn.dataset.tab === 'tab-clientes') refrescarPantallaClientes();
+    if(btn.dataset.tab === 'tab-catalogos-base') entrarATabCatalogosBase();
   });
 });
 
@@ -4261,6 +4303,229 @@ $('cxc-exportar').addEventListener('click', async ()=>{
     exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxC', encabezados, filas, tipos, [2,3,4]);
   } else {
     await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por cobrar', state.empresaNombre, encabezados, filas, tipos, [2,3,4], [2,3,4]);
+  }
+});
+
+// ---------- CATÁLOGOS BASE (Ronda 30) — Marcas/Categorías/Líneas/Unidades/Impuestos/Formas de
+// pago/Condiciones de pago sin pasar por SQL. Marcas, Categorías, Líneas de artículo, Formas de
+// pago y Condiciones de pago son catálogos de ESTA empresa (RLS: tiene_acceso_empresa). Unidades
+// de medida e Impuestos son catálogos GLOBALES compartidos por todo el sistema multiempresa — la
+// base de datos ya solo permite crearlos/editarlos a Super Admin (RLS: es_super_admin()); el resto
+// de roles los ve de solo lectura. Todas las escrituras van directo contra la tabla (sin RPC nueva)
+// porque la única regla de negocio real ya la aplica RLS — no hace falta validación de servidor.
+const CATALOGOS_SIMPLES = {
+  marcas: {
+    tabla: 'marcas', tituloPlural: 'Marcas', tituloSingular: 'marca',
+    campos: [{ id:'nombre', label:'Nombre', tipo:'texto', requerido:true }],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [{ label:'Nombre', valor:r=>r.nombre }],
+  },
+  categorias: {
+    tabla: 'categorias', tituloPlural: 'Categorías', tituloSingular: 'categoría',
+    campos: [{ id:'nombre', label:'Nombre', tipo:'texto', requerido:true }],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [{ label:'Nombre', valor:r=>r.nombre }],
+  },
+  lineas: {
+    tabla: 'lineas_articulo', tituloPlural: 'Líneas de artículo', tituloSingular: 'línea de artículo',
+    omitirEmpresaId: true, // se ubica vía categoria_id → categorias.empresa_id, no tiene su propia columna empresa_id
+    campos: [
+      { id:'categoria_id', label:'Categoría', tipo:'select', fuente:'categorias', requerido:true },
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+    ],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [
+      { label:'Categoría', valor:r=>state.categorias.find(c=>c.id===r.categoria_id)?.nombre || '—' },
+      { label:'Nombre', valor:r=>r.nombre },
+    ],
+  },
+  unidades: {
+    tabla: 'unidades_medida', tituloPlural: 'Unidades de medida', tituloSingular: 'unidad de medida',
+    campos: [
+      { id:'clave', label:'Clave', tipo:'texto', requerido:true },
+      { id:'descripcion', label:'Descripción', tipo:'texto', requerido:true },
+      { id:'clave_sat', label:'Clave SAT (opcional)', tipo:'texto' },
+    ],
+    tieneActivo: false, global: true, orden: 'descripcion',
+    columnas: [
+      { label:'Clave', valor:r=>r.clave },
+      { label:'Descripción', valor:r=>r.descripcion },
+      { label:'Clave SAT', valor:r=>r.clave_sat || '—' },
+    ],
+  },
+  impuestos: {
+    tabla: 'impuestos', tituloPlural: 'Impuestos', tituloSingular: 'impuesto',
+    campos: [
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'tasa', label:'Tasa (ej. 0.16 = 16%)', tipo:'numero', requerido:true },
+      { id:'tipo_factor', label:'Tipo', tipo:'select', opciones:[['tasa','Tasa'],['exento','Exento']], requerido:true },
+      { id:'clave_sat', label:'Clave SAT (opcional)', tipo:'texto' },
+    ],
+    tieneActivo: false, global: true, orden: 'nombre',
+    columnas: [
+      { label:'Nombre', valor:r=>r.nombre },
+      { label:'Tasa', valor:r=>r.tipo_factor==='exento' ? 'Exento' : `${(Number(r.tasa)*100).toFixed(2)}%` },
+      { label:'Clave SAT', valor:r=>r.clave_sat || '—' },
+    ],
+  },
+  formas_pago: {
+    tabla: 'formas_pago', tituloPlural: 'Formas de pago', tituloSingular: 'forma de pago',
+    campos: [
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'requiere_autorizacion', label:'Requiere autorización de un supervisor', tipo:'bool' },
+      { id:'permite_multiple', label:'Se puede usar más de una vez en el mismo ticket', tipo:'bool' },
+    ],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [
+      { label:'Nombre', valor:r=>r.nombre },
+      { label:'Requiere autorización', valor:r=>r.requiere_autorizacion ? 'Sí' : 'No' },
+      { label:'Se puede repetir en un ticket', valor:r=>r.permite_multiple ? 'Sí' : 'No' },
+    ],
+  },
+  condiciones_pago: {
+    tabla: 'condiciones_pago', tituloPlural: 'Condiciones de pago', tituloSingular: 'condición de pago',
+    campos: [
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'dias', label:'Días de crédito', tipo:'numero', requerido:true },
+    ],
+    tieneActivo: true, orden: 'dias',
+    columnas: [
+      { label:'Nombre', valor:r=>r.nombre },
+      { label:'Días', valor:r=>r.dias },
+    ],
+  },
+};
+state.cfgTabActivo = 'marcas';
+state.cfgCache = {};
+state.cfgEditId = null;
+
+function entrarATabCatalogosBase(){
+  $('cfg-nota-super-admin').style.display = (state.rol === 'Super Admin') ? 'none' : 'block';
+  cargarYRenderCatalogoSimple(state.cfgTabActivo);
+}
+
+async function cargarYRenderCatalogoSimple(key){
+  const cfg = CATALOGOS_SIMPLES[key];
+  const { data, error } = await sb.from(cfg.tabla).select('*').order(cfg.orden);
+  if(!error) state.cfgCache[key] = data || [];
+  if(key === 'categorias') state.categorias = state.cfgCache.categorias || state.categorias; // para el select de Líneas
+  renderCatalogoSimple(key);
+}
+
+function renderCatalogoSimple(key){
+  const cfg = CATALOGOS_SIMPLES[key];
+  const filas = state.cfgCache[key] || [];
+  $('cfg-titulo').textContent = cfg.tituloPlural;
+  const soloLectura = cfg.global && state.rol !== 'Super Admin';
+  $('cfg-nuevo').style.display = soloLectura ? 'none' : '';
+  const encabezados = cfg.columnas.map(c=>`<th>${c.label}</th>`).join('') + (cfg.tieneActivo ? '<th>Estado</th>' : '') + '<th></th>';
+  $('cfg-thead').innerHTML = `<tr>${encabezados}</tr>`;
+  if(!filas.length){
+    $('cfg-tabla-body').innerHTML = '';
+    $('cfg-vacio').style.display = 'block';
+    return;
+  }
+  $('cfg-vacio').style.display = 'none';
+  $('cfg-tabla-body').innerHTML = filas.map(r=>{
+    const celdas = cfg.columnas.map(c=>`<td>${c.valor(r)}</td>`).join('');
+    const estado = cfg.tieneActivo ? `<td>${r.activo ? 'Activo' : 'Inactivo'}</td>` : '';
+    const accion = soloLectura ? '' : `<button type="button" class="btn-gris cfg-editar" data-id="${r.id}">Editar</button>`;
+    return `<tr>${celdas}${estado}<td>${accion}</td></tr>`;
+  }).join('');
+  $('cfg-tabla-body').querySelectorAll('.cfg-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalCfg(key, b.dataset.id)));
+}
+
+document.querySelectorAll('#cfg-tabs .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#cfg-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
+    btn.classList.add('activo');
+    state.cfgTabActivo = btn.dataset.cfgtab;
+    cargarYRenderCatalogoSimple(state.cfgTabActivo);
+  });
+});
+
+function abrirModalCfg(key, id){
+  const cfg = CATALOGOS_SIMPLES[key];
+  state.cfgEditId = id || null;
+  const registro = id ? (state.cfgCache[key] || []).find(r=>r.id===id) : null;
+  $('cfg-modal-titulo').textContent = id ? `Editar ${cfg.tituloSingular}` : `Nuevo/a ${cfg.tituloSingular}`;
+  $('cfg-modal-error').innerHTML = '';
+  const camposHtml = cfg.campos.map(campo=>{
+    const valorActual = registro ? registro[campo.id] : '';
+    if(campo.tipo === 'texto'){
+      return `<div class="campo"><label>${campo.label}</label><input type="text" id="cfg-campo-${campo.id}" value="${valorActual!=null?String(valorActual).replace(/"/g,'&quot;'):''}"></div>`;
+    }
+    if(campo.tipo === 'numero'){
+      return `<div class="campo"><label>${campo.label}</label><input type="number" step="any" id="cfg-campo-${campo.id}" value="${valorActual!=null?valorActual:''}"></div>`;
+    }
+    if(campo.tipo === 'bool'){
+      return `<div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cfg-campo-${campo.id}" style="width:auto;" ${valorActual?'checked':''}> ${campo.label}</label></div>`;
+    }
+    if(campo.tipo === 'select'){
+      let opciones;
+      if(campo.fuente === 'categorias'){
+        opciones = (state.cfgCache.categorias || state.categorias).map(c=>[c.id, c.nombre]);
+      } else {
+        opciones = campo.opciones;
+      }
+      const optionsHtml = opciones.map(([val,txt])=>`<option value="${val}" ${String(valorActual)===String(val)?'selected':''}>${txt}</option>`).join('');
+      return `<div class="campo"><label>${campo.label}</label><select id="cfg-campo-${campo.id}"><option value="">(elegir…)</option>${optionsHtml}</select></div>`;
+    }
+    return '';
+  }).join('');
+  const activoHtml = cfg.tieneActivo
+    ? `<div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cfg-campo-activo" style="width:auto;" ${(!registro || registro.activo)?'checked':''}> Activo</label></div>`
+    : '';
+  $('cfg-modal-campos').innerHTML = camposHtml + activoHtml;
+  $('modal-cfg').dataset.key = key;
+  $('modal-cfg').classList.add('activo');
+}
+$('cfg-nuevo').addEventListener('click', ()=>abrirModalCfg(state.cfgTabActivo, null));
+$('cfg-modal-cancelar').addEventListener('click', ()=>{ $('modal-cfg').classList.remove('activo'); });
+$('cfg-modal-guardar').addEventListener('click', async ()=>{
+  const key = $('modal-cfg').dataset.key;
+  const cfg = CATALOGOS_SIMPLES[key];
+  $('cfg-modal-error').innerHTML = '';
+  const payload = {};
+  for(const campo of cfg.campos){
+    const el = $(`cfg-campo-${campo.id}`);
+    if(campo.tipo === 'bool'){ payload[campo.id] = el.checked; continue; }
+    let valor = el.value;
+    if(campo.tipo === 'texto') valor = valor.trim();
+    if(campo.requerido && !valor && valor !== 0){
+      $('cfg-modal-error').innerHTML = `<div class="msg-error">${campo.label} es obligatorio.</div>`;
+      return;
+    }
+    if(campo.tipo === 'numero' && valor !== ''){
+      valor = Number(valor);
+      if(isNaN(valor)){ $('cfg-modal-error').innerHTML = `<div class="msg-error">${campo.label} debe ser un número.</div>`; return; }
+    }
+    payload[campo.id] = (valor === '' && !campo.requerido) ? null : valor;
+  }
+  if(!cfg.global && !cfg.omitirEmpresaId) payload.empresa_id = state.empresaId;
+  if(cfg.tieneActivo) payload.activo = $('cfg-campo-activo').checked;
+  if(key === 'lineas' && !payload.categoria_id){
+    $('cfg-modal-error').innerHTML = '<div class="msg-error">Elige una categoría.</div>';
+    return;
+  }
+  $('cfg-modal-guardar').disabled = true;
+  let error;
+  if(state.cfgEditId){
+    ({ error } = await sb.from(cfg.tabla).update(payload).eq('id', state.cfgEditId));
+  } else {
+    ({ error } = await sb.from(cfg.tabla).insert(payload));
+  }
+  $('cfg-modal-guardar').disabled = false;
+  if(error){
+    $('cfg-modal-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  $('modal-cfg').classList.remove('activo');
+  await cargarYRenderCatalogoSimple(key);
+  // Si se editó Categorías, refresca también los selects de Líneas/filtros que dependen de ella.
+  if(key === 'categorias'){
+    const { data: categorias } = await sb.from('categorias').select('*').order('nombre');
+    state.categorias = categorias || [];
   }
 });
 
