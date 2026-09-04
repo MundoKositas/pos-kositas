@@ -57,6 +57,15 @@
   .resultado-item:last-child{border-bottom:none;}
   .stock-bajo{color:var(--rojo);font-weight:600;}
   .cant-input{width:70px;text-align:center;}
+  /* Ronda 26: quitar flechitas de incremento/decremento de los campos numéricos — Adrián pidió poder
+     teclear directo en cantidad/costo/precio sin que estorben. */
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0; }
+  input[type=number]{ -moz-appearance:textfield; }
+  /* Ronda 26: formato "$" para campos de costo/precio — el input queda igual, solo se le agrega un
+     prefijo visual "$" a la izquierda. */
+  .money-input{ position:relative; display:inline-block; }
+  .money-input .money-prefix{ position:absolute; left:6px; top:50%; transform:translateY(-50%); color:var(--gris); font-size:.85em; pointer-events:none; }
+  .money-input input{ padding-left:16px; }
   .totales{margin-top:14px;font-size:.95rem;}
   .totales .linea{display:flex;justify-content:space-between;padding:4px 0;gap:12px;}
   .totales .total-final{font-size:1.3rem;font-weight:700;border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;}
@@ -446,6 +455,22 @@
         <div id="ajuste-error"></div>
         <button class="btn-peligro" style="margin-top:10px;" id="ajuste-registrar">Registrar salida</button>
       </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Salidas registradas</h2>
+        <div class="fila" style="align-items:flex-end;">
+          <div class="col" style="min-width:150px;"><label>Desde</label><input type="date" id="ajustes-lista-desde"></div>
+          <div class="col" style="min-width:150px;"><label>Hasta</label><input type="date" id="ajustes-lista-hasta"></div>
+          <button type="button" class="btn-secundario" id="ajustes-lista-buscar">Buscar</button>
+        </div>
+        <div class="tabla-scroll" style="margin-top:10px;">
+          <table>
+            <thead><tr><th>Fecha</th><th>Folio</th><th>Almacén</th><th>Motivo</th><th>Capturó</th><th></th></tr></thead>
+            <tbody id="ajustes-lista-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="ajustes-lista-vacio" style="display:none;">No hay salidas por ajuste registradas en ese rango.</p>
+      </div>
     </div>
 
     <div id="inv-panel-traspasos" style="display:none;">
@@ -482,6 +507,23 @@
           </table>
         </div>
         <p class="nota" id="trasp-pendientes-vacio" style="display:none;">No hay traspasos pendientes de recibir.</p>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Traspasos registrados</h2>
+        <p class="nota">Un traspaso ya enviado no se puede editar aquí — si está mal capturado, no debe recibirse en el almacén destino, y se genera uno nuevo correcto.</p>
+        <div class="fila" style="align-items:flex-end;">
+          <div class="col" style="min-width:150px;"><label>Desde</label><input type="date" id="trasp-lista-desde"></div>
+          <div class="col" style="min-width:150px;"><label>Hasta</label><input type="date" id="trasp-lista-hasta"></div>
+          <button type="button" class="btn-secundario" id="trasp-lista-buscar">Buscar</button>
+        </div>
+        <div class="tabla-scroll" style="margin-top:10px;">
+          <table>
+            <thead><tr><th>Folio</th><th>Origen</th><th>Destino</th><th>Estado</th><th>Enviado por</th><th>Fecha de envío</th><th></th></tr></thead>
+            <tbody id="trasp-lista-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="trasp-lista-vacio" style="display:none;">No hay traspasos en ese rango.</p>
       </div>
     </div>
   </div>
@@ -792,6 +834,44 @@
   </div>
 </div>
 
+<!-- MODAL: detalle de una salida por ajuste registrada, con edición e historial (Ronda 27) -->
+<div class="modal-fondo" id="modal-ajuste-detalle">
+  <div class="modal" style="max-width:640px;">
+    <h2 style="margin-top:0;">Detalle de la salida por ajuste</h2>
+    <p class="nota" id="ad-resumen">Cargando…</p>
+    <div class="tabla-scroll">
+      <table>
+        <thead id="ad-thead"><tr><th>Producto</th><th class="num">Cantidad dada de baja</th></tr></thead>
+        <tbody id="ad-tabla-body"></tbody>
+      </table>
+    </div>
+    <div id="ad-error"></div>
+    <div id="ad-historial" style="margin-top:12px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="width:100%;" id="ad-cerrar">Cerrar</button>
+      <button class="btn-primario" style="width:100%;" id="ad-editar">Editar</button>
+      <button class="btn-primario" style="width:100%;display:none;" id="ad-guardar">Guardar cambios</button>
+      <button class="btn-gris" style="width:100%;display:none;" id="ad-cancelar-edicion">Cancelar edición</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: detalle de un traspaso registrado, solo lectura (Ronda 27) — un traspaso mal capturado no
+     se edita, se rechaza en destino y se genera uno correcto -->
+<div class="modal-fondo" id="modal-traspaso-detalle">
+  <div class="modal" style="max-width:640px;">
+    <h2 style="margin-top:0;">Detalle del traspaso</h2>
+    <p class="nota" id="td-resumen">Cargando…</p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Enviado</th><th class="num">Recibido</th></tr></thead>
+        <tbody id="td-tabla-body"></tbody>
+      </table>
+    </div>
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="td-cerrar">Cerrar</button>
+  </div>
+</div>
+
 <!-- MODAL: lista de precio -->
 <div class="modal-fondo" id="modal-lista">
   <div class="modal ancho" id="card-lista">
@@ -858,11 +938,58 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.10.001';
+const APP_VERSION = '1.11.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+
+// Ronda 26: Adrián reportó que un error real de captura (cantidad "11.001" en vez de un entero) vino
+// de que, al entrar a un campo numérico con clic o Tab, el valor que ya tenía no se marcaba — al
+// teclear encima, el número nuevo se pegaba junto al que ya estaba en vez de reemplazarlo. Se agrega
+// un listener global (fase de captura, porque "focus" no hace bubbling) que selecciona todo el
+// contenido de cualquier <input type="number"> al recibir el foco, para que teclear directo siempre
+// reemplace el valor — aplica a toda la app, incluyendo campos que se agreguen más adelante.
+document.addEventListener('focus', (e)=>{
+  if(e.target && e.target.tagName === 'INPUT' && (e.target.type === 'number' || e.target.classList.contains('num-libre'))){
+    e.target.select();
+  }
+}, true);
+
+// Ronda 27: Adrián reportó que el problema seguía en cantidad/costo/precio de "Nueva compra" incluso
+// después del fix de la Ronda 26, y que en Salidas por ajuste el campo de cantidad "brinca" a .001 en
+// el primer clic de la flechita y luego de 1 en 1 — eso es el propio <input type="number"> del
+// navegador (las flechas arriba/abajo y la rueda del mouse siguen incrementando por min/step aunque se
+// les quite el dibujo con CSS). La solución de fondo es dejar de usar type="number" para estos campos:
+// se usa <input type="text" inputmode="decimal" class="num-libre" data-dec="N"> — sin flechitas, sin
+// incrementos raros, con captura 100% libre — y esta función filtra lo tecleado para que solo se
+// puedan escribir dígitos y, cuando data-dec > 0, un punto decimal con ese máximo de decimales.
+function decimalesPorUnidad(unidadMedidaId){
+  const u = (state.unidades||[]).find(x=>x.id===unidadMedidaId);
+  const clave = (u?.clave || '').toUpperCase();
+  // Solo Kilogramo/Litro (y Metro, si algún día se agrega al catálogo) se venden/compran en fracciones
+  // — el resto (Pieza, Paquete, etc.) siempre es entero, por petición explícita de Adrián.
+  return (clave === 'KG' || clave === 'LT' || clave === 'M' || clave === 'MT') ? 3 : 0;
+}
+function limpiarNumeroLibre(texto, decimales){
+  let t = String(texto).replace(/[^0-9.]/g, '');
+  const partes = t.split('.');
+  if(partes.length > 2) t = partes[0] + '.' + partes.slice(1).join('');
+  if(decimales === 0){
+    t = t.split('.')[0];
+  } else {
+    const [ent, dec] = t.split('.');
+    if(dec !== undefined) t = `${ent}.${dec.slice(0, decimales)}`;
+  }
+  return t;
+}
+function activarNumeroLibre(inp){
+  const decimales = Number(inp.dataset.dec || 0);
+  inp.addEventListener('input', ()=>{
+    const limpio = limpiarNumeroLibre(inp.value, decimales);
+    if(limpio !== inp.value) inp.value = limpio;
+  });
+}
 // Fecha LOCAL (no UTC) en formato YYYY-MM-DD. Date#toISOString() siempre convierte a UTC antes de
 // cortar la fecha, lo que puede regresar el día equivocado para usuarios al oeste de UTC ya entrada
 // la noche (ej. Durango a las 7pm ya cae en el día siguiente en UTC) — usar esta función en vez de
@@ -2905,7 +3032,7 @@ function agregarLineaCompra(producto, cantidad){
   const precioActual = listaPublica ? (producto.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio ?? null) : null;
   state.compraLineas.push({
     varianteId: producto.varianteId, productoId: producto.productoId, nombre: producto.nombre,
-    tasa: tasaTotalProducto(producto),
+    tasa: tasaTotalProducto(producto), unidadMedidaId: producto.unidadMedidaId,
     ultimoCosto: producto.costo, cantidad, costoUnitario: producto.costo != null ? Number(producto.costo) : 0,
     precioPublico: precioActual,
   });
@@ -2928,34 +3055,66 @@ function renderLineasCompra(scrollAlFinal){
     return `<tr>
       <td>${l.nombre}</td>
       <td class="num">${ultimoCostoMostrado!=null?money(ultimoCostoMostrado):'—'}</td>
-      <td class="num"><input type="number" class="cant-input compra-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}"></td>
-      <td class="num"><input type="number" step="0.01" min="0" class="compra-costo" style="width:90px;text-align:right;" value="${costoMostrado}" data-idx="${i}"></td>
-      <td class="num"><input type="number" step="0.01" min="0" class="compra-precio" style="width:90px;text-align:right;" value="${precioMostrado}" placeholder="sin cambio" data-idx="${i}"></td>
-      <td class="num">${money(redondear2((Number(l.cantidad)||0) * costoMostrado))}</td>
+      <td class="num"><input type="text" inputmode="decimal" class="cant-input compra-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.unidadMedidaId)}" value="${l.cantidad}"></td>
+      <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-costo num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${costoMostrado}"></span></td>
+      <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-precio num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${precioMostrado}" placeholder="sin cambio"></span></td>
+      <td class="num" id="compra-importe-${i}">${money(redondear2((Number(l.cantidad)||0) * costoMostrado))}</td>
       <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`;
   }).join('');
-  $('compra-lineas-body').querySelectorAll('.compra-cant').forEach(inp=>inp.addEventListener('input', ()=>{ state.compraLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; renderLineasCompra(); }));
-  $('compra-lineas-body').querySelectorAll('.compra-costo').forEach(inp=>inp.addEventListener('change', ()=>{
-    const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
-    const factor = 1 + (Number(l.tasa)||0); const v = parseFloat(inp.value)||0;
-    l.costoUnitario = conImp ? redondear2(v/factor) : v;
-    renderLineasCompra();
-  }));
-  $('compra-lineas-body').querySelectorAll('.compra-precio').forEach(inp=>inp.addEventListener('change', ()=>{
-    const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
-    const factor = 1 + (Number(l.tasa)||0); const txt = inp.value.trim();
-    l.precioPublico = txt==='' ? null : (conImp ? redondear2(parseFloat(txt)/factor) : parseFloat(txt));
-    renderLineasCompra();
-  }));
+  // Cantidad usa un update ligero (solo el importe de su renglón y el total) en vez de reconstruir toda
+  // la tabla en cada tecla — reconstruirla en cada tecleo le quitaba el foco al campo mientras Adrián
+  // escribía (Ronda 26).
+  $('compra-lineas-body').querySelectorAll('.compra-cant').forEach(inp=>{
+    activarNumeroLibre(inp);
+    inp.addEventListener('input', ()=>{
+      const i = Number(inp.dataset.idx);
+      state.compraLineas[i].cantidad = Number(inp.value)||0;
+      actualizarImporteFilaCompra(i);
+    });
+  });
+  $('compra-lineas-body').querySelectorAll('.compra-costo').forEach(inp=>{
+    activarNumeroLibre(inp);
+    inp.addEventListener('change', ()=>{
+      const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
+      const factor = 1 + (Number(l.tasa)||0); const v = parseFloat(inp.value)||0;
+      l.costoUnitario = conImp ? redondear2(v/factor) : v;
+      renderLineasCompra();
+    });
+  });
+  $('compra-lineas-body').querySelectorAll('.compra-precio').forEach(inp=>{
+    activarNumeroLibre(inp);
+    inp.addEventListener('change', ()=>{
+      const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
+      const factor = 1 + (Number(l.tasa)||0); const txt = inp.value.trim();
+      l.precioPublico = txt==='' ? null : (conImp ? redondear2(parseFloat(txt)/factor) : parseFloat(txt));
+      renderLineasCompra();
+    });
+  });
   $('compra-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.compraLineas.splice(Number(btn.dataset.idx),1); renderLineasCompra(); }));
-  const total = redondear2(state.compraLineas.reduce((s,l)=>{
+  $('compra-total').textContent = money(totalCompraLineas());
+  if(scrollAlFinal){ const cont = $('compra-lineas-scroll'); cont.scrollTop = cont.scrollHeight; }
+}
+
+function totalCompraLineas(){
+  const conImp = $('compra-con-impuestos').checked;
+  return redondear2(state.compraLineas.reduce((s,l)=>{
     const factor = 1 + (Number(l.tasa)||0);
     const costo = conImp ? redondear2((Number(l.costoUnitario)||0)*factor) : (Number(l.costoUnitario)||0);
     return s + redondear2((Number(l.cantidad)||0)*costo);
   },0));
-  $('compra-total').textContent = money(total);
-  if(scrollAlFinal){ const cont = $('compra-lineas-scroll'); cont.scrollTop = cont.scrollHeight; }
+}
+
+// Ronda 26: update ligero al escribir en Cantidad — solo recalcula el importe del renglón y el total,
+// sin reconstruir toda la tabla (eso le quitaba el foco al campo en cada tecla).
+function actualizarImporteFilaCompra(i){
+  const conImp = $('compra-con-impuestos').checked;
+  const l = state.compraLineas[i];
+  const factor = 1 + (Number(l.tasa)||0);
+  const costoMostrado = conImp ? redondear2((Number(l.costoUnitario)||0) * factor) : (Number(l.costoUnitario)||0);
+  const celda = $(`compra-importe-${i}`);
+  if(celda) celda.textContent = money(redondear2((Number(l.cantidad)||0) * costoMostrado));
+  $('compra-total').textContent = money(totalCompraLineas());
 }
 
 $('compra-registrar').addEventListener('click', async ()=>{
@@ -3052,7 +3211,7 @@ async function abrirCompraDetalle(compraId){
 async function cargarCompraDetalle(compraId){
   const [{ data: compra, error: errCompra }, { data: lineas, error: errLineas }, { data: historial, error: errHist }] = await Promise.all([
     sb.from('compras').select('*, proveedores(nombre), almacenes(nombre), usuarios(nombre)').eq('id', compraId).single(),
-    sb.from('compra_detalle').select('id, cantidad, costo_unitario, importe, variantes(nombre_variante, productos(nombre))').eq('compra_id', compraId),
+    sb.from('compra_detalle').select('id, cantidad, costo_unitario, importe, variantes(nombre_variante, productos(nombre, unidad_medida_id))').eq('compra_id', compraId),
     sb.from('auditoria').select('creado_en, usuarios(nombre), datos_nuevos').eq('tabla', 'compras').eq('registro_id', compraId).eq('accion', 'editar').order('creado_en', { ascending: true }),
   ]);
   if(errCompra || errLineas){
@@ -3097,8 +3256,8 @@ function renderCompraDetalleTabla(){
   $('cd-thead').innerHTML = '<tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr>';
   $('cd-tabla-body').innerHTML = filas.map((l,i)=>`<tr>
       <td>${nombreLineaCompraDetalle(l)}</td>
-      <td class="num"><input type="number" class="cd-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}" style="width:90px;text-align:right;"></td>
-      <td class="num"><input type="number" class="cd-costo" min="0" step="0.01" value="${l.costo_unitario}" data-idx="${i}" style="width:90px;text-align:right;"></td>
+      <td class="num"><input type="text" inputmode="decimal" class="cd-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.variantes?.productos?.unidad_medida_id)}" style="width:90px;text-align:right;" value="${l.cantidad}"></td>
+      <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="cd-costo num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${l.costo_unitario}"></span></td>
       <td class="num" id="cd-importe-${i}">${money(l.cantidad * l.costo_unitario)}</td>
     </tr>`).join('');
   const cantInputsEl = $('cd-tabla-body').querySelectorAll('.cd-cant');
@@ -3108,9 +3267,10 @@ function renderCompraDetalleTabla(){
     const costo = Number(costoInputsEl[i].value) || 0;
     document.getElementById(`cd-importe-${i}`).textContent = money(cant * costo);
   };
-  $('cd-tabla-body').querySelectorAll('.cd-cant, .cd-costo').forEach(inp=>inp.addEventListener('input', ()=>{
-    recalcularImporte(Number(inp.dataset.idx));
-  }));
+  $('cd-tabla-body').querySelectorAll('.cd-cant, .cd-costo').forEach(inp=>{
+    activarNumeroLibre(inp);
+    inp.addEventListener('input', ()=>{ recalcularImporte(Number(inp.dataset.idx)); });
+  });
 }
 
 $('cd-editar').addEventListener('click', ()=>{
@@ -3252,7 +3412,7 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
           const precioActual = listaPublica ? (producto.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio ?? null) : null;
           state.compraLineas.push({
             varianteId: producto.varianteId, productoId: producto.productoId, nombre: producto.nombre,
-            tasa: tasaTotalProducto(producto),
+            tasa: tasaTotalProducto(producto), unidadMedidaId: producto.unidadMedidaId,
             ultimoCosto: producto.costo, cantidad, costoUnitario: valorUnitario, precioPublico: precioActual,
           });
         }
@@ -3419,6 +3579,8 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
     ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos'].forEach(id=>{
       $(id).style.display = (id === btn.dataset.invtab) ? 'block' : 'none';
     });
+    if(btn.dataset.invtab === 'inv-panel-ajustes') cargarAjustesLista();
+    if(btn.dataset.invtab === 'inv-panel-traspasos') cargarTraspasosLista();
   });
 });
 
@@ -3487,7 +3649,7 @@ function agregarLineaAjuste(producto, cantidad){
   const existenciaFila = existenciaEnAlmacen(producto, $('ajuste-almacen').value);
   const existente = state.ajusteLineas.find(l=>l.varianteId===producto.varianteId);
   if(existente){ existente.cantidad += cantidad; renderLineasAjuste(); return; }
-  state.ajusteLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad });
+  state.ajusteLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, unidadMedidaId: producto.unidadMedidaId, existencia: existenciaFila, cantidad });
   renderLineasAjuste();
 }
 function renderLineasAjuste(){
@@ -3496,10 +3658,10 @@ function renderLineasAjuste(){
     <tr>
       <td>${l.nombre}</td>
       <td class="num">${l.existencia}</td>
-      <td class="num"><input type="number" class="cant-input ajuste-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num"><input type="text" inputmode="decimal" class="cant-input ajuste-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.unidadMedidaId)}" value="${l.cantidad}"></td>
       <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`).join('');
-  $('ajuste-lineas-body').querySelectorAll('.ajuste-cant').forEach(inp=>inp.addEventListener('input', ()=>{ state.ajusteLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; }));
+  $('ajuste-lineas-body').querySelectorAll('.ajuste-cant').forEach(inp=>{ activarNumeroLibre(inp); inp.addEventListener('input', ()=>{ state.ajusteLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; }); });
   $('ajuste-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.ajusteLineas.splice(Number(btn.dataset.idx),1); renderLineasAjuste(); }));
 }
 $('ajuste-registrar').addEventListener('click', async ()=>{
@@ -3520,7 +3682,150 @@ $('ajuste-registrar').addEventListener('click', async ()=>{
   $('ajuste-motivo').value = '';
   renderLineasAjuste();
   await cargarProductos();
+  await cargarAjustesLista();
 });
+
+// ---- Salidas registradas (Ronda 27) — mismo patrón que "Compras registradas" (Ronda 24/25): listado
+// con filtro por fecha, modal de detalle, edición con auditoría e historial "Editó". RLS de
+// movimientos_inventario/_detalle ya permite leer directo (misma tiene_acceso_empresa que el resto),
+// así que el listado y el detalle no necesitan RPC — solo la edición (editar_ajuste_salida, migración
+// 074), para que el ajuste de existencias y la auditoría queden centralizados en el servidor.
+state.adMovimientoActual = null;
+state.adLineasActuales = [];
+state.adEditando = false;
+
+async function cargarAjustesLista(){
+  const desde = $('ajustes-lista-desde').value || fechaLocalISO();
+  const hasta = $('ajustes-lista-hasta').value || fechaLocalISO();
+  const { data, error } = await sb.from('movimientos_inventario')
+    .select('id, folio, fecha, descripcion, almacenes!movimientos_inventario_almacen_origen_id_fkey(nombre), usuarios(nombre)')
+    .eq('empresa_id', state.empresaId).eq('clasificacion', 'ajuste_salida')
+    .gte('fecha', desde).lte('fecha', hasta).order('fecha', { ascending: false });
+  if(error){ console.error(error); return; }
+  const ajustes = data || [];
+  $('ajustes-lista-vacio').style.display = ajustes.length ? 'none' : 'block';
+  $('ajustes-lista-body').innerHTML = ajustes.map(a=>`
+    <tr>
+      <td>${new Date(a.fecha+'T00:00:00').toLocaleDateString('es-MX')}</td>
+      <td><a href="#" class="link-ajuste-detalle" data-id="${a.id}" style="color:var(--azul);">${a.folio}</a></td>
+      <td>${a.almacenes?.nombre || '—'}</td>
+      <td>${a.descripcion || '—'}</td>
+      <td>${a.usuarios?.nombre || '—'}</td>
+      <td><button type="button" class="btn-gris ad-abrir" data-id="${a.id}">Ver detalle</button></td>
+    </tr>`).join('');
+  $('ajustes-lista-body').querySelectorAll('.link-ajuste-detalle, .ad-abrir').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.preventDefault(); abrirAjusteDetalle(el.dataset.id); });
+  });
+}
+$('ajustes-lista-buscar').addEventListener('click', cargarAjustesLista);
+
+const nombreLineaAjusteDetalle = (l) => {
+  const prod = l?.variantes?.productos?.nombre || '(producto no encontrado)';
+  const variante = l?.variantes?.nombre_variante;
+  return (variante && variante !== 'Único') ? `${prod} — ${variante}` : prod;
+};
+
+async function abrirAjusteDetalle(movimientoId){
+  state.adEditando = false;
+  $('ad-resumen').textContent = 'Cargando…';
+  $('ad-tabla-body').innerHTML = '';
+  $('ad-error').innerHTML = '';
+  $('ad-historial').innerHTML = '';
+  $('ad-editar').style.display = '';
+  $('ad-guardar').style.display = 'none';
+  $('ad-cancelar-edicion').style.display = 'none';
+  $('modal-ajuste-detalle').classList.add('activo');
+  await cargarAjusteDetalle(movimientoId);
+}
+
+async function cargarAjusteDetalle(movimientoId){
+  const [{ data: mov, error: errMov }, { data: lineas, error: errLineas }, { data: historial, error: errHist }] = await Promise.all([
+    sb.from('movimientos_inventario').select('*, almacenes!movimientos_inventario_almacen_origen_id_fkey(nombre), usuarios(nombre)').eq('id', movimientoId).single(),
+    sb.from('movimientos_inventario_detalle').select('id, cantidad, variantes(nombre_variante, productos(nombre, unidad_medida_id))').eq('movimiento_id', movimientoId),
+    sb.from('auditoria').select('creado_en, usuarios(nombre), datos_nuevos').eq('tabla', 'movimientos_inventario').eq('registro_id', movimientoId).eq('accion', 'editar').order('creado_en', { ascending: true }),
+  ]);
+  if(errMov || errLineas){
+    $('ad-resumen').textContent = `Error al cargar el detalle: ${(errMov||errLineas).message}`;
+    return;
+  }
+  state.adMovimientoActual = mov;
+  state.adLineasActuales = lineas || [];
+  $('ad-resumen').innerHTML = `Folio: <strong>${mov.folio}</strong> · Fecha: ${new Date(mov.fecha+'T00:00:00').toLocaleDateString('es-MX')}<br>`
+    + `Almacén: ${mov.almacenes?.nombre || '—'} · Motivo: ${mov.descripcion || '—'} · Capturó: ${mov.usuarios?.nombre || '—'}`;
+  renderAjusteDetalleTabla();
+
+  if(!errHist && historial && historial.length){
+    $('ad-historial').innerHTML = '<p class="nota" style="font-weight:600;margin-bottom:4px;">Editó:</p>'
+      + historial.map(h=>{
+          const fecha = new Date(h.creado_en).toLocaleString('es-MX');
+          const cambios = h.datos_nuevos?.cambios || [];
+          const resumen = cambios.map(c=>`${c.producto}: cant. ${c.cantidad_antes}→${c.cantidad_despues}`).join('; ');
+          return `<p class="nota" style="margin:2px 0;">• ${h.usuarios?.nombre || '—'} — ${fecha}${resumen ? ' — ' + resumen : ''}</p>`;
+        }).join('');
+  } else {
+    $('ad-historial').innerHTML = '';
+  }
+}
+
+function renderAjusteDetalleTabla(){
+  const filas = state.adLineasActuales;
+  if(!state.adEditando){
+    $('ad-tabla-body').innerHTML = filas.map(l=>`<tr>
+        <td>${nombreLineaAjusteDetalle(l)}</td>
+        <td class="num">${l.cantidad}</td>
+      </tr>`).join('');
+    return;
+  }
+  $('ad-tabla-body').innerHTML = filas.map((l,i)=>`<tr>
+      <td>${nombreLineaAjusteDetalle(l)}</td>
+      <td class="num"><input type="text" inputmode="decimal" class="ad-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.variantes?.productos?.unidad_medida_id)}" style="width:90px;text-align:right;" value="${l.cantidad}"></td>
+    </tr>`).join('');
+  $('ad-tabla-body').querySelectorAll('.ad-cant').forEach(inp=>activarNumeroLibre(inp));
+}
+
+$('ad-editar').addEventListener('click', ()=>{
+  state.adEditando = true;
+  $('ad-error').innerHTML = '';
+  $('ad-editar').style.display = 'none';
+  $('ad-guardar').style.display = '';
+  $('ad-cancelar-edicion').style.display = '';
+  renderAjusteDetalleTabla();
+});
+
+$('ad-cancelar-edicion').addEventListener('click', ()=>{
+  state.adEditando = false;
+  $('ad-error').innerHTML = '';
+  $('ad-editar').style.display = '';
+  $('ad-guardar').style.display = 'none';
+  $('ad-cancelar-edicion').style.display = 'none';
+  renderAjusteDetalleTabla();
+});
+
+$('ad-guardar').addEventListener('click', async ()=>{
+  $('ad-error').innerHTML = '';
+  const cantInputs = Array.from($('ad-tabla-body').querySelectorAll('.ad-cant'));
+  const lineas = state.adLineasActuales.map((l,i)=>({
+    detalle_id: l.id, cantidad: Number(cantInputs[i].value) || 0,
+  }));
+  if(lineas.some(l=>l.cantidad <= 0)){
+    $('ad-error').innerHTML = '<div class="msg-error">La cantidad debe ser mayor a cero en todas las líneas.</div>';
+    return;
+  }
+  const payload = { movimiento_id: state.adMovimientoActual.id, usuario_id: state.usuario.id, lineas };
+  const { error } = await sb.rpc('editar_ajuste_salida', { p: payload });
+  if(error){
+    $('ad-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  state.adEditando = false;
+  $('ad-editar').style.display = '';
+  $('ad-guardar').style.display = 'none';
+  $('ad-cancelar-edicion').style.display = 'none';
+  await cargarAjusteDetalle(state.adMovimientoActual.id);
+  await cargarProductos();
+});
+
+$('ad-cerrar').addEventListener('click', ()=>{ $('modal-ajuste-detalle').classList.remove('activo'); });
 
 // ---- Traspasos ----
 function agregarLineaTraspaso(producto, cantidad){
@@ -3528,7 +3833,7 @@ function agregarLineaTraspaso(producto, cantidad){
   const existenciaFila = existenciaEnAlmacen(producto, $('trasp-origen').value);
   const existente = state.traspLineas.find(l=>l.varianteId===producto.varianteId);
   if(existente){ existente.cantidad += cantidad; renderLineasTraspaso(); return; }
-  state.traspLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, existencia: existenciaFila, cantidad });
+  state.traspLineas.push({ varianteId: producto.varianteId, nombre: producto.nombre, unidadMedidaId: producto.unidadMedidaId, existencia: existenciaFila, cantidad });
   renderLineasTraspaso();
 }
 function renderLineasTraspaso(){
@@ -3537,10 +3842,10 @@ function renderLineasTraspaso(){
     <tr>
       <td>${l.nombre}</td>
       <td class="num">${l.existencia}</td>
-      <td class="num"><input type="number" class="cant-input trasp-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num"><input type="text" inputmode="decimal" class="cant-input trasp-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.unidadMedidaId)}" value="${l.cantidad}"></td>
       <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`).join('');
-  $('trasp-lineas-body').querySelectorAll('.trasp-cant').forEach(inp=>inp.addEventListener('input', ()=>{ state.traspLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; }));
+  $('trasp-lineas-body').querySelectorAll('.trasp-cant').forEach(inp=>{ activarNumeroLibre(inp); inp.addEventListener('input', ()=>{ state.traspLineas[Number(inp.dataset.idx)].cantidad = Number(inp.value)||0; }); });
   $('trasp-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.traspLineas.splice(Number(btn.dataset.idx),1); renderLineasTraspaso(); }));
 }
 $('trasp-enviar').addEventListener('click', async ()=>{
@@ -3619,6 +3924,61 @@ $('tr-cancelar').addEventListener('click', async ()=>{
   await cargarProductos();
   await cargarTraspasosPendientes();
 });
+
+// ---- Traspasos registrados (Ronda 27) — historial completo (enviado/recibido/cancelado), solo
+// lectura: Adrián decidió que un traspaso mal capturado no se edita, se rechaza en destino y se genera
+// uno correcto. Reutiliza traspaso_detalle_completo, que ya existía para la pantalla de recepción.
+async function cargarTraspasosLista(){
+  const desde = $('trasp-lista-desde').value || fechaLocalISO();
+  const hasta = $('trasp-lista-hasta').value || fechaLocalISO();
+  const { data, error } = await sb.from('traspasos_almacen')
+    .select(`id, folio, estado, fecha_envio,
+      origen:almacenes!traspasos_almacen_almacen_origen_id_fkey(nombre),
+      destino:almacenes!traspasos_almacen_almacen_destino_id_fkey(nombre),
+      usuarios!traspasos_almacen_usuario_envio_id_fkey(nombre)`)
+    .eq('empresa_id', state.empresaId)
+    .gte('fecha_envio', desde + 'T00:00:00').lte('fecha_envio', hasta + 'T23:59:59')
+    .order('fecha_envio', { ascending: false });
+  if(error){ console.error(error); return; }
+  const traspasos = data || [];
+  const etiquetaEstado = { enviado: 'En tránsito', recibido: 'Recibido', cancelado: 'Cancelado' };
+  $('trasp-lista-vacio').style.display = traspasos.length ? 'none' : 'block';
+  $('trasp-lista-body').innerHTML = traspasos.map(t=>`
+    <tr>
+      <td><a href="#" class="link-trasp-detalle" data-id="${t.id}" style="color:var(--azul);">${t.folio}</a></td>
+      <td>${t.origen?.nombre || '—'}</td>
+      <td>${t.destino?.nombre || '—'}</td>
+      <td>${etiquetaEstado[t.estado] || t.estado}</td>
+      <td>${t.usuarios?.nombre || '—'}</td>
+      <td>${new Date(t.fecha_envio).toLocaleString('es-MX')}</td>
+      <td><button type="button" class="btn-gris td-abrir" data-id="${t.id}">Ver detalle</button></td>
+    </tr>`).join('');
+  $('trasp-lista-body').querySelectorAll('.link-trasp-detalle, .td-abrir').forEach(el=>{
+    el.addEventListener('click', (e)=>{ e.preventDefault(); abrirTraspasoDetalle(el.dataset.id); });
+  });
+}
+$('trasp-lista-buscar').addEventListener('click', cargarTraspasosLista);
+
+async function abrirTraspasoDetalle(traspasoId){
+  $('td-resumen').textContent = 'Cargando…';
+  $('td-tabla-body').innerHTML = '';
+  $('modal-traspaso-detalle').classList.add('activo');
+  const { data, error } = await sb.rpc('traspaso_detalle_completo', { p_traspaso_id: traspasoId });
+  if(error){ $('td-resumen').textContent = `Error al cargar el detalle: ${error.message}`; return; }
+  const etiquetaEstado = { enviado: 'En tránsito', recibido: 'Recibido', cancelado: 'Cancelado' };
+  let resumen = `Folio: <strong>${data.folio}</strong> · Estado: ${etiquetaEstado[data.estado] || data.estado}<br>`
+    + `De ${data.almacen_origen} a ${data.almacen_destino} · Enviado por ${data.usuario_envio} — ${new Date(data.fecha_envio).toLocaleString('es-MX')}`;
+  if(data.notas_envio) resumen += `<br>Notas de envío: ${data.notas_envio}`;
+  if(data.estado === 'recibido') resumen += `<br>Recibido por ${data.usuario_recibio || '—'} — ${data.fecha_recibio ? new Date(data.fecha_recibio).toLocaleString('es-MX') : '—'}${data.notas_recepcion ? ' · Notas: ' + data.notas_recepcion : ''}`;
+  if(data.estado === 'cancelado') resumen += `<br>Motivo de cancelación: ${data.motivo_cancelacion || '—'}`;
+  $('td-resumen').innerHTML = resumen;
+  $('td-tabla-body').innerHTML = (data.lineas || []).map(l=>`<tr>
+      <td>${l.producto}</td>
+      <td class="num">${l.cantidad_enviada}</td>
+      <td class="num">${l.cantidad_recibida != null ? l.cantidad_recibida : '—'}</td>
+    </tr>`).join('');
+}
+$('td-cerrar').addEventListener('click', ()=>{ $('modal-traspaso-detalle').classList.remove('activo'); });
 
 // ---------- RONDA 22: CLIENTES / CxC ----------
 async function refrescarPantallaClientes(){

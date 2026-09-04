@@ -587,7 +587,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.6.001';
+const APP_VERSION = '1.6.002';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -985,6 +985,32 @@ async function entrarAlPOS(){
   reiniciarVenta();
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
+  suscribirStockEnVivo();
+}
+
+// Ronda 27: Adrián pidió que el stock se vea actualizado en el POS en cuanto se registre una
+// compra/ajuste/traspaso desde admin.html, sin tener que salir y entrar ni dar F5 — antes se veía el
+// stock que había al iniciar sesión hasta el siguiente refresco manual del catálogo. Se usa Supabase
+// Realtime (postgres_changes) sobre "existencias", filtrado al almacén de esta caja (state.almacenId)
+// — RLS de "existencias" ya limita esto a la misma empresa, así que el filtro es solo para no recibir
+// cambios de otros almacenes que no le interesan a esta caja. Al llegar un cambio se actualiza el
+// stock de ese producto en memoria (sin volver a consultar todo el catálogo) y se vuelve a dibujar la
+// búsqueda actual si hay una en pantalla.
+let canalStockEnVivo = null;
+function suscribirStockEnVivo(){
+  if(canalStockEnVivo){ sb.removeChannel(canalStockEnVivo); canalStockEnVivo = null; }
+  canalStockEnVivo = sb.channel('existencias-almacen-' + state.almacenId)
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'existencias', filter: `almacen_id=eq.${state.almacenId}`,
+    }, (payload) => {
+      const fila = (payload.new && Object.keys(payload.new).length) ? payload.new : payload.old;
+      if(!fila || !fila.variante_id) return;
+      const producto = state.catalogo.find(p=>p.varianteId === fila.variante_id);
+      if(!producto) return; // producto que aún no estaba en el catálogo cargado — se verá al re-entrar
+      producto.stock = payload.eventType === 'DELETE' ? 0 : (Number(payload.new.cantidad) || 0);
+      renderResultados(buscarInput.value.trim());
+    })
+    .subscribe();
 }
 
 async function cargarListasPrecio(){
