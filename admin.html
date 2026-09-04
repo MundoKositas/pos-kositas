@@ -542,31 +542,73 @@
       <button type="button" class="tab-btn" data-cfgtab="proveedores">Proveedores</button>
       <button type="button" class="tab-btn" data-cfgtab="sucursales">Sucursales</button>
       <button type="button" class="tab-btn" data-cfgtab="cajas">Cajas</button>
+      <button type="button" class="tab-btn" data-cfgtab="roles">Roles</button>
+      <button type="button" class="tab-btn" data-cfgtab="usuarios">Usuarios</button>
     </div>
     <p class="nota" id="cfg-nota-super-admin" style="display:none;">Unidades de medida e Impuestos son catálogos compartidos por todo el sistema (no solo Mundo Kositas) — por eso solo Super Admin puede crearlos o editarlos; con otro rol se muestran de solo lectura.</p>
-    <div class="card">
-      <div class="fila" style="justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;">
-        <div class="col" style="min-width:220px;">
-          <label>Buscar</label>
-          <input type="text" id="cfg-buscar" placeholder="Escribe para filtrar…">
+
+    <div id="cfg-panel-generico">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;">
+          <div class="col" style="min-width:220px;">
+            <label>Buscar</label>
+            <input type="text" id="cfg-buscar" placeholder="Escribe para filtrar…">
+          </div>
+          <h2 style="margin:0 auto 0 12px;" id="cfg-titulo">Marcas</h2>
+          <button class="btn-primario" id="cfg-nuevo">+ Nuevo</button>
         </div>
-        <h2 style="margin:0 auto 0 12px;" id="cfg-titulo">Marcas</h2>
-        <button class="btn-primario" id="cfg-nuevo">+ Nuevo</button>
+        <div class="tabla-scroll" style="margin-top:14px;">
+          <table>
+            <thead id="cfg-thead"></thead>
+            <tbody id="cfg-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="cfg-vacio" style="display:none;">Todavía no hay registros.</p>
+        <div class="fila" style="justify-content:flex-end;align-items:center;gap:8px;margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;">
+          <p class="nota" style="margin:0 auto 0 0;">Reporte del catálogo filtrado arriba:</p>
+          <select id="cfg-formato-exportar" style="width:auto;">
+            <option value="excel">Excel</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <button type="button" class="btn-gris" id="cfg-exportar">Exportar</button>
+        </div>
       </div>
-      <div class="tabla-scroll" style="margin-top:14px;">
-        <table>
-          <thead id="cfg-thead"></thead>
-          <tbody id="cfg-tabla-body"></tbody>
-        </table>
+    </div>
+
+    <!-- ROLES (Ronda 32) — catálogo global (todo el sistema multiempresa), solo Super Admin puede
+         crear/editar. Los 6 roles base (plantilla_global) no se pueden renombrar ni borrar porque
+         sus nombres están conectados a permisos en el código y en RLS — sí se les puede ajustar
+         la descripción y los permisos. -->
+    <div id="cfg-panel-roles" style="display:none;">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Roles</h2>
+          <button class="btn-primario" id="rol-nuevo">+ Nuevo rol</button>
+        </div>
+        <p class="nota">Son compartidos por todo el sistema (no solo Mundo Kositas) — por eso solo Super Admin puede crear o editar roles. Los 6 roles base del sistema no se pueden renombrar ni borrar, pero sí ajustarles la descripción y los permisos.</p>
+        <div class="tabla-scroll">
+          <table>
+            <thead><tr><th>Nombre</th><th>Descripción</th><th>Tipo</th><th></th></tr></thead>
+            <tbody id="rol-tabla-body"></tbody>
+          </table>
+        </div>
       </div>
-      <p class="nota" id="cfg-vacio" style="display:none;">Todavía no hay registros.</p>
-      <div class="fila" style="justify-content:flex-end;align-items:center;gap:8px;margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;">
-        <p class="nota" style="margin:0 auto 0 0;">Reporte del catálogo filtrado arriba:</p>
-        <select id="cfg-formato-exportar" style="width:auto;">
-          <option value="excel">Excel</option>
-          <option value="pdf">PDF</option>
-        </select>
-        <button type="button" class="btn-gris" id="cfg-exportar">Exportar</button>
+    </div>
+
+    <!-- USUARIOS (Ronda 32) — de esta empresa. Dar de alta uno nuevo crea también su cuenta de
+         acceso real (vía la función de servidor crear_usuario), no solo un registro. -->
+    <div id="cfg-panel-usuarios" style="display:none;">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Usuarios</h2>
+          <button class="btn-primario" id="usr-nuevo">+ Nuevo usuario</button>
+        </div>
+        <div class="tabla-scroll">
+          <table>
+            <thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Rol</th><th>Sucursal</th><th>Caja</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="usr-tabla-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -581,6 +623,73 @@
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button class="btn-gris" style="flex:1;" id="cfg-modal-cancelar">Cancelar</button>
       <button class="btn-primario" style="flex:1;" id="cfg-modal-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: alta/edición de rol, con matriz de permisos (Ronda 32) -->
+<div class="modal-fondo" id="modal-rol">
+  <div class="modal" style="max-width:560px;">
+    <h2 id="rol-modal-titulo">Nuevo rol</h2>
+    <div class="campo"><label>Nombre</label><input type="text" id="rol-nombre"></div>
+    <div class="campo"><label>Descripción (opcional)</label><input type="text" id="rol-descripcion"></div>
+    <p class="nota" id="rol-nombre-bloqueado-nota" style="display:none;">Es uno de los 6 roles base del sistema — el nombre no se puede cambiar, pero sí la descripción y los permisos.</p>
+    <h3 style="margin-bottom:6px;">Permisos</h3>
+    <div id="rol-permisos-lista"></div>
+    <div id="rol-modal-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="rol-modal-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="rol-modal-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: alta de usuario nuevo (Ronda 32) — crea la cuenta de acceso real vía la función de
+     servidor crear_usuario; solo alta, sin editar email ni contraseña desde aquí. -->
+<div class="modal-fondo" id="modal-usuario-nuevo">
+  <div class="modal">
+    <h2 style="margin-top:0;">Nuevo usuario</h2>
+    <div class="campo"><label>Nombre</label><input type="text" id="usr-nombre"></div>
+    <div class="grid-2">
+      <div class="campo"><label>Correo (será su usuario para entrar)</label><input type="email" id="usr-email"></div>
+      <div class="campo"><label>Teléfono (opcional)</label><input type="text" id="usr-telefono"></div>
+    </div>
+    <div class="campo"><label>Rol</label><select id="usr-rol"></select></div>
+    <div class="grid-2">
+      <div class="campo"><label>Sucursal (opcional)</label><select id="usr-sucursal"><option value="">(sin asignar)</option></select></div>
+      <div class="campo"><label>Caja (opcional)</label><select id="usr-caja"><option value="">(sin asignar)</option></select></div>
+    </div>
+    <div class="campo"><label>Almacén (opcional)</label><select id="usr-almacen"><option value="">(sin asignar)</option></select></div>
+    <div id="usr-nuevo-error"></div>
+    <div id="usr-nuevo-exito" style="display:none;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="usr-nuevo-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="usr-nuevo-guardar">Crear usuario</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: editar usuario existente (Ronda 32) — nombre/teléfono/estado y su asignación de rol,
+     sucursal, almacén y caja. No cambia correo ni contraseña. -->
+<div class="modal-fondo" id="modal-usuario-editar">
+  <div class="modal">
+    <h2 style="margin-top:0;">Editar usuario</h2>
+    <div class="campo"><label>Nombre</label><input type="text" id="usre-nombre"></div>
+    <div class="grid-2">
+      <div class="campo"><label>Correo</label><input type="email" id="usre-email" disabled></div>
+      <div class="campo"><label>Teléfono (opcional)</label><input type="text" id="usre-telefono"></div>
+    </div>
+    <div class="campo"><label>Rol</label><select id="usre-rol"></select></div>
+    <div class="grid-2">
+      <div class="campo"><label>Sucursal (opcional)</label><select id="usre-sucursal"><option value="">(sin asignar)</option></select></div>
+      <div class="campo"><label>Caja (opcional)</label><select id="usre-caja"><option value="">(sin asignar)</option></select></div>
+    </div>
+    <div class="campo"><label>Almacén (opcional)</label><select id="usre-almacen"><option value="">(sin asignar)</option></select></div>
+    <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="usre-activo" style="width:auto;"> Activo</label></div>
+    <div id="usre-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="usre-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="usre-guardar">Guardar</button>
     </div>
   </div>
 </div>
@@ -828,7 +937,19 @@
   <div class="modal" id="card-empresa-config">
     <h2 style="margin-top:0;">Configuración de empresa</h2>
 
-    <h3 style="margin-bottom:4px;">Logotipo</h3>
+    <h3 style="margin-bottom:4px;">Datos generales (Ronda 32)</h3>
+    <div class="grid-2">
+      <div class="campo"><label>Nombre comercial</label><input type="text" id="empresa-nombre-comercial"></div>
+      <div class="campo"><label>Razón social (opcional)</label><input type="text" id="empresa-razon-social"></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>RFC (opcional)</label><input type="text" id="empresa-rfc"></div>
+      <div class="campo"><label>Régimen fiscal SAT (opcional)</label><input type="text" id="empresa-regimen-fiscal"></div>
+    </div>
+    <button type="button" class="btn-secundario" id="empresa-datos-generales-guardar">Guardar datos generales</button>
+    <div id="empresa-datos-generales-estado"></div>
+
+    <h3 style="margin-bottom:4px;border-top:1px solid var(--borde);padding-top:14px;">Logotipo</h3>
     <p class="nota">Se usa en el ticket del Punto de Venta, aquí en el encabezado, en el Reporte de precios exportado a PDF, y en las pantallas de inicio de sesión de ambas aplicaciones.</p>
     <div style="text-align:center;margin:14px 0;">
       <img id="empresa-logo-preview" alt="" style="display:none;max-height:120px;max-width:100%;object-fit:contain;">
@@ -994,7 +1115,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.13.001';
+const APP_VERSION = '1.14.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1236,6 +1357,11 @@ $('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); l
 // a PNG en el navegador si el original es de otro formato (para que la ruta pública sea siempre la
 // misma y las pantallas de login puedan mostrarlo sin consultar la base de datos — ver LOGO_URL_FIJA).
 $('btn-config-empresa').addEventListener('click', ()=>{
+  $('empresa-nombre-comercial').value = state.empresaNombre || '';
+  $('empresa-razon-social').value = state.empresaRazonSocial || '';
+  $('empresa-rfc').value = state.empresaRfc || '';
+  $('empresa-regimen-fiscal').value = state.empresaRegimenFiscal || '';
+  $('empresa-datos-generales-estado').innerHTML = '';
   $('empresa-logo-estado').innerHTML = '';
   if(state.logoUrl){
     $('empresa-logo-preview').src = state.logoUrl;
@@ -1253,6 +1379,29 @@ $('btn-config-empresa').addEventListener('click', ()=>{
   $('modal-empresa-config').classList.add('activo');
 });
 $('empresa-config-cerrar').addEventListener('click', ()=>{ $('modal-empresa-config').classList.remove('activo'); });
+
+// ---------- DATOS GENERALES DE LA EMPRESA (Ronda 32) ----------
+$('empresa-datos-generales-guardar').addEventListener('click', async ()=>{
+  const nombreComercial = $('empresa-nombre-comercial').value.trim();
+  if(!nombreComercial){ $('empresa-datos-generales-estado').innerHTML = '<div class="msg-error">El nombre comercial es obligatorio.</div>'; return; }
+  $('empresa-datos-generales-estado').innerHTML = '<p class="nota">Guardando…</p>';
+  const { error } = await sb.from('empresas').update({
+    nombre_comercial: nombreComercial,
+    razon_social: $('empresa-razon-social').value.trim() || null,
+    rfc: $('empresa-rfc').value.trim() || null,
+    regimen_fiscal_sat: $('empresa-regimen-fiscal').value.trim() || null,
+  }).eq('id', state.empresaId);
+  if(error){
+    $('empresa-datos-generales-estado').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  state.empresaNombre = nombreComercial;
+  state.empresaRazonSocial = $('empresa-razon-social').value.trim();
+  state.empresaRfc = $('empresa-rfc').value.trim();
+  state.empresaRegimenFiscal = $('empresa-regimen-fiscal').value.trim();
+  $('hdr-empresa').textContent = state.empresaNombre;
+  $('empresa-datos-generales-estado').innerHTML = '<p class="nota">Guardado.</p>';
+});
 
 // ---------- DESGLOSE DE IMPUESTOS EN EL POS (empresas.desglosar_impuestos_ticket) ----------
 // Controla cómo `pos.html` muestra los precios en la búsqueda, el carrito, el cobro y el ticket —
@@ -1368,6 +1517,9 @@ async function iniciarSesionApp(){
   if(!empresa){ return mostrarError('No se encontró una empresa activa para tu cuenta.'); }
   state.empresaId = empresa.id;
   state.empresaNombre = empresa.nombre_comercial;
+  state.empresaRazonSocial = empresa.razon_social || '';
+  state.empresaRfc = empresa.rfc || '';
+  state.empresaRegimenFiscal = empresa.regimen_fiscal_sat || '';
   state.logoUrl = empresa.logo_url || '';
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
   state.textoPagare = empresa.texto_pagare || '';
@@ -4487,7 +4639,16 @@ state.cfgEditId = null;
 
 function entrarATabCatalogosBase(){
   $('cfg-nota-super-admin').style.display = (state.rol === 'Super Admin') ? 'none' : 'block';
-  cargarYRenderCatalogoSimple(state.cfgTabActivo);
+  mostrarSubpanelCatalogosBase(state.cfgTabActivo);
+}
+function mostrarSubpanelCatalogosBase(key){
+  const esRoles = key === 'roles', esUsuarios = key === 'usuarios';
+  $('cfg-panel-generico').style.display = (esRoles || esUsuarios) ? 'none' : 'block';
+  $('cfg-panel-roles').style.display = esRoles ? 'block' : 'none';
+  $('cfg-panel-usuarios').style.display = esUsuarios ? 'block' : 'none';
+  if(esRoles) cargarYRenderRoles();
+  else if(esUsuarios) cargarYRenderUsuarios();
+  else cargarYRenderCatalogoSimple(key);
 }
 
 async function cargarYRenderCatalogoSimple(key){
@@ -4536,8 +4697,8 @@ document.querySelectorAll('#cfg-tabs .tab-btn').forEach(btn=>{
     document.querySelectorAll('#cfg-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
     btn.classList.add('activo');
     state.cfgTabActivo = btn.dataset.cfgtab;
-    $('cfg-buscar').value = '';
-    cargarYRenderCatalogoSimple(state.cfgTabActivo);
+    if($('cfg-buscar')) $('cfg-buscar').value = '';
+    mostrarSubpanelCatalogosBase(state.cfgTabActivo);
   });
 });
 
@@ -4650,6 +4811,206 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
     const { data: sucursales } = await sb.from('sucursales').select('*').eq('activo', true);
     state.sucursales = sucursales || [];
   }
+});
+
+// ---------- ROLES (Ronda 32) ----------
+// Catálogo GLOBAL (compartido por todo el sistema multiempresa, no tiene empresa_id) — RLS solo
+// deja escribir a Super Admin. Los 6 roles base (plantilla_global=true) no se pueden renombrar ni
+// borrar porque sus nombres están conectados a permisos hardcodeados en el código (ROLES_PERMITIDOS
+// aquí, y checks por nombre de rol en varias RPCs) — sí se les puede cambiar la descripción y los
+// permisos. Un rol nuevo (plantilla_global=false) se puede renombrar, editar y borrar libremente.
+state.rolesCache = [];
+state.permisosCache = [];
+async function cargarYRenderRoles(){
+  const [{ data: roles }, { data: permisos }] = await Promise.all([
+    sb.from('roles').select('*').order('nombre'),
+    sb.from('permisos').select('*').order('modulo').order('codigo'),
+  ]);
+  state.rolesCache = roles || [];
+  state.permisosCache = permisos || [];
+  const soloLectura = state.rol !== 'Super Admin';
+  $('rol-nuevo').style.display = soloLectura ? 'none' : '';
+  $('rol-tabla-body').innerHTML = state.rolesCache.map(r=>`<tr>
+    <td>${r.nombre}</td>
+    <td>${r.descripcion || '—'}</td>
+    <td>${r.plantilla_global ? 'Base del sistema' : 'Personalizado'}</td>
+    <td>${soloLectura ? '' : `<button type="button" class="btn-gris rol-editar" data-id="${r.id}">Editar</button>`}</td>
+  </tr>`).join('');
+  $('rol-tabla-body').querySelectorAll('.rol-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalRol(b.dataset.id)));
+}
+async function abrirModalRol(id){
+  state.rolEditId = id || null;
+  const rol = id ? state.rolesCache.find(r=>r.id===id) : null;
+  $('rol-modal-titulo').textContent = id ? 'Editar rol' : 'Nuevo rol';
+  $('rol-modal-error').innerHTML = '';
+  $('rol-nombre').value = rol?.nombre || '';
+  $('rol-nombre').disabled = !!(rol && rol.plantilla_global);
+  $('rol-nombre-bloqueado-nota').style.display = (rol && rol.plantilla_global) ? 'block' : 'none';
+  $('rol-descripcion').value = rol?.descripcion || '';
+  let permisosActuales = [];
+  if(id){
+    const { data } = await sb.from('rol_permisos').select('permiso_id').eq('rol_id', id);
+    permisosActuales = (data || []).map(p=>p.permiso_id);
+  }
+  const porModulo = {};
+  state.permisosCache.forEach(p=>{ (porModulo[p.modulo] = porModulo[p.modulo] || []).push(p); });
+  $('rol-permisos-lista').innerHTML = Object.entries(porModulo).map(([modulo, permisos])=>`
+    <p class="nota" style="margin:10px 0 4px;text-transform:capitalize;"><strong>${modulo}</strong></p>
+    ${permisos.map(p=>`<label style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+      <input type="checkbox" class="rol-permiso-check" data-id="${p.id}" style="width:auto;" ${permisosActuales.includes(p.id)?'checked':''}> ${p.codigo}
+    </label>`).join('')}
+  `).join('');
+  $('modal-rol').classList.add('activo');
+}
+$('rol-nuevo').addEventListener('click', ()=>abrirModalRol(null));
+$('rol-modal-cancelar').addEventListener('click', ()=>{ $('modal-rol').classList.remove('activo'); });
+$('rol-modal-guardar').addEventListener('click', async ()=>{
+  const nombre = $('rol-nombre').value.trim();
+  $('rol-modal-error').innerHTML = '';
+  if(!nombre){ $('rol-modal-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
+  $('rol-modal-guardar').disabled = true;
+  let rolId = state.rolEditId;
+  if(rolId){
+    const { error } = await sb.from('roles').update({
+      nombre: $('rol-nombre').disabled ? undefined : nombre,
+      descripcion: $('rol-descripcion').value.trim() || null,
+    }).eq('id', rolId);
+    if(error){ $('rol-modal-guardar').disabled = false; $('rol-modal-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  } else {
+    const { data, error } = await sb.from('roles').insert({
+      nombre, descripcion: $('rol-descripcion').value.trim() || null, plantilla_global: false,
+    }).select('id').single();
+    if(error){ $('rol-modal-guardar').disabled = false; $('rol-modal-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+    rolId = data.id;
+  }
+  const permisoIdsElegidos = [...document.querySelectorAll('.rol-permiso-check:checked')].map(el=>el.dataset.id);
+  // Reemplaza los permisos del rol por los que quedaron marcados — no es atómico (son 2 llamadas),
+  // pero es una operación de un solo Super Admin a la vez, riesgo bajo.
+  await sb.from('rol_permisos').delete().eq('rol_id', rolId);
+  if(permisoIdsElegidos.length){
+    await sb.from('rol_permisos').insert(permisoIdsElegidos.map(pid=>({ rol_id: rolId, permiso_id: pid })));
+  }
+  $('rol-modal-guardar').disabled = false;
+  $('modal-rol').classList.remove('activo');
+  await cargarYRenderRoles();
+});
+
+// ---------- USUARIOS (Ronda 32) ----------
+// Dar de alta uno nuevo crea también su cuenta de acceso real (correo/contraseña) — eso necesita la
+// llave de administrador de Supabase, que nunca debe llegar al navegador, así que se hace mediante
+// la función de servidor "crear_usuario" (revisa ahí mismo que quien llama sea Super Admin o Admin
+// de Empresa antes de crear nada). Editar un usuario existente sí se puede hacer directo desde aquí
+// (nombre/teléfono/rol/sucursal/almacén/caja/activo) porque eso no requiere tocar Supabase Auth.
+state.usuariosCache = [];
+state.cajasEmpresaCache = [];
+async function cargarCajasEmpresa(){
+  const idsSucursales = (state.sucursales || []).map(s=>s.id);
+  if(!idsSucursales.length){ state.cajasEmpresaCache = []; return; }
+  const { data } = await sb.from('cajas').select('id, nombre, sucursal_id').in('sucursal_id', idsSucursales).eq('activo', true).order('nombre');
+  state.cajasEmpresaCache = data || [];
+}
+async function llenarSelectsAsignacionUsuario(prefijo){
+  $(`${prefijo}-rol`).innerHTML = state.rolesCache.map(r=>`<option value="${r.id}">${r.nombre}</option>`).join('');
+  $(`${prefijo}-sucursal`).innerHTML = '<option value="">(sin asignar)</option>' + state.sucursales.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join('');
+  $(`${prefijo}-almacen`).innerHTML = '<option value="">(sin asignar)</option>' + state.almacenes.map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
+  await cargarCajasEmpresa();
+  $(`${prefijo}-caja`).innerHTML = '<option value="">(sin asignar)</option>' + state.cajasEmpresaCache.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+}
+async function cargarYRenderUsuarios(){
+  if(!state.rolesCache.length){
+    const { data: roles } = await sb.from('roles').select('*').order('nombre');
+    state.rolesCache = roles || [];
+  }
+  const { data: asignaciones, error } = await sb.from('usuario_asignaciones')
+    .select('id, usuario_id, rol_id, sucursal_id, almacen_id, caja_id, activo, usuarios(nombre, email, telefono, activo), roles(nombre), sucursales(nombre), cajas(nombre)')
+    .eq('empresa_id', state.empresaId);
+  if(error){ $('usr-tabla-body').innerHTML = `<tr><td colspan="8"><div class="msg-error">${error.message}</div></td></tr>`; return; }
+  state.usuariosCache = asignaciones || [];
+  $('usr-tabla-body').innerHTML = state.usuariosCache.map(a=>`<tr>
+    <td>${a.usuarios?.nombre || '—'}</td>
+    <td>${a.usuarios?.email || '—'}</td>
+    <td>${a.usuarios?.telefono || '—'}</td>
+    <td>${a.roles?.nombre || '—'}</td>
+    <td>${a.sucursales?.nombre || '—'}</td>
+    <td>${a.cajas?.nombre || '—'}</td>
+    <td>${(a.activo && a.usuarios?.activo) ? 'Activo' : 'Inactivo'}</td>
+    <td><button type="button" class="btn-gris usr-editar" data-id="${a.id}">Editar</button></td>
+  </tr>`).join('');
+  $('usr-tabla-body').querySelectorAll('.usr-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalUsuarioEditar(b.dataset.id)));
+}
+$('usr-nuevo').addEventListener('click', async ()=>{
+  $('usr-nombre').value = ''; $('usr-email').value = ''; $('usr-telefono').value = '';
+  await llenarSelectsAsignacionUsuario('usr');
+  $('usr-nuevo-error').innerHTML = '';
+  $('usr-nuevo-exito').style.display = 'none';
+  $('usr-nuevo-exito').innerHTML = '';
+  $('modal-usuario-nuevo').classList.add('activo');
+});
+$('usr-nuevo-cancelar').addEventListener('click', ()=>{ $('modal-usuario-nuevo').classList.remove('activo'); });
+$('usr-nuevo-guardar').addEventListener('click', async ()=>{
+  const nombre = $('usr-nombre').value.trim();
+  const email = $('usr-email').value.trim();
+  $('usr-nuevo-error').innerHTML = '';
+  if(!nombre || !email){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Nombre y correo son obligatorios.</div>'; return; }
+  if(!$('usr-rol').value){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
+  $('usr-nuevo-guardar').disabled = true;
+  const { data, error } = await sb.functions.invoke('crear_usuario', { body: {
+    nombre, email, telefono: $('usr-telefono').value.trim() || null,
+    empresa_id: state.empresaId,
+    sucursal_id: $('usr-sucursal').value || null,
+    almacen_id: $('usr-almacen').value || null,
+    caja_id: $('usr-caja').value || null,
+    rol_id: $('usr-rol').value,
+  } });
+  $('usr-nuevo-guardar').disabled = false;
+  if(error || data?.error){
+    $('usr-nuevo-error').innerHTML = `<div class="msg-error">${data?.error || error.message}</div>`;
+    return;
+  }
+  $('usr-nuevo-exito').style.display = 'block';
+  $('usr-nuevo-exito').innerHTML = `<p class="nota"><strong>Usuario creado.</strong> Contraseña temporal: <strong>${data.password_temporal}</strong> — apúntala y compártesela, no se vuelve a mostrar. Puede cambiarla después de entrar.</p>`;
+  await cargarYRenderUsuarios();
+});
+async function abrirModalUsuarioEditar(asignacionId){
+  const a = state.usuariosCache.find(x=>x.id===asignacionId);
+  if(!a) return;
+  state.usuarioAsignacionEditId = asignacionId;
+  state.usuarioEditId = a.usuario_id;
+  $('usre-nombre').value = a.usuarios?.nombre || '';
+  $('usre-email').value = a.usuarios?.email || '';
+  $('usre-telefono').value = a.usuarios?.telefono || '';
+  $('usre-activo').checked = !!(a.activo && a.usuarios?.activo);
+  await llenarSelectsAsignacionUsuario('usre');
+  $('usre-rol').value = a.rol_id || '';
+  $('usre-sucursal').value = a.sucursal_id || '';
+  $('usre-almacen').value = a.almacen_id || '';
+  $('usre-caja').value = a.caja_id || '';
+  $('usre-error').innerHTML = '';
+  $('modal-usuario-editar').classList.add('activo');
+}
+$('usre-cancelar').addEventListener('click', ()=>{ $('modal-usuario-editar').classList.remove('activo'); });
+$('usre-guardar').addEventListener('click', async ()=>{
+  const nombre = $('usre-nombre').value.trim();
+  $('usre-error').innerHTML = '';
+  if(!nombre){ $('usre-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
+  if(!$('usre-rol').value){ $('usre-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
+  $('usre-guardar').disabled = true;
+  const activo = $('usre-activo').checked;
+  const { error: errorUsuario } = await sb.from('usuarios').update({
+    nombre, telefono: $('usre-telefono').value.trim() || null, activo,
+  }).eq('id', state.usuarioEditId);
+  const { error: errorAsignacion } = await sb.from('usuario_asignaciones').update({
+    rol_id: $('usre-rol').value,
+    sucursal_id: $('usre-sucursal').value || null,
+    almacen_id: $('usre-almacen').value || null,
+    caja_id: $('usre-caja').value || null,
+    activo,
+  }).eq('id', state.usuarioAsignacionEditId);
+  $('usre-guardar').disabled = false;
+  const error = errorUsuario || errorAsignacion;
+  if(error){ $('usre-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  $('modal-usuario-editar').classList.remove('activo');
+  await cargarYRenderUsuarios();
 });
 
 // ---------- ARRANQUE ----------
