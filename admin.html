@@ -938,7 +938,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.11.001';
+const APP_VERSION = '1.11.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3579,8 +3579,20 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
     ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos'].forEach(id=>{
       $(id).style.display = (id === btn.dataset.invtab) ? 'block' : 'none';
     });
-    if(btn.dataset.invtab === 'inv-panel-ajustes') cargarAjustesLista();
-    if(btn.dataset.invtab === 'inv-panel-traspasos') cargarTraspasosLista();
+    // Ronda 28: a diferencia de "Compras registradas" (que recuerda el rango que se haya
+    // capturado), Adrián pidió que estos dos filtros de fecha siempre regresen a "hoy" cada vez
+    // que se vuelve a entrar a la pestaña — así el listado nunca se ve con fechas en blanco.
+    if(btn.dataset.invtab === 'inv-panel-ajustes'){
+      $('ajuste-fecha').value = fechaLocalISO();
+      $('ajustes-lista-desde').value = fechaLocalISO();
+      $('ajustes-lista-hasta').value = fechaLocalISO();
+      cargarAjustesLista();
+    }
+    if(btn.dataset.invtab === 'inv-panel-traspasos'){
+      $('trasp-lista-desde').value = fechaLocalISO();
+      $('trasp-lista-hasta').value = fechaLocalISO();
+      cargarTraspasosLista();
+    }
   });
 });
 

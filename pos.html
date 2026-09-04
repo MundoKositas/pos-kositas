@@ -100,6 +100,7 @@
     <button class="btn-secundario" id="btn-actualizar-catalogo">Actualizar catálogo</button>
     <button class="btn-secundario" id="btn-reportes">Reportes</button>
     <button class="btn-secundario" id="btn-ventas-dia">Ventas del día</button>
+    <button class="btn-secundario" id="btn-tickets-espera">🕓 Tickets en espera</button>
     <button class="btn-gris" id="btn-mi-pin" style="display:none;">PIN de supervisor</button>
     <button class="btn-peligro" id="btn-cerrar-caja">Cerrar caja</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
@@ -179,6 +180,7 @@
           </table>
         </div>
         <p id="carrito-vacio" style="color:var(--gris);">Aún no hay productos en el carrito.</p>
+        <button class="btn-secundario" id="btn-poner-en-espera" style="width:100%;margin-top:10px;">🕓 Poner esta venta en espera (atender a otro cliente)</button>
       </div>
     </div>
     <div class="col" style="flex:1;">
@@ -388,10 +390,29 @@
   <div class="modal">
     <h2>Ticket</h2>
     <div id="reimprimir-body" style="font-size:.9rem;"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
+    <div id="reimprimir-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
       <button class="btn-secundario" style="flex:1;" id="reimprimir-imprimir">Imprimir</button>
+      <button class="btn-secundario" style="flex:1;" id="reimprimir-volver-cobrar">🔁 Volver a cobrar</button>
       <button class="btn-primario" style="flex:1;" id="reimprimir-cerrar">Cerrar</button>
     </div>
+  </div>
+</div>
+
+<!-- MODAL: tickets en espera (Ronda 28) -->
+<div class="modal-fondo" id="modal-tickets-espera">
+  <div class="modal">
+    <h2>Tickets en espera</h2>
+    <p class="nota">Se muestran los tickets en espera de esta sesión de caja. Hay que retomarlos (cobrarlos o cancelarlos) antes de cerrar caja.</p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Cliente</th><th class="num">Artículos</th><th>Hora</th><th></th></tr></thead>
+        <tbody id="te-lista-body"></tbody>
+      </table>
+    </div>
+    <p class="nota" id="te-lista-vacio" style="display:none;">No hay tickets en espera.</p>
+    <div id="te-error"></div>
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="te-cerrar">Cerrar</button>
   </div>
 </div>
 
@@ -587,7 +608,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.6.002';
+const APP_VERSION = '1.7.001';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -986,6 +1007,7 @@ async function entrarAlPOS(){
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
   suscribirStockEnVivo();
+  actualizarBadgeTicketsEspera();
 }
 
 // Ronda 27: Adrián pidió que el stock se vea actualizado en el POS en cuanto se registre una
@@ -2361,6 +2383,142 @@ function reiniciarVenta(){
   $('buscar-input').focus();
 }
 
+// ---------- RONDA 28: Tickets en espera ----------
+// Adrián preguntó cómo atender a más de un cliente a la vez (por ejemplo, alguien que va por más
+// artículos o por dinero a medio cobro) — antes lo resolvía "reteniendo y liberando" en el sistema
+// anterior. Aquí se implementa como "poner en espera": el carrito completo se guarda (cliente,
+// artículos, lista de precio, condición de pago, descuentos/autorizaciones de cada línea) y la
+// pantalla queda libre para una venta nueva; cualquier ticket en espera se puede retomar después. No
+// toca inventario ni caja — es solo un borrador — así que se guarda con un insert/delete directo
+// (RLS de ventas_en_espera ya limita esto a la misma empresa), sin necesidad de ninguna RPC.
+// Adrián decidió explícitamente que los tickets en espera deben resolverse el mismo día: no se puede
+// cerrar caja mientras queden pendientes (ver el guard en btn-cerrar-caja más abajo).
+let ticketsEsperaCache = [];
+
+async function cargarTicketsEspera(){
+  if(!state.sesionCaja) return [];
+  const { data, error } = await sb.from('ventas_en_espera')
+    .select('id, cliente_id, lista_precio_id, condicion_pago_id, carrito, creado_en, clientes(nombre)')
+    .eq('sesion_caja_id', state.sesionCaja.id)
+    .order('creado_en', { ascending: true });
+  if(error){ console.error(error); return []; }
+  return data || [];
+}
+async function actualizarBadgeTicketsEspera(){
+  const tickets = await cargarTicketsEspera();
+  $('btn-tickets-espera').textContent = tickets.length ? `🕓 Tickets en espera (${tickets.length})` : '🕓 Tickets en espera';
+}
+
+$('btn-poner-en-espera').addEventListener('click', async ()=>{
+  $('cobro-error').innerHTML = '';
+  if(!state.carrito.length){ alert('No hay artículos en el carrito para poner en espera.'); return; }
+  const lineas = state.carrito.map(l=>({
+    varianteId: l.varianteId, cantidad: l.cantidad, listaPrecioId: l.listaPrecioId,
+    descuentoTipo: l.descuentoTipo, descuentoValor: l.descuentoValor, descuentoOrigen: l.descuentoOrigen,
+    precioManual: l.precioManual, autorizaciones: l.autorizaciones,
+  }));
+  const payload = {
+    empresa_id: state.empresaId, sucursal_id: state.sucursalId, caja_id: state.cajaId,
+    sesion_caja_id: state.sesionCaja.id, usuario_id: state.usuario.id,
+    cliente_id: state.clienteId, lista_precio_id: state.listaPrecioId,
+    condicion_pago_id: state.condicionPagoVentaId || null,
+    carrito: {
+      lineas,
+      listaPrecioAutorizadaPor: state.listaPrecioAutorizadaPor,
+      descuentoTicketAutorizadoPor: state.descuentoTicketAutorizadoPor,
+    },
+  };
+  const { error } = await sb.from('ventas_en_espera').insert(payload);
+  if(error){ $('cobro-error').innerHTML = `<div class="msg-error">No se pudo poner en espera: ${error.message}</div>`; return; }
+  reiniciarVenta();
+  await actualizarBadgeTicketsEspera();
+});
+
+async function abrirModalTicketsEspera(){
+  $('te-error').innerHTML = '';
+  ticketsEsperaCache = await cargarTicketsEspera();
+  $('te-lista-vacio').style.display = ticketsEsperaCache.length ? 'none' : 'block';
+  $('te-lista-body').innerHTML = ticketsEsperaCache.map(t=>{
+    const nArticulos = (t.carrito?.lineas||[]).reduce((s,l)=>s+(Number(l.cantidad)||0),0);
+    return `<tr>
+      <td>${t.clientes?.nombre || 'Público en general'}</td>
+      <td class="num">${nArticulos}</td>
+      <td>${new Date(t.creado_en).toLocaleTimeString('es-MX')}</td>
+      <td style="white-space:nowrap;"><button type="button" class="btn-secundario te-retomar" data-id="${t.id}">Retomar</button> <button type="button" class="quitar te-cancelar" data-id="${t.id}">Cancelar</button></td>
+    </tr>`;
+  }).join('');
+  $('te-lista-body').querySelectorAll('.te-retomar').forEach(b=>b.addEventListener('click', ()=>retomarTicketEspera(b.dataset.id)));
+  $('te-lista-body').querySelectorAll('.te-cancelar').forEach(b=>b.addEventListener('click', ()=>cancelarTicketEspera(b.dataset.id)));
+  $('modal-tickets-espera').classList.add('activo');
+}
+$('btn-tickets-espera').addEventListener('click', abrirModalTicketsEspera);
+$('te-cerrar').addEventListener('click', ()=>{ $('modal-tickets-espera').classList.remove('activo'); });
+
+async function retomarTicketEspera(id){
+  $('te-error').innerHTML = '';
+  if(state.carrito.length){
+    $('te-error').innerHTML = '<div class="msg-error">Ya hay una venta en curso en pantalla — ponla en espera, cóbrala o cancélala antes de retomar otro ticket.</div>';
+    return;
+  }
+  const ticket = ticketsEsperaCache.find(t=>t.id===id);
+  if(!ticket) return;
+
+  // Cliente — Público en general si el que traía ya no existe o se desactivó.
+  const clienteValido = ticket.cliente_id && state.clientes.some(c=>c.id===ticket.cliente_id);
+  const publico = state.clientes.find(c=>c.es_publico_general);
+  $('sel-cliente').value = clienteValido ? ticket.cliente_id : (publico ? publico.id : '');
+  aplicarClienteSeleccionado();
+  // aplicarClienteSeleccionado() ya propuso el plazo máximo del cliente por default — si el ticket en
+  // espera traía uno más corto elegido a propósito, se vuelve a aplicar encima.
+  if(ticket.condicion_pago_id && $('sel-condicion-pago').querySelector(`option[value="${ticket.condicion_pago_id}"]`)){
+    $('sel-condicion-pago').value = ticket.condicion_pago_id;
+    state.condicionPagoVentaId = ticket.condicion_pago_id;
+  }
+
+  // Lista de precios del ticket — vuelve a cotizar todo con precios ACTUALES bajo esa lista.
+  if(ticket.lista_precio_id) aplicarListaPrecioTicket(ticket.lista_precio_id);
+
+  state.listaPrecioAutorizadaPor = ticket.carrito?.listaPrecioAutorizadaPor || null;
+  state.descuentoTicketAutorizadoPor = ticket.carrito?.descuentoTicketAutorizadoPor || null;
+
+  // Reconstruye el carrito con precio y stock ACTUALES del catálogo — solo se conservan la cantidad y
+  // los ajustes propios de cada línea (lista/descuento/precio manual), nunca el precio viejo.
+  let noEncontradas = 0;
+  state.carrito = [];
+  (ticket.carrito?.lineas || []).forEach(l=>{
+    const producto = state.catalogo.find(p=>p.varianteId === l.varianteId);
+    if(!producto){ noEncontradas++; return; }
+    state.carrito.push({
+      varianteId: producto.varianteId, nombre: producto.nombre, precio: producto.precio,
+      preciosPorLista: producto.preciosPorLista, listaPrecioId: l.listaPrecioId || null,
+      cantidad: Number(l.cantidad) || 1, impuestos: producto.impuestos,
+      stock: producto.stock, codigo: null,
+      descuentoTipo: l.descuentoTipo || null, descuentoValor: l.descuentoValor || 0,
+      descuentoOrigen: l.descuentoOrigen || null, precioManual: (l.precioManual === undefined ? null : l.precioManual),
+      autorizaciones: l.autorizaciones || { listaPrecio: null, descuento: null, precioManual: null },
+    });
+  });
+
+  const { error } = await sb.from('ventas_en_espera').delete().eq('id', id);
+  if(error) console.error('No se pudo quitar el ticket de la lista de espera:', error);
+
+  actualizarBloqueosPermisos();
+  renderCarrito();
+  $('modal-tickets-espera').classList.remove('activo');
+  await actualizarBadgeTicketsEspera();
+  if(noEncontradas){
+    $('cobro-error').innerHTML = `<div class="msg-error">${noEncontradas} producto(s) de ese ticket ya no están disponibles y no se agregaron.</div>`;
+  }
+}
+
+async function cancelarTicketEspera(id){
+  if(!confirm('¿Cancelar este ticket en espera? No se puede deshacer.')) return;
+  const { error } = await sb.from('ventas_en_espera').delete().eq('id', id);
+  if(error){ $('te-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  await abrirModalTicketsEspera();
+  await actualizarBadgeTicketsEspera();
+}
+
 // ---------- BLOQUE B (Ronda 17): dashboard de "Ventas del día" — reimprimir/modificar/cancelar/devolver ----------
 // mismo_dia y estado los regresa el propio servidor (venta_detalle_completo/ventas_del_dia), con la
 // hora real de Durango (America/Mexico_City) para no repetir el bug de "día equivocado" ya corregido
@@ -2486,10 +2644,13 @@ function htmlTicketDesdeDatos(datos){
     ${datos.estado !== 'completada' ? `<p class="nota" style="margin-top:10px;font-weight:700;">Estado del ticket: ${ESTADO_VENTA_ETIQUETA[datos.estado]||datos.estado}</p>` : ''}
   `;
 }
+let reimprimirDatosActuales = null;
 async function abrirReimprimirTicket(ventaId){
   $('vd-error').innerHTML = '';
   const { data, error } = await sb.rpc('venta_detalle_completo', { p_venta_id: ventaId });
   if(error){ $('vd-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
+  reimprimirDatosActuales = data;
+  $('reimprimir-error').innerHTML = '';
   const html = htmlTicketDesdeDatos(data);
   $('reimprimir-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
@@ -2497,6 +2658,44 @@ async function abrirReimprimirTicket(ventaId){
 }
 $('reimprimir-cerrar').addEventListener('click', ()=>{ $('modal-reimprimir').classList.remove('activo'); $('ticket-imprimible').innerHTML=''; });
 $('reimprimir-imprimir').addEventListener('click', ()=>window.print());
+
+// Ronda 28: Adrián pidió una forma rápida de volver a cobrar una venta repetitiva, al mismo cliente o
+// a otro. Se copian los mismos artículos y cantidades, pero SIEMPRE se vuelven a cotizar con precio y
+// stock ACTUALES del catálogo (decisión explícita de Adrián) — nunca se copian los precios viejos, para
+// no vender por error a un precio que ya cambió. El cliente de la venta original se preselecciona (si
+// sigue activo), pero el cajero lo puede cambiar libremente antes de cobrar, como cualquier venta.
+$('reimprimir-volver-cobrar').addEventListener('click', ()=>{
+  $('reimprimir-error').innerHTML = '';
+  if(!reimprimirDatosActuales) return;
+  if(state.carrito.length){
+    $('reimprimir-error').innerHTML = '<div class="msg-error">Ya hay una venta en curso en pantalla — ponla en espera, cóbrala o cancélala antes de volver a cobrar este ticket.</div>';
+    return;
+  }
+  const lineasOriginales = reimprimirDatosActuales.lineas || [];
+  let agregadas = 0, noEncontradas = 0;
+  lineasOriginales.forEach(l=>{
+    const producto = state.catalogo.find(p=>p.varianteId === l.variante_id);
+    if(!producto){ noEncontradas++; return; }
+    agregarAlCarrito(producto, null, Number(l.cantidad) || 1);
+    agregadas++;
+  });
+  if(!agregadas){
+    $('reimprimir-error').innerHTML = '<div class="msg-error">Ninguno de los productos de ese ticket sigue disponible en el catálogo.</div>';
+    return;
+  }
+  // Preselecciona al mismo cliente de la venta original, si sigue activo — Público en general si no.
+  const clienteOriginal = state.clientes.find(c=>c.nombre === reimprimirDatosActuales.cliente && !c.es_publico_general);
+  if(clienteOriginal){
+    $('sel-cliente').value = clienteOriginal.id;
+    aplicarClienteSeleccionado();
+  }
+  $('modal-reimprimir').classList.remove('activo');
+  $('ticket-imprimible').innerHTML = '';
+  mostrarPantalla('pantalla-pos');
+  if(noEncontradas){
+    $('cobro-error').innerHTML = `<div class="msg-error">${noEncontradas} producto(s) de ese ticket ya no están disponibles y no se agregaron.</div>`;
+  }
+});
 
 // ---- Modificar ticket ----
 let mvVentaId = null, mvDatos = null, mvLineas = []; // {ventaDetalleId|null, varianteId, nombre, cantidad, precioUnitario, descuentoUnitario, impuestos:[{impuesto_id,tasa}]}
@@ -3180,6 +3379,13 @@ async function generarReportePDFCierre(r, reporte){
 }
 
 $('btn-cerrar-caja').addEventListener('click', async ()=>{
+  // Ronda 28: Adrián pidió explícitamente que no se pueda cerrar caja si quedan tickets en espera sin
+  // resolver — hay que cobrarlos o cancelarlos el mismo día, no se guardan para el día siguiente.
+  const pendientes = await cargarTicketsEspera();
+  if(pendientes.length){
+    alert(`No se puede cerrar caja: hay ${pendientes.length} ticket(s) en espera sin resolver. Cóbralos o cancélalos primero (botón "Tickets en espera").`);
+    return;
+  }
   $('cierre-confirmar').disabled = false;
   $('cierre-resumen').innerHTML = 'Calculando…';
   $('modal-cerrar-caja').classList.add('activo');
