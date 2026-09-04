@@ -539,6 +539,9 @@
       <button type="button" class="tab-btn" data-cfgtab="impuestos">Impuestos</button>
       <button type="button" class="tab-btn" data-cfgtab="formas_pago">Formas de pago</button>
       <button type="button" class="tab-btn" data-cfgtab="condiciones_pago">Condiciones de pago</button>
+      <button type="button" class="tab-btn" data-cfgtab="proveedores">Proveedores</button>
+      <button type="button" class="tab-btn" data-cfgtab="sucursales">Sucursales</button>
+      <button type="button" class="tab-btn" data-cfgtab="cajas">Cajas</button>
     </div>
     <p class="nota" id="cfg-nota-super-admin" style="display:none;">Unidades de medida e Impuestos son catálogos compartidos por todo el sistema (no solo Mundo Kositas) — por eso solo Super Admin puede crearlos o editarlos; con otro rol se muestran de solo lectura.</p>
     <div class="card">
@@ -991,7 +994,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.12.003';
+const APP_VERSION = '1.13.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4408,6 +4411,75 @@ const CATALOGOS_SIMPLES = {
       { label:'Días', valor:r=>r.dias },
     ],
   },
+  // Ronda 31: Proveedores con información complementaria opcional, y Sucursales/Cajas — Adrián
+  // notó que no estaban en su lista original y hoy solo se administran por SQL.
+  proveedores: {
+    tabla: 'proveedores', tituloPlural: 'Proveedores', tituloSingular: 'proveedor',
+    campos: [
+      { id:'nombre', label:'Nombre / Razón social', tipo:'texto', requerido:true },
+      { id:'rfc', label:'RFC (opcional)', tipo:'texto' },
+      { id:'contacto_nombre', label:'Nombre de quien nos atiende (opcional)', tipo:'texto' },
+      { id:'contacto_telefono', label:'Teléfono de quien nos atiende (opcional)', tipo:'texto' },
+      { id:'telefono', label:'Teléfono general del proveedor (opcional)', tipo:'texto' },
+      { id:'correo', label:'Correo (opcional)', tipo:'texto' },
+      { id:'direccion', label:'Dirección (opcional)', tipo:'texto' },
+      { id:'banco', label:'Banco (opcional)', tipo:'texto' },
+      { id:'cuenta_clabe', label:'Cuenta / CLABE (opcional)', tipo:'texto' },
+      { id:'dias_credito', label:'Días de crédito que nos da (opcional)', tipo:'numero' },
+      { id:'notas', label:'Notas (opcional)', tipo:'textarea' },
+    ],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [
+      { label:'Nombre', valor:r=>r.nombre },
+      { label:'Contacto', valor:r=>r.contacto_nombre || '—' },
+      { label:'Teléfono', valor:r=>r.contacto_telefono || r.telefono || '—' },
+      { label:'Correo', valor:r=>r.correo || '—' },
+      { label:'RFC', valor:r=>r.rfc || '—' },
+      { label:'Días de crédito', valor:r=>r.dias_credito ?? '—' },
+    ],
+  },
+  sucursales: {
+    tabla: 'sucursales', tituloPlural: 'Sucursales', tituloSingular: 'sucursal',
+    campos: [
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'direccion', label:'Dirección (opcional)', tipo:'texto' },
+      { id:'telefono', label:'Teléfono (opcional)', tipo:'texto' },
+      { id:'responsable_usuario_id', label:'Responsable (opcional)', tipo:'select', fuente:'usuarios' },
+      { id:'lista_precio_default_id', label:'Lista de precio default (opcional)', tipo:'select', fuente:'listasPrecio' },
+    ],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [
+      { label:'Nombre', valor:r=>r.nombre },
+      { label:'Dirección', valor:r=>r.direccion || '—' },
+      { label:'Teléfono', valor:r=>r.telefono || '—' },
+      { label:'Responsable', valor:r=>state.usuariosEmpresa.find(u=>u.id===r.responsable_usuario_id)?.nombre || '—' },
+      { label:'Almacén default', valor:r=>state.almacenes.find(a=>a.id===r.almacen_default_id)?.nombre || '(se define desde Inventario → Almacenes)' },
+    ],
+  },
+  cajas: {
+    tabla: 'cajas', tituloPlural: 'Cajas', tituloSingular: 'caja',
+    omitirEmpresaId: true, // se ubica vía sucursal_id → sucursales.empresa_id, no tiene su propia columna empresa_id
+    campos: [
+      { id:'sucursal_id', label:'Sucursal', tipo:'select', fuente:'sucursales', requerido:true },
+      { id:'almacen_id', label:'Almacén (de dónde descuenta stock al vender)', tipo:'select', fuente:'almacenes', requerido:true },
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'numero', label:'Número', tipo:'numero', requerido:true },
+    ],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [
+      { label:'Sucursal', valor:r=>state.sucursales.find(s=>s.id===r.sucursal_id)?.nombre || '—' },
+      { label:'Almacén', valor:r=>state.almacenes.find(a=>a.id===r.almacen_id)?.nombre || '—' },
+      { label:'Nombre', valor:r=>r.nombre },
+      { label:'Número', valor:r=>r.numero },
+    ],
+  },
+};
+const CFG_FUENTES = {
+  categorias: () => (state.cfgCache.categorias || state.categorias).map(c=>[c.id, c.nombre]),
+  sucursales: () => (state.cfgCache.sucursales || state.sucursales).map(s=>[s.id, s.nombre]),
+  almacenes: () => state.almacenes.map(a=>[a.id, a.nombre]),
+  usuarios: () => state.usuariosEmpresa.map(u=>[u.id, u.nombre]),
+  listasPrecio: () => state.listasPrecio.map(l=>[l.id, l.nombre]),
 };
 state.cfgTabActivo = 'marcas';
 state.cfgCache = {};
@@ -4503,13 +4575,11 @@ function abrirModalCfg(key, id){
     if(campo.tipo === 'bool'){
       return `<div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cfg-campo-${campo.id}" style="width:auto;" ${valorActual?'checked':''}> ${campo.label}</label></div>`;
     }
+    if(campo.tipo === 'textarea'){
+      return `<div class="campo"><label>${campo.label}</label><textarea id="cfg-campo-${campo.id}" rows="3">${valorActual!=null?String(valorActual):''}</textarea></div>`;
+    }
     if(campo.tipo === 'select'){
-      let opciones;
-      if(campo.fuente === 'categorias'){
-        opciones = (state.cfgCache.categorias || state.categorias).map(c=>[c.id, c.nombre]);
-      } else {
-        opciones = campo.opciones;
-      }
+      const opciones = campo.fuente ? CFG_FUENTES[campo.fuente]() : campo.opciones;
       const optionsHtml = opciones.map(([val,txt])=>`<option value="${val}" ${String(valorActual)===String(val)?'selected':''}>${txt}</option>`).join('');
       return `<div class="campo"><label>${campo.label}</label><select id="cfg-campo-${campo.id}"><option value="">(elegir…)</option>${optionsHtml}</select></div>`;
     }
@@ -4533,7 +4603,7 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
     const el = $(`cfg-campo-${campo.id}`);
     if(campo.tipo === 'bool'){ payload[campo.id] = el.checked; continue; }
     let valor = el.value;
-    if(campo.tipo === 'texto') valor = valor.trim();
+    if(campo.tipo === 'texto' || campo.tipo === 'textarea') valor = valor.trim();
     if(campo.requerido && !valor && valor !== 0){
       $('cfg-modal-error').innerHTML = `<div class="msg-error">${campo.label} es obligatorio.</div>`;
       return;
@@ -4564,10 +4634,21 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
   }
   $('modal-cfg').classList.remove('activo');
   await cargarYRenderCatalogoSimple(key);
-  // Si se editó Categorías, refresca también los selects de Líneas/filtros que dependen de ella.
+  // Si se editó un catálogo del que dependen selects en otras pantallas (Categorías → Líneas y
+  // filtros de Catálogo; Proveedores/Sucursales → el select de "Nueva compra" y el resto de
+  // Inventario), se refresca también esa copia para que se vea al toque sin salir y volver a entrar.
   if(key === 'categorias'){
     const { data: categorias } = await sb.from('categorias').select('*').order('nombre');
     state.categorias = categorias || [];
+  }
+  if(key === 'proveedores'){
+    const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+    state.proveedores = proveedores || [];
+    if(typeof renderProveedorSelect === 'function') renderProveedorSelect();
+  }
+  if(key === 'sucursales'){
+    const { data: sucursales } = await sb.from('sucursales').select('*').eq('activo', true);
+    state.sucursales = sucursales || [];
   }
 });
 
