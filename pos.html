@@ -186,6 +186,10 @@
         <h2>Cliente</h2>
         <select id="sel-cliente"></select>
         <p class="nota" id="cliente-credito-nota" style="margin:6px 0 0;display:none;"></p>
+        <div id="cliente-condicion-pago-bloque" style="display:none;margin-top:6px;">
+          <p class="nota" style="margin:0 0 4px;">Condición de pago de esta venta (máximo autorizado para este cliente: <span id="cliente-condicion-pago-max"></span>)</p>
+          <select id="sel-condicion-pago"></select>
+        </div>
         <p class="nota" style="margin:10px 0 4px;">Lista de precios del ticket</p>
         <div style="display:flex;gap:6px;align-items:center;">
           <select id="sel-lista-precio" style="flex:1;"></select>
@@ -583,7 +587,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.5.004';
+const APP_VERSION = '1.6.001';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -643,6 +647,7 @@ const state = {
   catalogo: [],
   listasPrecio: [], // catálogo de listas de precio activas, para el selector de la venta
   clientes: [], clienteId: null,
+  condicionesPago: [], condicionPagoVentaId: null, // Ronda 23: catálogo Contado/7/15/30/60 días y la condición elegida para la venta a crédito EN CURSO
   formasPago: [],
   categorias: [], lineas: [], // para los filtros de la pestaña Reportes
   // carrito: cada línea trae preciosPorLista (copia del mapa del producto) y listaPrecioId — null
@@ -972,6 +977,9 @@ async function entrarAlPOS(){
     ? 'Precios mostrados sin IVA (el impuesto se desglosa en el total).'
     : 'Precios mostrados con IVA incluido.';
 
+  // cargarCondicionesPago() va antes y por separado: cargarClientes() ya llama actualizarNotaCreditoCliente(),
+  // que necesita el catálogo de condiciones de pago cargado para saber si el cliente tiene crédito autorizado.
+  await cargarCondicionesPago();
   await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
   actualizarBloqueosPermisos();
   reiniciarVenta();
@@ -1328,12 +1336,48 @@ $('btn-actualizar-catalogo').addEventListener('click', async ()=>{ await cargarC
 // puede seguir cambiando manualmente (mismo permiso/PIN de siempre en sel-lista-precio).
 function clienteSeleccionado(){ return state.clientes.find(c=>c.id===state.clienteId) || null; }
 function creditoDisponibleCliente(cliente){ return Math.max(0, Number(cliente.limite_credito) - Number(cliente.saldo_actual)); }
+// Ronda 23: catálogo de condiciones de pago (Contado/7/15/30/60 días). condicionPagoCliente() da la
+// condición ASIGNADA al cliente (su plazo máximo autorizado); clienteTieneCreditoAutorizado() es false
+// tanto si no tiene condición configurada como si es "Contado" (dias=0) — en ambos casos no puede
+// comprar a crédito, igual que "Público en general".
+async function cargarCondicionesPago(){
+  const { data } = await sb.from('condiciones_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('dias');
+  state.condicionesPago = data || [];
+}
+function condicionPagoCliente(cliente){ return state.condicionesPago.find(cp=>cp.id===cliente?.condicion_pago_id) || null; }
+function clienteTieneCreditoAutorizado(cliente){ const cp = condicionPagoCliente(cliente); return !!cp && cp.dias > 0; }
+// Llena el selector de condición de pago DE ESTA VENTA con las opciones <= el plazo máximo del
+// cliente (nunca más largo del que tiene autorizado) y lo propone en el máximo — el cajero lo puede
+// acortar libremente (Adrián confirmó que no hace falta PIN para acortarlo, solo para el resto de las
+// reglas de crédito que ya existían).
+function actualizarBloqueCondicionPago(){
+  const c = clienteSeleccionado();
+  const bloque = $('cliente-condicion-pago-bloque');
+  if(!c || !clienteTieneCreditoAutorizado(c)){
+    bloque.style.display = 'none';
+    state.condicionPagoVentaId = null;
+    return;
+  }
+  const cpMax = condicionPagoCliente(c);
+  bloque.style.display = 'block';
+  $('cliente-condicion-pago-max').textContent = cpMax.nombre;
+  const opciones = state.condicionesPago.filter(cp=>cp.dias > 0 && cp.dias <= cpMax.dias);
+  $('sel-condicion-pago').innerHTML = opciones.map(cp=>`<option value="${cp.id}">${cp.nombre}</option>`).join('');
+  state.condicionPagoVentaId = cpMax.id;
+  $('sel-condicion-pago').value = cpMax.id;
+}
+$('sel-condicion-pago').addEventListener('change', ()=>{ state.condicionPagoVentaId = $('sel-condicion-pago').value; });
 function actualizarNotaCreditoCliente(){
   const c = clienteSeleccionado();
   const nota = $('cliente-credito-nota');
-  if(!c || c.es_publico_general){ nota.style.display = 'none'; return; }
+  if(!c || c.es_publico_general){ nota.style.display = 'none'; actualizarBloqueCondicionPago(); return; }
   nota.style.display = 'block';
-  nota.textContent = `Saldo actual: ${money(c.saldo_actual)} · Límite de crédito: ${money(c.limite_credito)} · Disponible: ${money(creditoDisponibleCliente(c))}`;
+  if(clienteTieneCreditoAutorizado(c)){
+    nota.textContent = `Saldo actual: ${money(c.saldo_actual)} · Límite de crédito: ${money(c.limite_credito)} · Disponible: ${money(creditoDisponibleCliente(c))}`;
+  } else {
+    nota.textContent = 'Este cliente es de Contado — no tiene línea de crédito autorizada.';
+  }
+  actualizarBloqueCondicionPago();
 }
 function aplicarClienteSeleccionado(){
   state.clienteId = $('sel-cliente').value;
@@ -1984,7 +2028,9 @@ function recalcularTotales(){
   // y de que el cliente elegido no sea "Público en general" (el resto de las reglas de negocio —
   // permiso y límite — se validan hasta dar clic, porque dependen del cliente y del PIN).
   const clienteActual = clienteSeleccionado();
-  $('btn-credito-cliente').disabled = state.carrito.length===0 || sinPrecio || !clienteActual || clienteActual.es_publico_general;
+  // Ronda 23: además de no ser "Público en general", el cliente debe tener una condición de pago
+  // configurada distinta de "Contado" (dias > 0) — un cliente de Contado no tiene línea de crédito.
+  $('btn-credito-cliente').disabled = state.carrito.length===0 || sinPrecio || !clienteActual || clienteActual.es_publico_general || !clienteTieneCreditoAutorizado(clienteActual);
 }
 
 // ---------- PAGOS ----------
@@ -2176,6 +2222,10 @@ $('btn-credito-cliente').addEventListener('click', async ()=>{
     $('cobro-error').innerHTML = '<div class="msg-error">Selecciona un cliente registrado (no "Público en general") para vender a crédito.</div>';
     return;
   }
+  if(!clienteTieneCreditoAutorizado(cliente)){
+    $('cobro-error').innerHTML = '<div class="msg-error">Este cliente es de Contado — no tiene línea de crédito autorizada. Cámbiale la condición de pago en Clientes si necesita crédito.</div>';
+    return;
+  }
   const { subtotal, impuesto, desglose, payloadDetalle, payloadVenta, total } = construirDetalleYVentaBase('credito');
   const excedeLimite = total > creditoDisponibleCliente(cliente) + 0.001;
   let autorizadoPor = null;
@@ -2191,7 +2241,8 @@ $('btn-credito-cliente').addEventListener('click', async ()=>{
 
   $('btn-credito-cliente').disabled = true;
   const { data: ventaId, error } = await sb.rpc('registrar_venta', {
-    p_venta: payloadVenta, p_detalle: payloadDetalle, p_pagos: [], p_autorizado_por: autorizadoPor
+    p_venta: payloadVenta, p_detalle: payloadDetalle, p_pagos: [], p_autorizado_por: autorizadoPor,
+    p_condicion_pago_id: state.condicionPagoVentaId,
   });
   $('btn-credito-cliente').disabled = false;
 
@@ -2233,6 +2284,7 @@ function mostrarTicket(ventaId, venta, desglose){
     </div>
     ${venta.tipo_venta === 'credito' ? `
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Venta a crédito — cargada a la cuenta de ${cliente?.nombre || 'cliente'}.</p>
+    ${(()=>{ const cp = state.condicionesPago.find(c=>c.id===state.condicionPagoVentaId); if(!cp) return ''; const venc = new Date(); venc.setDate(venc.getDate()+cp.dias); return `<p class="nota" style="margin:2px 0 0;">Condición de pago: ${cp.nombre} · Vence: ${venc.toLocaleDateString('es-MX')}</p>`; })()}
     <div style="margin-top:14px;border-top:1px dashed #000;padding-top:10px;">
       <p style="margin:0;">${(state.textoPagare || 'Recibí de conformidad los artículos de este ticket por un total de {total}, a crédito, y me comprometo a pagar dicho importe a {empresa}.').replace('{total}', `<strong>${money(venta.total)}</strong>`).replace('{empresa}', `<strong>${state.empresaNombre}</strong>`)}</p>
       <div style="margin:64px auto 0;border-top:1px solid #000;width:85%;"></div>

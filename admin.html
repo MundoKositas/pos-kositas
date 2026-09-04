@@ -269,7 +269,7 @@
         <div class="tabla-scroll" style="margin-top:14px;">
           <table>
             <thead><tr>
-              <th>Nombre</th><th>Teléfono</th><th>RFC</th><th>Lista de precio default</th>
+              <th>Nombre</th><th>Teléfono</th><th>RFC</th><th>Lista de precio default</th><th>Condición de pago</th>
               <th class="num">Límite de crédito</th><th class="num">Saldo actual</th><th>Estado</th><th></th>
             </tr></thead>
             <tbody id="clientes-tabla-body"></tbody>
@@ -281,7 +281,7 @@
 
     <div id="cli-panel-cxc" style="display:none;">
       <div class="card">
-        <div class="fila" style="justify-content:space-between;align-items:center;">
+        <div class="fila" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
           <h2 style="margin:0;">Cuentas por cobrar</h2>
           <div class="fila" style="gap:8px;">
             <select id="cxc-formato-exportar" style="width:auto;">
@@ -291,10 +291,24 @@
             <button type="button" class="btn-secundario" id="cxc-exportar">Exportar</button>
           </div>
         </div>
-        <p class="nota">Clientes con saldo pendiente (saldo actual mayor a $0), de mayor a menor saldo. Los abonos se registran desde el POS (pantalla de venta, "Abono de cliente") para que queden reflejados en el corte de caja de quien los recibe.</p>
+        <div class="fila" style="gap:10px;flex-wrap:wrap;margin-top:8px;">
+          <div class="col" style="min-width:220px;">
+            <label>Buscar cliente</label>
+            <input type="text" id="cxc-buscar" placeholder="Nombre del cliente…">
+          </div>
+          <div class="col" style="min-width:220px;">
+            <label>Agrupar por</label>
+            <select id="cxc-agrupar">
+              <option value="ninguno">Sin agrupar (de mayor a menor saldo)</option>
+              <option value="condicion">Condición de pago</option>
+              <option value="vencimiento">Fecha de vencimiento</option>
+            </select>
+          </div>
+        </div>
+        <p class="nota">Clientes con saldo pendiente (saldo actual mayor a $0). Los abonos se registran desde el POS (pantalla de venta, "Abono de cliente") para que queden reflejados en el corte de caja de quien los recibe. Agrupado por fecha de vencimiento, un mismo cliente puede aparecer varias veces — una por cada fecha en la que vence parte de su saldo.</p>
         <div class="tabla-scroll">
           <table>
-            <thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Límite de crédito</th><th class="num">Saldo actual</th><th class="num">Disponible</th><th></th></tr></thead>
+            <thead id="cxc-thead"><tr><th>Cliente</th><th>Teléfono</th><th class="num">Límite de crédito</th><th class="num">Saldo actual</th><th class="num">Disponible</th><th></th></tr></thead>
             <tbody id="cxc-tabla-body"></tbody>
           </table>
         </div>
@@ -550,9 +564,11 @@
       <div class="campo"><label>RFC</label><input type="text" id="cliente-rfc"></div>
     </div>
     <div class="grid-2">
+      <div class="campo"><label>Condición de pago</label><select id="cliente-condicion-pago"><option value="">(ninguna — no puede comprar a crédito)</option></select></div>
       <div class="campo"><label>Límite de crédito</label><input type="number" step="0.01" min="0" id="cliente-limite-credito" value="0"></div>
-      <div class="campo"><label>Lista de precio default</label><select id="cliente-lista-precio"><option value="">(usar la de la sucursal)</option></select></div>
     </div>
+    <p class="nota" id="cliente-condicion-pago-nota">Es el plazo MÁXIMO que este cliente puede usar al comprar a crédito — al cobrar, el cajero puede elegir esta condición o una más corta, pero nunca una más larga. Si es "Contado", no puede tener línea de crédito (el límite se guarda en $0).</p>
+    <div class="campo"><label>Lista de precio default</label><select id="cliente-lista-precio"><option value="">(usar la de la sucursal)</option></select></div>
     <p class="nota">El cajero puede seguir cambiando la lista de precio del ticket manualmente al cobrar — esta es solo la que se propone automáticamente al seleccionar a este cliente.</p>
     <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cliente-activo" checked style="width:auto;"> Activo</label></div>
     <div id="cliente-error"></div>
@@ -816,7 +832,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.8.003';
+const APP_VERSION = '1.9.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -939,6 +955,7 @@ document.addEventListener('keydown', (e)=>{
 const state = {
   usuario: null, rol: null, empresaId: null, empresaNombre: '', almacenId: null,
   productos: [], impuestos: [], categorias: [], lineas: [], unidades: [], listasPrecio: [], margenesLinea: [],
+  condicionesPago: [], cxcAgrupacion: 'ninguno', cxcVencimientos: [], // Ronda 23
   productoEditId: null, varianteEditId: null,
   listaEditId: null,
   costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
@@ -1188,6 +1205,8 @@ async function iniciarSesionApp(){
   state.clientes = clientes || [];
   $('cliente-lista-precio').innerHTML = '<option value="">(usar la de la sucursal)</option>'
     + state.listasPrecio.filter(l=>l.activo).map(l=>`<option value="${l.id}">${l.nombre}</option>`).join('');
+  $('cliente-condicion-pago').innerHTML = '<option value="">(ninguna — no puede comprar a crédito)</option>'
+    + state.condicionesPago.map(cp=>`<option value="${cp.id}">${cp.nombre}</option>`).join('');
   renderClientesTabla();
   renderCxcTabla();
 
@@ -1243,7 +1262,7 @@ document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
 
 // ---------- CATÁLOGOS BASE ----------
 async function cargarCatalogosBase(){
-  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}] = await Promise.all([
+  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}] = await Promise.all([
     sb.from('impuestos').select('*').order('nombre'),
     sb.from('categorias').select('*').order('nombre'),
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
@@ -1251,6 +1270,7 @@ async function cargarCatalogosBase(){
     sb.from('listas_precio').select('*').order('nombre'),
     sb.from('listas_precio_margen_linea').select('*'),
     sb.from('marcas').select('*').eq('activo', true).order('nombre'),
+    sb.from('condiciones_pago').select('*').eq('activo', true).order('dias'), // Ronda 23
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
@@ -1259,6 +1279,7 @@ async function cargarCatalogosBase(){
   state.listasPrecio = listas || [];
   state.margenesLinea = margenesLinea || [];
   state.marcas = marcas || [];
+  state.condicionesPago = condicionesPago || [];
 
   llenarSelect('prod-categoria', state.categorias, c=>c.id, c=>c.nombre);
   habilitarComboBuscable('prod-categoria');
@@ -3444,6 +3465,9 @@ function nombreListaPrecioCliente(c){
   const l = state.listasPrecio.find(x=>x.id===c.lista_precio_default_id);
   return l ? l.nombre : '(la de la sucursal)';
 }
+// Ronda 23: catálogo de condiciones de pago (Contado/7/15/30/60 días).
+function condicionPagoDeCliente(c){ return state.condicionesPago.find(cp=>cp.id===c.condicion_pago_id) || null; }
+function nombreCondicionPagoCliente(c){ return condicionPagoDeCliente(c)?.nombre || '(sin condición — no puede comprar a crédito)'; }
 function clientesFiltrados(){
   const q = ($('cli-buscar').value || '').trim().toLowerCase();
   if(!q) return state.clientes;
@@ -3461,6 +3485,7 @@ function renderClientesTabla(){
       <td>${c.telefono || '—'}</td>
       <td>${c.rfc || '—'}</td>
       <td>${nombreListaPrecioCliente(c)}</td>
+      <td>${c.es_publico_general ? '—' : nombreCondicionPagoCliente(c)}</td>
       <td class="num">${c.es_publico_general ? '—' : money(c.limite_credito)}</td>
       <td class="num">${c.es_publico_general ? '—' : money(c.saldo_actual)}</td>
       <td>${c.activo ? 'Activo' : 'Inactivo'}</td>
@@ -3487,12 +3512,25 @@ function abrirCliente(id){
   $('cliente-rfc').value = c?.rfc || '';
   $('cliente-limite-credito').value = c ? c.limite_credito : 0;
   $('cliente-lista-precio').value = c?.lista_precio_default_id || '';
+  $('cliente-condicion-pago').value = c?.condicion_pago_id || '';
   $('cliente-activo').checked = c ? c.activo : true;
   state.clienteEditId = c?.id || null;
+  actualizarBloqueoLimiteCreditoCliente();
   $('modal-cliente').classList.add('activo');
 }
 $('btn-nuevo-cliente').addEventListener('click', ()=>abrirCliente(null));
 $('cliente-cancelar').addEventListener('click', ()=>{ $('modal-cliente').classList.remove('activo'); });
+// Ronda 23: un cliente de "Contado" (o sin condición de pago) no puede tener línea de crédito — el
+// campo se deshabilita y se fuerza a 0 en pantalla; guardar_cliente también lo fuerza del lado del
+// servidor, esto es solo para que se vea claro de inmediato.
+function actualizarBloqueoLimiteCreditoCliente(){
+  const cpId = $('cliente-condicion-pago').value;
+  const cp = state.condicionesPago.find(x=>x.id===cpId);
+  const esContadoOSinCondicion = !cp || cp.dias === 0;
+  $('cliente-limite-credito').disabled = esContadoOSinCondicion;
+  if(esContadoOSinCondicion) $('cliente-limite-credito').value = 0;
+}
+$('cliente-condicion-pago').addEventListener('change', actualizarBloqueoLimiteCreditoCliente);
 $('cliente-guardar').addEventListener('click', async ()=>{
   $('cliente-error').innerHTML = '';
   const nombre = $('cliente-nombre').value.trim();
@@ -3503,6 +3541,7 @@ $('cliente-guardar').addEventListener('click', async ()=>{
     id: state.clienteEditId, empresa_id: state.empresaId, nombre,
     telefono: $('cliente-telefono').value.trim(), rfc: $('cliente-rfc').value.trim(),
     limite_credito: limite, lista_precio_default_id: $('cliente-lista-precio').value || null,
+    condicion_pago_id: $('cliente-condicion-pago').value || null,
     activo: $('cliente-activo').checked,
   };
   $('cliente-guardar').disabled = true;
@@ -3538,39 +3577,140 @@ async function abrirEstadoCuenta(id){
 }
 $('ec-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta').classList.remove('activo'); });
 
-// ---- Cuentas por cobrar (clientes con saldo pendiente) ----
+// ---- Cuentas por cobrar (clientes con saldo pendiente) — Ronda 23: filtro por nombre + 3 modos de
+// agrupación (sin agrupar / por condición de pago / por fecha de vencimiento). El modo "vencimiento"
+// usa la RPC reporte_cxc_vencimientos, que reparte los abonos del cliente FIFO contra sus cargos más
+// antiguos, así que un mismo cliente puede aparecer varias veces — una por cada fecha que aún debe.
 function clientesConSaldo(){
   return state.clientes.filter(c => !c.es_publico_general && Number(c.saldo_actual) > 0)
     .sort((a,b)=> Number(b.saldo_actual) - Number(a.saldo_actual));
 }
-function renderCxcTabla(){
+function clientesConSaldoFiltrados(){
+  const q = ($('cxc-buscar').value || '').trim().toLowerCase();
   const items = clientesConSaldo();
+  return q ? items.filter(c => (c.nombre||'').toLowerCase().includes(q)) : items;
+}
+async function cxcVencimientosFiltrados(){
+  const { data, error } = await sb.rpc('reporte_cxc_vencimientos', { p_empresa_id: state.empresaId });
+  if(error){ console.error('reporte_cxc_vencimientos:', error); return []; }
+  state.cxcVencimientos = data || [];
+  const q = ($('cxc-buscar').value || '').trim().toLowerCase();
+  return q ? state.cxcVencimientos.filter(v => (v.cliente_nombre||'').toLowerCase().includes(q)) : state.cxcVencimientos;
+}
+function filaAccion(clienteId){ return `<button type="button" class="btn-gris cxc-estado-cuenta" data-id="${clienteId}">Estado de cuenta</button>`; }
+function conectarBotonesEstadoCuenta(){
+  $('cxc-tabla-body').querySelectorAll('.cxc-estado-cuenta').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirEstadoCuenta(btn.dataset.id));
+  });
+}
+const THEAD_CXC_NORMAL = '<tr><th>Cliente</th><th>Teléfono</th><th class="num">Límite de crédito</th><th class="num">Saldo actual</th><th class="num">Disponible</th><th></th></tr>';
+const THEAD_CXC_VENCIMIENTO = '<tr><th>Cliente</th><th>Referencia</th><th>Fecha de vencimiento</th><th class="num">Importe que vence</th><th></th></tr>';
+async function renderCxcTabla(){
+  const modo = $('cxc-agrupar').value;
+  $('cxc-thead').innerHTML = modo === 'vencimiento' ? THEAD_CXC_VENCIMIENTO : THEAD_CXC_NORMAL;
+
+  if(modo === 'vencimiento'){
+    const filas = await cxcVencimientosFiltrados();
+    $('cxc-vacio').style.display = filas.length ? 'none' : 'block';
+    $('cxc-tabla-body').innerHTML = filas.map(v=>`<tr>
+        <td>${v.cliente_nombre}</td><td>${v.referencia || '—'}</td>
+        <td>${v.fecha_vencimiento ? new Date(v.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-MX') : '(sin condición de pago)'}</td>
+        <td class="num">${money(v.monto_pendiente)}</td>
+        <td>${filaAccion(v.cliente_id)}</td>
+      </tr>`).join('');
+    conectarBotonesEstadoCuenta();
+    $('cxc-total').textContent = money(filas.reduce((s,v)=>s+Number(v.monto_pendiente),0));
+    return;
+  }
+
+  const items = clientesConSaldoFiltrados();
   $('cxc-vacio').style.display = items.length ? 'none' : 'block';
-  $('cxc-tabla-body').innerHTML = items.map(c=>`<tr>
+  const filaCliente = c => `<tr>
       <td>${c.nombre}</td><td>${c.telefono || '—'}</td>
       <td class="num">${money(c.limite_credito)}</td>
       <td class="num">${money(c.saldo_actual)}</td>
       <td class="num">${money(Math.max(0, c.limite_credito - c.saldo_actual))}</td>
-      <td><button type="button" class="btn-gris cxc-estado-cuenta" data-id="${c.id}">Estado de cuenta</button></td>
-    </tr>`).join('');
-  $('cxc-tabla-body').querySelectorAll('.cxc-estado-cuenta').forEach(btn=>{
-    btn.addEventListener('click', ()=>abrirEstadoCuenta(btn.dataset.id));
-  });
+      <td>${filaAccion(c.id)}</td>
+    </tr>`;
+
+  if(modo === 'condicion'){
+    // Un grupo por condición de pago (ordenados de plazo más corto a más largo), más "(sin condición
+    // de pago)" al final para clientes con saldo que aún no tienen una asignada.
+    const grupos = new Map();
+    for(const c of items){
+      const cp = condicionPagoDeCliente(c);
+      const clave = cp ? cp.id : '__sin__';
+      if(!grupos.has(clave)) grupos.set(clave, { nombre: cp ? cp.nombre : '(sin condición de pago)', dias: cp ? cp.dias : 999999, items: [] });
+      grupos.get(clave).items.push(c);
+    }
+    const gruposOrdenados = [...grupos.values()].sort((a,b)=>a.dias-b.dias);
+    $('cxc-tabla-body').innerHTML = gruposOrdenados.map(g=>{
+      const subtotal = g.items.reduce((s,c)=>s+Number(c.saldo_actual),0);
+      return `<tr><td colspan="6" style="font-weight:700;background:#f3f4f6;">${g.nombre}</td></tr>`
+        + g.items.map(filaCliente).join('')
+        + `<tr><td colspan="3"></td><td class="num" style="font-weight:700;">${money(subtotal)}</td><td colspan="2"></td></tr>`;
+    }).join('');
+  } else {
+    $('cxc-tabla-body').innerHTML = items.map(filaCliente).join('');
+  }
+  conectarBotonesEstadoCuenta();
   $('cxc-total').textContent = money(items.reduce((s,c)=>s+Number(c.saldo_actual),0));
 }
+$('cxc-buscar').addEventListener('input', renderCxcTabla);
+$('cxc-agrupar').addEventListener('change', renderCxcTabla);
+
 $('cxc-exportar').addEventListener('click', async ()=>{
-  const items = clientesConSaldo();
+  const modo = $('cxc-agrupar').value;
+  const nombreArchivoBase = `cuentas_por_cobrar_${modo === 'vencimiento' ? 'por_vencimiento_' : modo === 'condicion' ? 'por_condicion_pago_' : ''}${fechaLocalISO()}`;
+
+  if(modo === 'vencimiento'){
+    const filas0 = await cxcVencimientosFiltrados();
+    const encabezados = ['Cliente','Referencia','Fecha de vencimiento','Condición de pago','Importe que vence'];
+    const filas = filas0.map(v=>[v.cliente_nombre, v.referencia || '—', v.fecha_vencimiento ? new Date(v.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-MX') : '(sin condición)', v.condicion_pago_nombre || '—', Number(v.monto_pendiente)||0]);
+    const tipos = filas0.map(()=>'producto');
+    filas.push(['TOTAL GENERAL', '', '', '', redondear2(filas0.reduce((s,v)=>s+Number(v.monto_pendiente),0))]);
+    tipos.push('total');
+    if($('cxc-formato-exportar').value === 'excel'){
+      exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxC por vencimiento', encabezados, filas, tipos, [4]);
+    } else {
+      await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por cobrar — por fecha de vencimiento', state.empresaNombre, encabezados, filas, tipos, [4], [4]);
+    }
+    return;
+  }
+
+  const items = clientesConSaldoFiltrados();
   const encabezados = ['Cliente','Teléfono','Límite de crédito','Saldo actual','Disponible'];
-  // Reporte plano (sin agrupar por categoría/línea, a diferencia de existencias/resurtido/precios) —
-  // cada cliente es un renglón tipo 'producto', y el último renglón es el TOTAL GENERAL.
-  const filas = items.map(c=>[c.nombre, c.telefono || '—', Number(c.limite_credito)||0, Number(c.saldo_actual)||0, Math.max(0, Number(c.limite_credito)-Number(c.saldo_actual))]);
-  const tipos = items.map(()=>'producto');
+  const filas = [];
+  const tipos = [];
+  if(modo === 'condicion'){
+    const grupos = new Map();
+    for(const c of items){
+      const cp = condicionPagoDeCliente(c);
+      const clave = cp ? cp.id : '__sin__';
+      if(!grupos.has(clave)) grupos.set(clave, { nombre: cp ? cp.nombre : '(sin condición de pago)', dias: cp ? cp.dias : 999999, items: [] });
+      grupos.get(clave).items.push(c);
+    }
+    for(const g of [...grupos.values()].sort((a,b)=>a.dias-b.dias)){
+      filas.push([g.nombre, '', '', '', '']); tipos.push('grupo');
+      for(const c of g.items){
+        filas.push([c.nombre, c.telefono || '—', Number(c.limite_credito)||0, Number(c.saldo_actual)||0, Math.max(0, Number(c.limite_credito)-Number(c.saldo_actual))]);
+        tipos.push('producto');
+      }
+      filas.push(['Subtotal ' + g.nombre, '', '', redondear2(g.items.reduce((s,c)=>s+Number(c.saldo_actual),0)), '']);
+      tipos.push('subtotalCategoria');
+    }
+  } else {
+    for(const c of items){
+      filas.push([c.nombre, c.telefono || '—', Number(c.limite_credito)||0, Number(c.saldo_actual)||0, Math.max(0, Number(c.limite_credito)-Number(c.saldo_actual))]);
+      tipos.push('producto');
+    }
+  }
   filas.push(['TOTAL GENERAL', '', '', redondear2(items.reduce((s,c)=>s+Number(c.saldo_actual),0)), '']);
   tipos.push('total');
   if($('cxc-formato-exportar').value === 'excel'){
-    exportarExcelAgrupado(`cuentas_por_cobrar_${fechaLocalISO()}.xlsx`, 'CxC', encabezados, filas, tipos, [2,3,4]);
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxC', encabezados, filas, tipos, [2,3,4]);
   } else {
-    await exportarPDFAgrupado(`cuentas_por_cobrar_${fechaLocalISO()}.pdf`, 'Cuentas por cobrar', state.empresaNombre, encabezados, filas, tipos, [2,3,4], [2,3,4]);
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por cobrar', state.empresaNombre, encabezados, filas, tipos, [2,3,4], [2,3,4]);
   }
 });
 
