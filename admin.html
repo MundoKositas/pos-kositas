@@ -766,14 +766,14 @@
   </div>
 </div>
 
-<!-- MODAL: detalle de una compra registrada (Ronda 24) -->
+<!-- MODAL: detalle de una compra registrada (Ronda 24; edición + historial en Ronda 25) -->
 <div class="modal-fondo" id="modal-compra-detalle">
-  <div class="modal" style="max-width:640px;">
+  <div class="modal" style="max-width:680px;">
     <h2 style="margin-top:0;">Detalle de la compra</h2>
     <p class="nota" id="cd-resumen">Cargando…</p>
     <div class="tabla-scroll">
       <table>
-        <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr></thead>
+        <thead id="cd-thead"><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr></thead>
         <tbody id="cd-tabla-body"></tbody>
       </table>
     </div>
@@ -781,7 +781,14 @@
       <div class="linea total-final"><span>Total de la compra</span><span id="cd-total">$0.00</span></div>
     </div>
     <p class="nota">La columna "Total (con impuestos)" de la lista de compras es un cálculo aparte para comparar contra la factura del proveedor — este total es el que se capturó al registrar la compra.</p>
-    <button class="btn-gris" style="width:100%;margin-top:14px;" id="cd-cerrar">Cerrar</button>
+    <div id="cd-error"></div>
+    <div id="cd-historial" style="margin-top:12px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="width:100%;" id="cd-cerrar">Cerrar</button>
+      <button class="btn-primario" style="width:100%;" id="cd-editar">Editar</button>
+      <button class="btn-primario" style="width:100%;display:none;" id="cd-guardar">Guardar cambios</button>
+      <button class="btn-gris" style="width:100%;display:none;" id="cd-cancelar-edicion">Cancelar edición</button>
+    </div>
   </div>
 </div>
 
@@ -851,7 +858,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.9.002';
+const APP_VERSION = '1.10.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3011,39 +3018,148 @@ async function cargarComprasLista(){
 // registradas" solo mostraba el renglón resumen (fecha/folio/proveedor/almacén/total), sin manera de
 // entrar al detalle. RLS de compra_detalle ya permite leerla directo (vía la política de "compras"),
 // así que no hizo falta ninguna RPC ni migración nueva — solo consultar las tablas.
+//
+// Ronda 25: Adrián encontró un error de captura real (cantidad 11.001) usando esta pantalla, y pidió
+// poder editar cantidad/costo de una compra ya registrada, dejando todo cambio en la auditoría. Se
+// agrega un modo "Editar" con inputs (mismo patrón que "Nueva compra"), que llama al RPC editar_compra
+// (migración 073). "Capturó: X" se deja tal cual (Adrián lo pidió explícitamente) y se agrega, aparte,
+// una sección "Editó" con el historial de ediciones leído de auditoria (visible solo para roles que
+// puedan leer esa tabla — Admin de Empresa / Super Admin; para los demás roles simplemente no aparece).
+state.cdCompraActual = null;
+state.cdLineasActuales = [];
+state.cdEditando = false;
+
+const nombreLineaCompraDetalle = (v) => {
+  const prod = v?.variantes?.productos?.nombre || '(producto no encontrado)';
+  const variante = v?.variantes?.nombre_variante;
+  return (variante && variante !== 'Único') ? `${prod} — ${variante}` : prod;
+};
+
 async function abrirCompraDetalle(compraId){
+  state.cdEditando = false;
   $('cd-resumen').textContent = 'Cargando…';
   $('cd-tabla-body').innerHTML = '';
   $('cd-total').textContent = '$0.00';
+  $('cd-error').innerHTML = '';
+  $('cd-historial').innerHTML = '';
+  $('cd-editar').style.display = '';
+  $('cd-guardar').style.display = 'none';
+  $('cd-cancelar-edicion').style.display = 'none';
   $('modal-compra-detalle').classList.add('activo');
+  await cargarCompraDetalle(compraId);
+}
 
-  const [{ data: compra, error: errCompra }, { data: lineas, error: errLineas }] = await Promise.all([
+async function cargarCompraDetalle(compraId){
+  const [{ data: compra, error: errCompra }, { data: lineas, error: errLineas }, { data: historial, error: errHist }] = await Promise.all([
     sb.from('compras').select('*, proveedores(nombre), almacenes(nombre), usuarios(nombre)').eq('id', compraId).single(),
-    sb.from('compra_detalle').select('cantidad, costo_unitario, importe, variantes(nombre_variante, productos(nombre))').eq('compra_id', compraId),
+    sb.from('compra_detalle').select('id, cantidad, costo_unitario, importe, variantes(nombre_variante, productos(nombre))').eq('compra_id', compraId),
+    sb.from('auditoria').select('creado_en, usuarios(nombre), datos_nuevos').eq('tabla', 'compras').eq('registro_id', compraId).eq('accion', 'editar').order('creado_en', { ascending: true }),
   ]);
   if(errCompra || errLineas){
     $('cd-resumen').textContent = `Error al cargar el detalle: ${(errCompra||errLineas).message}`;
     return;
   }
-  const nombreLinea = (v) => {
-    const prod = v?.variantes?.productos?.nombre || '(producto no encontrado)';
-    const variante = v?.variantes?.nombre_variante;
-    return (variante && variante !== 'Único') ? `${prod} — ${variante}` : prod;
-  };
+  state.cdCompraActual = compra;
+  state.cdLineasActuales = lineas || [];
   $('cd-resumen').innerHTML = `Folio: <strong>${compra.folio_documento || '(sin folio)'}</strong> · Fecha: ${new Date(compra.fecha_compra+'T00:00:00').toLocaleDateString('es-MX')}<br>`
     + `Proveedor: ${compra.proveedores?.nombre || '(sin proveedor)'} · Almacén: ${compra.almacenes?.nombre || '—'} · Capturó: ${compra.usuarios?.nombre || '—'}`;
-  const filas = lineas || [];
-  $('cd-tabla-body').innerHTML = filas.map(l=>`<tr>
-      <td>${nombreLinea(l)}</td>
-      <td class="num">${l.cantidad}</td>
-      <td class="num">${money(l.costo_unitario)}</td>
-      <td class="num">${money(l.importe)}</td>
-    </tr>`).join('');
-  // El total del detalle sin impuestos debe cuadrar con compras.total (capturado sin impuestos); la
-  // columna "Total (con impuestos)" de la lista es la que sí calcula impuestos — aquí se muestra el
-  // total real de la compra tal como se guardó, para que cuadre con lo que Adrián capturó.
   $('cd-total').textContent = money(compra.total);
+  renderCompraDetalleTabla();
+
+  // Historial de ediciones ("Editó"). auditoria solo la puede leer Admin de Empresa / Super Admin
+  // (política solo_admins_ven_auditoria) — para otros roles esta consulta simplemente regresa vacío
+  // (sin error), así que no se muestra nada en vez de fallar.
+  if(!errHist && historial && historial.length){
+    $('cd-historial').innerHTML = '<p class="nota" style="font-weight:600;margin-bottom:4px;">Editó:</p>'
+      + historial.map(h=>{
+          const fecha = new Date(h.creado_en).toLocaleString('es-MX');
+          const cambios = h.datos_nuevos?.cambios || [];
+          const resumen = cambios.map(c=>`${c.producto}: cant. ${c.cantidad_antes}→${c.cantidad_despues}, costo ${money(c.costo_antes)}→${money(c.costo_despues)}`).join('; ');
+          return `<p class="nota" style="margin:2px 0;">• ${h.usuarios?.nombre || '—'} — ${fecha}${resumen ? ' — ' + resumen : ''}</p>`;
+        }).join('');
+  } else {
+    $('cd-historial').innerHTML = '';
+  }
 }
+
+function renderCompraDetalleTabla(){
+  const filas = state.cdLineasActuales;
+  if(!state.cdEditando){
+    $('cd-thead').innerHTML = '<tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr>';
+    $('cd-tabla-body').innerHTML = filas.map(l=>`<tr>
+        <td>${nombreLineaCompraDetalle(l)}</td>
+        <td class="num">${l.cantidad}</td>
+        <td class="num">${money(l.costo_unitario)}</td>
+        <td class="num">${money(l.importe)}</td>
+      </tr>`).join('');
+    return;
+  }
+  $('cd-thead').innerHTML = '<tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr>';
+  $('cd-tabla-body').innerHTML = filas.map((l,i)=>`<tr>
+      <td>${nombreLineaCompraDetalle(l)}</td>
+      <td class="num"><input type="number" class="cd-cant" min="0.001" step="1" value="${l.cantidad}" data-idx="${i}" style="width:90px;text-align:right;"></td>
+      <td class="num"><input type="number" class="cd-costo" min="0" step="0.01" value="${l.costo_unitario}" data-idx="${i}" style="width:90px;text-align:right;"></td>
+      <td class="num" id="cd-importe-${i}">${money(l.cantidad * l.costo_unitario)}</td>
+    </tr>`).join('');
+  const cantInputsEl = $('cd-tabla-body').querySelectorAll('.cd-cant');
+  const costoInputsEl = $('cd-tabla-body').querySelectorAll('.cd-costo');
+  const recalcularImporte = (i) => {
+    const cant = Number(cantInputsEl[i].value) || 0;
+    const costo = Number(costoInputsEl[i].value) || 0;
+    document.getElementById(`cd-importe-${i}`).textContent = money(cant * costo);
+  };
+  $('cd-tabla-body').querySelectorAll('.cd-cant, .cd-costo').forEach(inp=>inp.addEventListener('input', ()=>{
+    recalcularImporte(Number(inp.dataset.idx));
+  }));
+}
+
+$('cd-editar').addEventListener('click', ()=>{
+  state.cdEditando = true;
+  $('cd-error').innerHTML = '';
+  $('cd-editar').style.display = 'none';
+  $('cd-guardar').style.display = '';
+  $('cd-cancelar-edicion').style.display = '';
+  renderCompraDetalleTabla();
+});
+
+$('cd-cancelar-edicion').addEventListener('click', ()=>{
+  state.cdEditando = false;
+  $('cd-error').innerHTML = '';
+  $('cd-editar').style.display = '';
+  $('cd-guardar').style.display = 'none';
+  $('cd-cancelar-edicion').style.display = 'none';
+  renderCompraDetalleTabla();
+});
+
+$('cd-guardar').addEventListener('click', async ()=>{
+  $('cd-error').innerHTML = '';
+  const cantInputs = Array.from($('cd-tabla-body').querySelectorAll('.cd-cant'));
+  const costoInputs = Array.from($('cd-tabla-body').querySelectorAll('.cd-costo'));
+  const lineas = state.cdLineasActuales.map((l,i)=>({
+    compra_detalle_id: l.id,
+    cantidad: Number(cantInputs[i].value) || 0,
+    costo_unitario: Number(costoInputs[i].value) || 0,
+  }));
+  if(lineas.some(l=>l.cantidad <= 0)){
+    $('cd-error').innerHTML = '<div class="msg-error">La cantidad debe ser mayor a cero en todas las líneas.</div>';
+    return;
+  }
+  const payload = { compra_id: state.cdCompraActual.id, usuario_id: state.usuario.id, lineas };
+  const { error } = await sb.rpc('editar_compra', { p: payload });
+  if(error){
+    $('cd-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  state.cdEditando = false;
+  $('cd-editar').style.display = '';
+  $('cd-guardar').style.display = 'none';
+  $('cd-cancelar-edicion').style.display = 'none';
+  await cargarCompraDetalle(state.cdCompraActual.id);
+  // El costo de última compra y/o los precios pudieron cambiar — refresca el catálogo de productos y
+  // la lista de compras (el total de la compra pudo cambiar).
+  await Promise.all([cargarComprasLista(), cargarProductos()]);
+});
+
 $('cd-cerrar').addEventListener('click', ()=>{ $('modal-compra-detalle').classList.remove('activo'); });
 
 // ---------------------------------------------------------------------------------------------
