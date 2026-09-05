@@ -604,7 +604,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.004';
+const APP_VERSION = '1.7.005';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -988,7 +988,7 @@ $('btn-abrir-caja').addEventListener('click', async ()=>{
   const { data, error } = await sb.from('sesiones_caja').insert({
     caja_id: state.cajaId, usuario_id: state.usuario.id, fondo_inicial: fondo
   }).select().single();
-  if(error){ $('abrir-caja-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  if(error){ $('abrir-caja-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
   state.sesionCaja = data;
   await entrarAlPOS();
 });
@@ -1647,6 +1647,12 @@ function redondear2(n){
 // sesión vencida. Sin esto, ese mensaje crudo no le dice nada a quien está usando el POS.
 function mensajeErrorAmigable(err){
   const msg = (err && err.message) || String(err);
+  if(/row-level security|row level security/i.test(msg)){
+    // Esto pasa cuando el usuario que tiene la sesión abierta en este POS fue desactivado (o
+    // perdió su asignación) mientras seguía usando la app: Supabase bloquea la escritura por
+    // seguridad, pero el mensaje crudo de Postgres no le dice nada útil al cajero.
+    return 'No se pudo completar esta acción: tu usuario ya no tiene acceso activo en el sistema. Consulta al administrador. (Si crees que es un error, cierra sesión con el botón "Salir" y vuelve a entrar.)';
+  }
   if(/permission denied|JWT|expired|not authenticated/i.test(msg)){
     return 'Tu sesión pudo haber expirado. Da clic en "Salir" (arriba a la derecha) y vuelve a entrar, e intenta generar el reporte de nuevo.';
   }
@@ -2258,7 +2264,7 @@ $('btn-cobrar').addEventListener('click', async ()=>{
   });
 
   if(error){
-    $('cobro-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('cobro-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`;
     $('btn-cobrar').disabled = false;
     return;
   }
@@ -2305,7 +2311,7 @@ $('btn-credito-cliente').addEventListener('click', async ()=>{
   $('btn-credito-cliente').disabled = false;
 
   if(error){
-    $('cobro-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('cobro-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`;
     return;
   }
 
@@ -2440,7 +2446,7 @@ $('btn-poner-en-espera').addEventListener('click', async ()=>{
     },
   };
   const { error } = await sb.from('ventas_en_espera').insert(payload);
-  if(error){ $('cobro-error').innerHTML = `<div class="msg-error">No se pudo poner en espera: ${error.message}</div>`; return; }
+  if(error){ $('cobro-error').innerHTML = `<div class="msg-error">No se pudo poner en espera: ${mensajeErrorAmigable(error)}</div>`; return; }
   $('espera-nota').value = '';
   reiniciarVenta();
   await actualizarBadgeTicketsEspera();
@@ -2531,7 +2537,7 @@ async function retomarTicketEspera(id){
 async function cancelarTicketEspera(id){
   if(!confirm('¿Cancelar este ticket en espera? No se puede deshacer.')) return;
   const { error } = await sb.from('ventas_en_espera').delete().eq('id', id);
-  if(error){ $('te-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  if(error){ $('te-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
   await abrirModalTicketsEspera();
   await actualizarBadgeTicketsEspera();
 }
@@ -3119,7 +3125,7 @@ $('mov-confirmar').addEventListener('click', async ()=>{
     sesion_caja_id: state.sesionCaja.id, tipo, monto, motivo, usuario_id: state.usuario.id
   });
   if(error){
-    $('mov-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('mov-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`;
     $('mov-confirmar').disabled = false;
     return;
   }
@@ -3210,7 +3216,7 @@ $('abono-confirmar').addEventListener('click', async ()=>{
   });
   $('abono-confirmar').disabled = false;
   if(error){
-    $('abono-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('abono-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`;
     return;
   }
   $('modal-abono').classList.remove('activo');
@@ -3439,7 +3445,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     p_sesion_id: state.sesionCaja.id, p_efectivo_contado: efectivo, p_observaciones: obs || null
   });
   if(error){
-    $('cierre-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('cierre-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`;
     $('cierre-confirmar').disabled = false;
     return;
   }
