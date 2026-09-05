@@ -1154,7 +1154,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.15.001';
+const APP_VERSION = '1.15.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5023,6 +5023,25 @@ async function cargarYRenderUsuarios(){
   </tr>`).join('');
   $('usr-tabla-body').querySelectorAll('.usr-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalUsuarioEditar(b.dataset.id)));
 }
+// Llama a una Edge Function asegurando primero un access token VIGENTE. Adrián reportó "No
+// autenticado." al crear un usuario después de tener admin.html abierto un buen rato — el access
+// token de Supabase dura 1 hora, y aunque el navegador lo debería renovar solo de fondo, una pestaña
+// en segundo plano puede retrasar ese renovado; si eso pasa, invoke() manda el token viejo (ya
+// vencido) y la función lo rechaza. Por eso, antes de invocar, se revisa la sesión y si el token ya
+// venció o está por vencer se refresca a fuerza, y se manda explícito en el header en vez de confiar
+// en que supabase-js ya trae uno vigente por su cuenta.
+async function invocarFuncionAutenticada(nombre, body){
+  let { data: { session } } = await sb.auth.getSession();
+  const vencidoOPorVencer = !session || (session.expires_at && session.expires_at * 1000 < Date.now() + 30000);
+  if(vencidoOPorVencer){
+    const { data: refrescado } = await sb.auth.refreshSession();
+    session = refrescado?.session || session;
+  }
+  return sb.functions.invoke(nombre, {
+    body,
+    headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
+  });
+}
 // Extrae el mensaje real de una llamada a una Edge Function: cuando la función responde con un
 // status distinto de 2xx, supabase-js regresa un error genérico ("Edge Function returned a non-2xx
 // status code") y dispara data=null — el mensaje real que sí mandó la función (p.ej. "ya existe una
@@ -5057,14 +5076,14 @@ $('usr-nuevo-guardar').addEventListener('click', async ()=>{
   if(!$('usr-rol').value){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
   const cajaSeleccionada = state.cajasEmpresaCache.find(c=>c.id === $('usr-caja').value);
   $('usr-nuevo-guardar').disabled = true;
-  const { data, error } = await sb.functions.invoke('crear_usuario', { body: {
+  const { data, error } = await invocarFuncionAutenticada('crear_usuario', {
     nombre, email, telefono: $('usr-telefono').value.trim() || null,
     empresa_id: state.empresaId,
     sucursal_id: $('usr-sucursal').value || null,
     almacen_id: cajaSeleccionada?.almacen_id || null,
     caja_id: $('usr-caja').value || null,
     rol_id: $('usr-rol').value,
-  } });
+  });
   $('usr-nuevo-guardar').disabled = false;
   if(error || data?.error){
     $('usr-nuevo-error').innerHTML = `<div class="msg-error">${data?.error || await mensajeErrorEdgeFunction(error)}</div>`;
