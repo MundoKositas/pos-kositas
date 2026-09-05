@@ -544,6 +544,7 @@
       <button type="button" class="tab-btn" data-cfgtab="cajas">Cajas</button>
       <button type="button" class="tab-btn" data-cfgtab="roles">Roles</button>
       <button type="button" class="tab-btn" data-cfgtab="usuarios">Usuarios</button>
+      <button type="button" class="tab-btn" data-cfgtab="auditoria">Auditoría</button>
     </div>
     <p class="nota" id="cfg-nota-super-admin" style="display:none;">Unidades de medida e Impuestos son catálogos compartidos por todo el sistema (no solo Mundo Kositas) — por eso solo Super Admin puede crearlos o editarlos; con otro rol se muestran de solo lectura.</p>
 
@@ -611,6 +612,43 @@
         </div>
       </div>
     </div>
+
+    <!-- AUDITORÍA (Ronda 32, ajuste) — aperturas/cierres de caja y entradas/salidas al sistema, con
+         fecha y hora del servidor. Solo Admin de Empresa/Super Admin la ven (misma regla de RLS que
+         ya aplica a la tabla `auditoria` de Compras) — con otro rol, ambas consultas regresan
+         vacío, así que simplemente se muestra "sin registros" en vez de fallar. -->
+    <div id="cfg-panel-auditoria" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Aperturas y cierres de caja</h2>
+        <div class="fila" style="align-items:flex-end;gap:10px;flex-wrap:wrap;">
+          <div class="col"><label>Desde</label><input type="date" id="aud-caja-desde"></div>
+          <div class="col"><label>Hasta</label><input type="date" id="aud-caja-hasta"></div>
+          <button type="button" class="btn-gris" id="aud-caja-filtrar">Filtrar</button>
+        </div>
+        <div class="tabla-scroll" style="margin-top:14px;">
+          <table>
+            <thead><tr><th>Caja</th><th>Sucursal</th><th>Usuario</th><th>Apertura</th><th>Fondo inicial</th><th>Cierre</th><th>Efectivo esperado</th><th>Efectivo contado</th><th>Diferencia</th><th>Estado</th></tr></thead>
+            <tbody id="aud-caja-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="aud-caja-vacio" style="display:none;">Sin registros en este rango.</p>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0;">Accesos al sistema (entradas/salidas)</h2>
+        <div class="fila" style="align-items:flex-end;gap:10px;flex-wrap:wrap;">
+          <div class="col"><label>Desde</label><input type="date" id="aud-acceso-desde"></div>
+          <div class="col"><label>Hasta</label><input type="date" id="aud-acceso-hasta"></div>
+          <button type="button" class="btn-gris" id="aud-acceso-filtrar">Filtrar</button>
+        </div>
+        <div class="tabla-scroll" style="margin-top:14px;">
+          <table>
+            <thead><tr><th>Usuario</th><th>App</th><th>Tipo</th><th>Fecha y hora</th></tr></thead>
+            <tbody id="aud-acceso-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="aud-acceso-vacio" style="display:none;">Sin registros en este rango.</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -659,13 +697,14 @@
       <div class="campo"><label>Sucursal (opcional)</label><select id="usr-sucursal"><option value="">(sin asignar)</option></select></div>
       <div class="campo"><label>Caja (opcional)</label><select id="usr-caja"><option value="">(sin asignar)</option></select></div>
     </div>
-    <div class="campo"><label>Almacén (opcional)</label><select id="usr-almacen"><option value="">(sin asignar)</option></select></div>
+    <p class="nota">Almacén: <span id="usr-almacen-derivado">(sin asignar)</span> — lo determina la caja elegida (de dónde descuenta stock al vender), no se edita aquí.</p>
     <div id="usr-nuevo-error"></div>
     <div id="usr-nuevo-exito" style="display:none;"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
+    <div style="display:flex;gap:8px;margin-top:14px;" id="usr-nuevo-botones">
       <button class="btn-gris" style="flex:1;" id="usr-nuevo-cancelar">Cancelar</button>
       <button class="btn-primario" style="flex:1;" id="usr-nuevo-guardar">Crear usuario</button>
     </div>
+    <button class="btn-primario" style="width:100%;margin-top:14px;display:none;" id="usr-nuevo-cerrar">Cerrar</button>
   </div>
 </div>
 
@@ -684,7 +723,7 @@
       <div class="campo"><label>Sucursal (opcional)</label><select id="usre-sucursal"><option value="">(sin asignar)</option></select></div>
       <div class="campo"><label>Caja (opcional)</label><select id="usre-caja"><option value="">(sin asignar)</option></select></div>
     </div>
-    <div class="campo"><label>Almacén (opcional)</label><select id="usre-almacen"><option value="">(sin asignar)</option></select></div>
+    <p class="nota">Almacén: <span id="usre-almacen-derivado">(sin asignar)</span> — lo determina la caja elegida (de dónde descuenta stock al vender), no se edita aquí.</p>
     <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="usre-activo" style="width:auto;"> Activo</label></div>
     <div id="usre-error"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -937,14 +976,14 @@
   <div class="modal" id="card-empresa-config">
     <h2 style="margin-top:0;">Configuración de empresa</h2>
 
-    <h3 style="margin-bottom:4px;">Datos generales (Ronda 32)</h3>
+    <h3 style="margin-bottom:4px;">Datos generales</h3>
     <div class="grid-2">
       <div class="campo"><label>Nombre comercial</label><input type="text" id="empresa-nombre-comercial"></div>
       <div class="campo"><label>Razón social (opcional)</label><input type="text" id="empresa-razon-social"></div>
     </div>
     <div class="grid-2">
       <div class="campo"><label>RFC (opcional)</label><input type="text" id="empresa-rfc"></div>
-      <div class="campo"><label>Régimen fiscal SAT (opcional)</label><input type="text" id="empresa-regimen-fiscal"></div>
+      <div class="campo"><label>Régimen fiscal SAT (opcional)</label><select id="empresa-regimen-fiscal"><option value="">(sin especificar)</option></select></div>
     </div>
     <button type="button" class="btn-secundario" id="empresa-datos-generales-guardar">Guardar datos generales</button>
     <div id="empresa-datos-generales-estado"></div>
@@ -966,7 +1005,7 @@
     <p class="nota" id="empresa-desglosar-impuestos-nota">Aplica a la búsqueda, el carrito, el cobro y el ticket del Punto de Venta (`pos.html`) — no afecta los precios que ves aquí en Admin, que tienen su propio interruptor "con impuestos" en Catálogo y Reporte de precios.</p>
     <div id="empresa-desglosar-impuestos-estado"></div>
 
-    <h3 style="margin-bottom:4px;border-top:1px solid var(--borde);padding-top:14px;">Pagaré de ventas a crédito (Ronda 22)</h3>
+    <h3 style="margin-bottom:4px;border-top:1px solid var(--borde);padding-top:14px;">Pagaré de ventas a crédito</h3>
     <p class="nota">Texto que se imprime en el ticket de una venta a crédito, arriba de la línea para la firma del cliente. Usa <code>{total}</code> y <code>{empresa}</code> donde quieras que aparezcan el importe y el nombre de la empresa — si lo dejas vacío, se usa un texto por default.</p>
     <div class="campo"><textarea id="empresa-texto-pagare" rows="3" placeholder="Recibí de conformidad los artículos de este ticket por un total de {total}, a crédito, y me comprometo a pagar dicho importe a {empresa}."></textarea></div>
     <button type="button" class="btn-secundario" id="empresa-texto-pagare-guardar">Guardar texto del pagaré</button>
@@ -1115,7 +1154,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.14.001';
+const APP_VERSION = '1.15.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1293,6 +1332,7 @@ const state = {
   formSnapshot: '', marcas: [],
   catalogoPagina: 1, catalogoPorPagina: 50,
   logoUrl: '', desglosarImpuestos: true, textoPagare: '',
+  regimenesFiscales: [], // catálogo SAT (c_RegimenFiscal), global, para el select de "Datos generales"
   // Ronda 21 (Compras/Inventarios): sucursales/almacenes/proveedores/usuarios de la empresa,
   // permisos del módulo "inventario" del usuario actual, y las líneas en construcción de cada
   // formulario tipo ticket (compra, ajuste de salida, traspaso).
@@ -1350,7 +1390,20 @@ async function hacerLogin(){
   if(error){ $('login-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
   await iniciarSesionApp();
 }
-$('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); location.reload(); });
+$('btn-logout').addEventListener('click', async ()=>{
+  await registrarAccesoSistema('admin', 'salida');
+  await sb.auth.signOut();
+  location.reload();
+});
+
+// ---------- ACCESOS AL SISTEMA (entrada/salida, fecha y hora del servidor) ----------
+// No se espera (await) desde donde se llama para no retrasar el login/logout por este registro, ni
+// se deja que un fallo aquí tumbe el flujo real de entrar/salir. La función de servidor
+// registrar_acceso_sistema es la única forma de escribir en accesos_sistema — no se puede insertar
+// directo desde el cliente (RLS lo rechaza a propósito).
+async function registrarAccesoSistema(app, tipo){
+  try { await sb.rpc('registrar_acceso_sistema', { p_app: app, p_tipo: tipo }); } catch(e){ /* best-effort */ }
+}
 
 // ---------- LOGOTIPO DE LA EMPRESA ----------
 // Se sube siempre con el mismo nombre de archivo (logo.png) al bucket público "empresa", convertido
@@ -1360,6 +1413,8 @@ $('btn-config-empresa').addEventListener('click', ()=>{
   $('empresa-nombre-comercial').value = state.empresaNombre || '';
   $('empresa-razon-social').value = state.empresaRazonSocial || '';
   $('empresa-rfc').value = state.empresaRfc || '';
+  $('empresa-regimen-fiscal').innerHTML = '<option value="">(sin especificar)</option>' +
+    state.regimenesFiscales.map(r=>`<option value="${r.clave}">${r.clave} - ${r.descripcion}</option>`).join('');
   $('empresa-regimen-fiscal').value = state.empresaRegimenFiscal || '';
   $('empresa-datos-generales-estado').innerHTML = '';
   $('empresa-logo-estado').innerHTML = '';
@@ -1504,7 +1559,11 @@ async function iniciarSesionApp(){
     await sb.auth.signOut();
     return mostrarError('Tu usuario no tiene ninguna asignación activa. Contacta al administrador.');
   }
-  const asignacion = asignaciones[0];
+  // Si el usuario tiene más de una asignación activa (ej. Super Admin que además aparece dado de
+  // alta en una empresa para fines de visibilidad en "Usuarios"), la de Super Admin (empresa_id
+  // vacío) siempre gana — nunca debe perder sus privilegios globales por tener también una
+  // asignación de empresa.
+  const asignacion = asignaciones.find(a=>!a.empresa_id) || asignaciones[0];
   state.rol = asignacion.roles?.nombre || '';
   if(!ROLES_PERMITIDOS.includes(state.rol)){
     await sb.auth.signOut();
@@ -1523,6 +1582,11 @@ async function iniciarSesionApp(){
   state.logoUrl = empresa.logo_url || '';
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
   state.textoPagare = empresa.texto_pagare || '';
+
+  const { data: regimenesFiscales } = await sb.from('regimenes_fiscales_sat').select('*').order('orden');
+  state.regimenesFiscales = regimenesFiscales || [];
+
+  registrarAccesoSistema('admin', 'entrada'); // no se espera (await) — no debe bloquear ni tronar el inicio de sesión si falla
 
   const { data: almacenesActivos } = await sb.from('almacenes').select('*').eq('activo', true);
   state.almacenId = almacenesActivos?.[0]?.id || null;
@@ -4642,12 +4706,14 @@ function entrarATabCatalogosBase(){
   mostrarSubpanelCatalogosBase(state.cfgTabActivo);
 }
 function mostrarSubpanelCatalogosBase(key){
-  const esRoles = key === 'roles', esUsuarios = key === 'usuarios';
-  $('cfg-panel-generico').style.display = (esRoles || esUsuarios) ? 'none' : 'block';
+  const esRoles = key === 'roles', esUsuarios = key === 'usuarios', esAuditoria = key === 'auditoria';
+  $('cfg-panel-generico').style.display = (esRoles || esUsuarios || esAuditoria) ? 'none' : 'block';
   $('cfg-panel-roles').style.display = esRoles ? 'block' : 'none';
   $('cfg-panel-usuarios').style.display = esUsuarios ? 'block' : 'none';
+  $('cfg-panel-auditoria').style.display = esAuditoria ? 'block' : 'none';
   if(esRoles) cargarYRenderRoles();
   else if(esUsuarios) cargarYRenderUsuarios();
+  else if(esAuditoria) entrarATabAuditoria();
   else cargarYRenderCatalogoSimple(key);
 }
 
@@ -4895,26 +4961,45 @@ $('rol-modal-guardar').addEventListener('click', async ()=>{
   await cargarYRenderRoles();
 });
 
-// ---------- USUARIOS (Ronda 32) ----------
+// ---------- USUARIOS (Ronda 32, ajustada tras la primera prueba real) ----------
 // Dar de alta uno nuevo crea también su cuenta de acceso real (correo/contraseña) — eso necesita la
 // llave de administrador de Supabase, que nunca debe llegar al navegador, así que se hace mediante
 // la función de servidor "crear_usuario" (revisa ahí mismo que quien llama sea Super Admin o Admin
-// de Empresa antes de crear nada). Editar un usuario existente sí se puede hacer directo desde aquí
-// (nombre/teléfono/rol/sucursal/almacén/caja/activo) porque eso no requiere tocar Supabase Auth.
+// de Empresa antes de crear nada). Editar un usuario existente se hace vía la función de servidor
+// guardar_asignacion_usuario, que valida ahí (no solo en pantalla) que una caja activa no se
+// reasigne a 2 usuarios a la vez, y deja auditoría de cuándo se activa/desactiva a alguien.
+//
+// El Almacén de un usuario ya NO se captura a mano: cada caja (catálogo Cajas) ya define de qué
+// almacén descuenta stock al vender, así que aquí solo se MUESTRA el almacén de la caja elegida —
+// se guarda ese mismo almacen_id, no uno capturado aparte, para que nunca queden desalineados.
 state.usuariosCache = [];
 state.cajasEmpresaCache = [];
 async function cargarCajasEmpresa(){
   const idsSucursales = (state.sucursales || []).map(s=>s.id);
   if(!idsSucursales.length){ state.cajasEmpresaCache = []; return; }
-  const { data } = await sb.from('cajas').select('id, nombre, sucursal_id').in('sucursal_id', idsSucursales).eq('activo', true).order('nombre');
+  const { data } = await sb.from('cajas').select('id, nombre, sucursal_id, almacen_id').in('sucursal_id', idsSucursales).eq('activo', true).order('nombre');
   state.cajasEmpresaCache = data || [];
+}
+function opcionesCajasPorSucursal(sucursalId){
+  return sucursalId ? state.cajasEmpresaCache.filter(c=>c.sucursal_id===sucursalId) : state.cajasEmpresaCache;
+}
+function actualizarAlmacenDerivadoDeCaja(prefijo){
+  const cajaId = $(`${prefijo}-caja`).value;
+  const caja = state.cajasEmpresaCache.find(c=>c.id===cajaId);
+  const almacen = caja ? state.almacenes.find(a=>a.id===caja.almacen_id) : null;
+  $(`${prefijo}-almacen-derivado`).textContent = almacen ? almacen.nombre : '(sin asignar — elige una caja)';
 }
 async function llenarSelectsAsignacionUsuario(prefijo){
   $(`${prefijo}-rol`).innerHTML = state.rolesCache.map(r=>`<option value="${r.id}">${r.nombre}</option>`).join('');
   $(`${prefijo}-sucursal`).innerHTML = '<option value="">(sin asignar)</option>' + state.sucursales.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join('');
-  $(`${prefijo}-almacen`).innerHTML = '<option value="">(sin asignar)</option>' + state.almacenes.map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
   await cargarCajasEmpresa();
-  $(`${prefijo}-caja`).innerHTML = '<option value="">(sin asignar)</option>' + state.cajasEmpresaCache.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  $(`${prefijo}-caja`).innerHTML = '<option value="">(sin asignar)</option>' + opcionesCajasPorSucursal($(`${prefijo}-sucursal`).value).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  actualizarAlmacenDerivadoDeCaja(prefijo);
+  $(`${prefijo}-sucursal`).onchange = ()=>{
+    $(`${prefijo}-caja`).innerHTML = '<option value="">(sin asignar)</option>' + opcionesCajasPorSucursal($(`${prefijo}-sucursal`).value).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+    actualizarAlmacenDerivadoDeCaja(prefijo);
+  };
+  $(`${prefijo}-caja`).onchange = ()=>actualizarAlmacenDerivadoDeCaja(prefijo);
 }
 async function cargarYRenderUsuarios(){
   if(!state.rolesCache.length){
@@ -4938,37 +5023,61 @@ async function cargarYRenderUsuarios(){
   </tr>`).join('');
   $('usr-tabla-body').querySelectorAll('.usr-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalUsuarioEditar(b.dataset.id)));
 }
+// Extrae el mensaje real de una llamada a una Edge Function: cuando la función responde con un
+// status distinto de 2xx, supabase-js regresa un error genérico ("Edge Function returned a non-2xx
+// status code") y dispara data=null — el mensaje real que sí mandó la función (p.ej. "ya existe una
+// cuenta con ese correo") viene en error.context (la Response cruda), hay que leerlo aparte.
+async function mensajeErrorEdgeFunction(error){
+  try {
+    if(error?.context && typeof error.context.json === 'function'){
+      const cuerpo = await error.context.json();
+      if(cuerpo?.error) return cuerpo.error;
+    }
+  } catch(e){ /* el cuerpo no era JSON — usar el mensaje genérico */ }
+  return error?.message || 'Ocurrió un error inesperado.';
+}
 $('usr-nuevo').addEventListener('click', async ()=>{
   $('usr-nombre').value = ''; $('usr-email').value = ''; $('usr-telefono').value = '';
   await llenarSelectsAsignacionUsuario('usr');
   $('usr-nuevo-error').innerHTML = '';
   $('usr-nuevo-exito').style.display = 'none';
   $('usr-nuevo-exito').innerHTML = '';
+  $('usr-nuevo-botones').style.display = 'flex';
+  $('usr-nuevo-cerrar').style.display = 'none';
+  ['usr-nombre','usr-email','usr-telefono','usr-rol','usr-sucursal','usr-caja'].forEach(id=>$(id).disabled = false);
   $('modal-usuario-nuevo').classList.add('activo');
 });
 $('usr-nuevo-cancelar').addEventListener('click', ()=>{ $('modal-usuario-nuevo').classList.remove('activo'); });
+$('usr-nuevo-cerrar').addEventListener('click', ()=>{ $('modal-usuario-nuevo').classList.remove('activo'); });
 $('usr-nuevo-guardar').addEventListener('click', async ()=>{
   const nombre = $('usr-nombre').value.trim();
   const email = $('usr-email').value.trim();
   $('usr-nuevo-error').innerHTML = '';
   if(!nombre || !email){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Nombre y correo son obligatorios.</div>'; return; }
   if(!$('usr-rol').value){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
+  const cajaSeleccionada = state.cajasEmpresaCache.find(c=>c.id === $('usr-caja').value);
   $('usr-nuevo-guardar').disabled = true;
   const { data, error } = await sb.functions.invoke('crear_usuario', { body: {
     nombre, email, telefono: $('usr-telefono').value.trim() || null,
     empresa_id: state.empresaId,
     sucursal_id: $('usr-sucursal').value || null,
-    almacen_id: $('usr-almacen').value || null,
+    almacen_id: cajaSeleccionada?.almacen_id || null,
     caja_id: $('usr-caja').value || null,
     rol_id: $('usr-rol').value,
   } });
   $('usr-nuevo-guardar').disabled = false;
   if(error || data?.error){
-    $('usr-nuevo-error').innerHTML = `<div class="msg-error">${data?.error || error.message}</div>`;
+    $('usr-nuevo-error').innerHTML = `<div class="msg-error">${data?.error || await mensajeErrorEdgeFunction(error)}</div>`;
     return;
   }
   $('usr-nuevo-exito').style.display = 'block';
   $('usr-nuevo-exito').innerHTML = `<p class="nota"><strong>Usuario creado.</strong> Contraseña temporal: <strong>${data.password_temporal}</strong> — apúntala y compártesela, no se vuelve a mostrar. Puede cambiarla después de entrar.</p>`;
+  // Ya se creó — deja de tener sentido "Cancelar" (no hay nada que deshacer) ni "Crear usuario" de
+  // nuevo (crearía un segundo usuario por accidente, como pasó en la primera prueba real). Solo
+  // queda salir del formulario.
+  $('usr-nuevo-botones').style.display = 'none';
+  $('usr-nuevo-cerrar').style.display = 'block';
+  ['usr-nombre','usr-email','usr-telefono','usr-rol','usr-sucursal','usr-caja'].forEach(id=>$(id).disabled = true);
   await cargarYRenderUsuarios();
 });
 async function abrirModalUsuarioEditar(asignacionId){
@@ -4983,8 +5092,12 @@ async function abrirModalUsuarioEditar(asignacionId){
   await llenarSelectsAsignacionUsuario('usre');
   $('usre-rol').value = a.rol_id || '';
   $('usre-sucursal').value = a.sucursal_id || '';
-  $('usre-almacen').value = a.almacen_id || '';
+  // Reconstruir las opciones de caja para ESTA sucursal antes de fijar el valor — si no, la caja
+  // guardada podría no estar todavía entre las opciones (llenarSelectsAsignacionUsuario arrancó con
+  // todas las cajas de la empresa, sin filtrar por sucursal).
+  $('usre-caja').innerHTML = '<option value="">(sin asignar)</option>' + opcionesCajasPorSucursal(a.sucursal_id).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
   $('usre-caja').value = a.caja_id || '';
+  actualizarAlmacenDerivadoDeCaja('usre');
   $('usre-error').innerHTML = '';
   $('modal-usuario-editar').classList.add('activo');
 }
@@ -4995,23 +5108,88 @@ $('usre-guardar').addEventListener('click', async ()=>{
   if(!nombre){ $('usre-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
   if(!$('usre-rol').value){ $('usre-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
   $('usre-guardar').disabled = true;
-  const activo = $('usre-activo').checked;
-  const { error: errorUsuario } = await sb.from('usuarios').update({
-    nombre, telefono: $('usre-telefono').value.trim() || null, activo,
-  }).eq('id', state.usuarioEditId);
-  const { error: errorAsignacion } = await sb.from('usuario_asignaciones').update({
+  const cajaSeleccionada = state.cajasEmpresaCache.find(c=>c.id === $('usre-caja').value);
+  const { error } = await sb.rpc('guardar_asignacion_usuario', { p: {
+    asignacion_id: state.usuarioAsignacionEditId,
+    usuario_id: state.usuarioEditId,
+    nombre,
+    telefono: $('usre-telefono').value.trim() || null,
     rol_id: $('usre-rol').value,
     sucursal_id: $('usre-sucursal').value || null,
-    almacen_id: $('usre-almacen').value || null,
+    almacen_id: cajaSeleccionada?.almacen_id || null,
     caja_id: $('usre-caja').value || null,
-    activo,
-  }).eq('id', state.usuarioAsignacionEditId);
+    activo: $('usre-activo').checked,
+  } });
   $('usre-guardar').disabled = false;
-  const error = errorUsuario || errorAsignacion;
   if(error){ $('usre-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
   $('modal-usuario-editar').classList.remove('activo');
   await cargarYRenderUsuarios();
 });
+
+// ---------- AUDITORÍA (Ronda 32, ajuste) — aperturas/cierres de caja y accesos al sistema ----------
+// Ambas consultas ya vienen filtradas por RLS a lo que el rol actual puede ver (Admin de
+// Empresa/Super Admin) — con otro rol regresan vacío en vez de fallar, igual que la sección "Editó"
+// de Compras (Ronda 25).
+function entrarATabAuditoria(){
+  const hoy = fechaLocalISO();
+  if(!$('aud-caja-desde').value){ $('aud-caja-desde').value = hoy; $('aud-caja-hasta').value = hoy; }
+  if(!$('aud-acceso-desde').value){ $('aud-acceso-desde').value = hoy; $('aud-acceso-hasta').value = hoy; }
+  cargarYRenderAperturasCierresCaja();
+  cargarYRenderAccesosSistema();
+}
+async function cargarYRenderAperturasCierresCaja(){
+  const desde = $('aud-caja-desde').value, hasta = $('aud-caja-hasta').value;
+  const { data, error } = await sb.from('sesiones_caja')
+    .select('id, fondo_inicial, fecha_apertura, fecha_cierre, efectivo_esperado, efectivo_contado, diferencia, estado, cajas(nombre, sucursal_id), usuarios(nombre)')
+    .gte('fecha_apertura', `${desde}T00:00:00`)
+    .lte('fecha_apertura', `${hasta}T23:59:59`)
+    .order('fecha_apertura', { ascending: false });
+  const filas = error ? [] : (data || []);
+  if(!filas.length){
+    $('aud-caja-tabla-body').innerHTML = '';
+    $('aud-caja-vacio').style.display = 'block';
+    return;
+  }
+  $('aud-caja-vacio').style.display = 'none';
+  $('aud-caja-tabla-body').innerHTML = filas.map(s=>{
+    const sucursal = state.sucursales.find(x=>x.id === s.cajas?.sucursal_id);
+    return `<tr>
+      <td>${s.cajas?.nombre || '—'}</td>
+      <td>${sucursal?.nombre || '—'}</td>
+      <td>${s.usuarios?.nombre || '—'}</td>
+      <td>${new Date(s.fecha_apertura).toLocaleString('es-MX')}</td>
+      <td>${money(s.fondo_inicial)}</td>
+      <td>${s.fecha_cierre ? new Date(s.fecha_cierre).toLocaleString('es-MX') : '—'}</td>
+      <td>${s.efectivo_esperado != null ? money(s.efectivo_esperado) : '—'}</td>
+      <td>${s.efectivo_contado != null ? money(s.efectivo_contado) : '—'}</td>
+      <td>${s.diferencia != null ? money(s.diferencia) : '—'}</td>
+      <td>${s.estado}</td>
+    </tr>`;
+  }).join('');
+}
+$('aud-caja-filtrar').addEventListener('click', cargarYRenderAperturasCierresCaja);
+async function cargarYRenderAccesosSistema(){
+  const desde = $('aud-acceso-desde').value, hasta = $('aud-acceso-hasta').value;
+  const { data, error } = await sb.from('accesos_sistema')
+    .select('id, app, tipo, creado_en, usuarios(nombre)')
+    .gte('creado_en', `${desde}T00:00:00`)
+    .lte('creado_en', `${hasta}T23:59:59`)
+    .order('creado_en', { ascending: false });
+  const filas = error ? [] : (data || []);
+  if(!filas.length){
+    $('aud-acceso-tabla-body').innerHTML = '';
+    $('aud-acceso-vacio').style.display = 'block';
+    return;
+  }
+  $('aud-acceso-vacio').style.display = 'none';
+  $('aud-acceso-tabla-body').innerHTML = filas.map(a=>`<tr>
+    <td>${a.usuarios?.nombre || '—'}</td>
+    <td>${a.app === 'admin' ? 'Admin Kositas' : 'Punto de venta'}</td>
+    <td>${a.tipo === 'entrada' ? 'Entrada' : 'Salida'}</td>
+    <td>${new Date(a.creado_en).toLocaleString('es-MX')}</td>
+  </tr>`).join('');
+}
+$('aud-acceso-filtrar').addEventListener('click', cargarYRenderAccesosSistema);
 
 // ---------- ARRANQUE ----------
 (async ()=>{

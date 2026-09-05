@@ -604,7 +604,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.003';
+const APP_VERSION = '1.7.004';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -831,9 +831,18 @@ async function hacerLogin(){
 }
 
 $('btn-logout').addEventListener('click', async ()=>{
+  await registrarAccesoSistema('pos', 'salida');
   await sb.auth.signOut();
   location.reload();
 });
+
+// ---------- ACCESOS AL SISTEMA (entrada/salida, fecha y hora del servidor) ----------
+// No se espera (await) desde donde se llama para no retrasar el login/logout por este registro, ni
+// se deja que un fallo aquí tumbe el flujo real de entrar/salir. La función de servidor
+// registrar_acceso_sistema es la única forma de escribir en accesos_sistema.
+async function registrarAccesoSistema(app, tipo){
+  try { await sb.rpc('registrar_acceso_sistema', { p_app: app, p_tipo: tipo }); } catch(e){ /* best-effort */ }
+}
 
 // ---------- CARGA DE CONTEXTO ----------
 async function iniciarSesionApp(){
@@ -865,7 +874,10 @@ async function iniciarSesionApp(){
     return;
   }
 
-  const asignacion = asignaciones[0];
+  // Si el usuario tiene más de una asignación activa, la de Super Admin (empresa_id vacío) siempre
+  // gana — mismo criterio que admin.html, para que nunca pierda sus privilegios globales por tener
+  // también una asignación de empresa.
+  const asignacion = asignaciones.find(a=>!a.empresa_id) || asignaciones[0];
   state.rol = asignacion.roles?.nombre || '';
   const esSuperAdmin = !asignacion.empresa_id;
 
@@ -877,6 +889,8 @@ async function iniciarSesionApp(){
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
   state.logoUrl = empresa.logo_url || '';
   state.textoPagare = empresa.texto_pagare || '';
+
+  registrarAccesoSistema('pos', 'entrada'); // no se espera (await) — no debe bloquear el inicio de sesión si falla
 
   const { data: sucursales } = await sb.from('sucursales').select('*').eq('empresa_id', empresa.id).eq('activo', true);
   if(!sucursales || sucursales.length===0){ mostrarError('La empresa no tiene sucursales activas.'); return; }
