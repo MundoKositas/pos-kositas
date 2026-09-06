@@ -648,6 +648,22 @@
         </div>
         <p class="nota" id="aud-acceso-vacio" style="display:none;">Sin registros en este rango.</p>
       </div>
+      <div class="card">
+        <h2 style="margin-top:0;">Cambios de estado en productos</h2>
+        <p class="nota" style="margin-top:0;">Cada vez que se cambia "Es inventariable", "Activo" o "Activo en el catálogo del servicio a domicilio" al editar un producto, queda aquí quién lo hizo y cuándo (fecha del servidor).</p>
+        <div class="fila" style="align-items:flex-end;gap:10px;flex-wrap:wrap;">
+          <div class="col"><label>Desde</label><input type="date" id="aud-prod-desde"></div>
+          <div class="col"><label>Hasta</label><input type="date" id="aud-prod-hasta"></div>
+          <button type="button" class="btn-gris" id="aud-prod-filtrar">Filtrar</button>
+        </div>
+        <div class="tabla-scroll" style="margin-top:14px;">
+          <table>
+            <thead><tr><th>Producto</th><th>Usuario</th><th>Cambios</th><th>Fecha y hora</th></tr></thead>
+            <tbody id="aud-prod-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="aud-prod-vacio" style="display:none;">Sin registros en este rango.</p>
+      </div>
     </div>
   </div>
 </div>
@@ -692,7 +708,7 @@
       <div class="campo"><label>Correo (será su usuario para entrar)</label><input type="email" id="usr-email"></div>
       <div class="campo"><label>Teléfono (opcional)</label><input type="text" id="usr-telefono"></div>
     </div>
-    <div class="campo"><label>Rol</label><select id="usr-rol"></select></div>
+    <div class="campo"><label>Rol(es) — puedes marcar más de uno</label><div id="usr-roles-lista"></div>
     <div class="grid-2">
       <div class="campo"><label>Sucursal (opcional)</label><select id="usr-sucursal"><option value="">(sin asignar)</option></select></div>
       <div class="campo"><label>Caja (opcional)</label><select id="usr-caja"><option value="">(sin asignar)</option></select></div>
@@ -718,7 +734,7 @@
       <div class="campo"><label>Correo</label><input type="email" id="usre-email" disabled></div>
       <div class="campo"><label>Teléfono (opcional)</label><input type="text" id="usre-telefono"></div>
     </div>
-    <div class="campo"><label>Rol</label><select id="usre-rol"></select></div>
+    <div class="campo"><label>Rol(es) — puedes marcar más de uno</label><div id="usre-roles-lista"></div>
     <div class="grid-2">
       <div class="campo"><label>Sucursal (opcional)</label><select id="usre-sucursal"><option value="">(sin asignar)</option></select></div>
       <div class="campo"><label>Caja (opcional)</label><select id="usre-caja"><option value="">(sin asignar)</option></select></div>
@@ -1154,7 +1170,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.15.002';
+const APP_VERSION = '1.16.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1322,7 +1338,7 @@ document.addEventListener('keydown', (e)=>{
 });
 
 const state = {
-  usuario: null, rol: null, empresaId: null, empresaNombre: '', almacenId: null,
+  usuario: null, rol: null, roles: [], empresaId: null, empresaNombre: '', almacenId: null,
   productos: [], impuestos: [], categorias: [], lineas: [], unidades: [], listasPrecio: [], margenesLinea: [],
   condicionesPago: [], cxcAgrupacion: 'ninguno', cxcVencimientos: [], // Ronda 23
   productoEditId: null, varianteEditId: null,
@@ -1554,7 +1570,7 @@ async function iniciarSesionApp(){
   state.usuario = usuarioRow;
 
   const { data: asignaciones } = await sb.from('usuario_asignaciones')
-    .select('*, roles(nombre)').eq('usuario_id', usuarioRow.id).eq('activo', true);
+    .select('*, asignacion_roles(roles(nombre))').eq('usuario_id', usuarioRow.id).eq('activo', true);
   if(!asignaciones || asignaciones.length === 0){
     await sb.auth.signOut();
     return mostrarError('Tu usuario no tiene ninguna asignación activa. Contacta al administrador.');
@@ -1564,10 +1580,14 @@ async function iniciarSesionApp(){
   // vacío) siempre gana — nunca debe perder sus privilegios globales por tener también una
   // asignación de empresa.
   const asignacion = asignaciones.find(a=>!a.empresa_id) || asignaciones[0];
-  state.rol = asignacion.roles?.nombre || '';
-  if(!ROLES_PERMITIDOS.includes(state.rol)){
+  // Ronda 33: una asignación puede tener 1 a N roles a la vez (ej. Cajero Y Comprador) — state.roles
+  // es el arreglo real para cualquier chequeo de lógica; state.rol es solo la versión de TEXTO para
+  // mostrar en pantalla (encabezado, mensajes de error), nunca comparar contra ella directamente.
+  state.roles = (asignacion.asignacion_roles || []).map(ar=>ar.roles?.nombre).filter(Boolean);
+  state.rol = state.roles.join(', ') || 'sin rol';
+  if(!state.roles.some(r=>ROLES_PERMITIDOS.includes(r))){
     await sb.auth.signOut();
-    return mostrarError(`Tu rol (${state.rol || 'sin rol'}) no tiene acceso a Admin Kositas. Usa el Punto de Venta.`);
+    return mostrarError(`Tu rol (${state.rol}) no tiene acceso a Admin Kositas. Usa el Punto de Venta.`);
   }
   const esSuperAdmin = !asignacion.empresa_id;
 
@@ -2154,13 +2174,14 @@ async function exportarPDFAgrupado(nombreArchivo, titulo, subtitulo, encabezados
 }
 
 // ---------- REPORTE DE EXISTENCIAS (Catálogo) ----------
-// Todos los productos filtrados en Catálogo que tengan existencia (stock > 0), agrupados por
-// Categoría → Línea con subtotal en cada nivel y total general. Respeta el checkbox de con/sin
+// Todos los productos ACTIVOS filtrados en Catálogo que tengan existencia (stock > 0), agrupados
+// por Categoría → Línea con subtotal en cada nivel y total general. Un producto dado de baja
+// (activo=false) nunca aparece aquí, aunque todavía tenga existencia física en el almacén. Respeta el checkbox de con/sin
 // impuestos del Catálogo (mismo que se usa para pintar la tabla en pantalla).
 function datosReporteExistencias(){
   const conImpuestos = $('cat-con-impuestos').checked;
   const listaPublica = obtenerListaPublica();
-  const items = itemsFiltradosCatalogo().filter(p=>p.inventariable && Number(p.stock) > 0);
+  const items = itemsFiltradosCatalogo().filter(p=>p.activo && p.inventariable && Number(p.stock) > 0);
   const filas = items.map(p=>{
     const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
     const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
@@ -2206,14 +2227,15 @@ $('cat-exportar-existencias').addEventListener('click', async ()=>{
 });
 
 // ---------- REPORTE DE RESURTIDO (Catálogo) ----------
-// Productos filtrados en Catálogo cuyo stock está en o por debajo de su punto de reorden (mismo
-// criterio que la etiqueta "Bajo mínimo" que ya se muestra en la tabla), agrupados igual que Existencias.
+// Productos ACTIVOS filtrados en Catálogo cuyo stock está en o por debajo de su punto de reorden
+// (mismo criterio que la etiqueta "Bajo mínimo" que ya se muestra en la tabla), agrupados igual que
+// Existencias. Un producto dado de baja (activo=false) no se sugiere resurtir aunque esté bajo mínimo.
 // A petición de Adrián, el resurtido se calcula con DOS bases: cuánto se necesita para llegar al
 // punto de reorden, y cuánto para llegar al stock máximo — cada una con su columna de cantidad y su
 // columna de total ($), ambas usando el mismo costo unitario.
 function datosReporteResurtido(){
   const conImpuestos = $('cat-con-impuestos').checked;
-  const items = itemsFiltradosCatalogo().filter(p=>p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo));
+  const items = itemsFiltradosCatalogo().filter(p=>p.activo && p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo));
   const filas = items.map(p=>{
     const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
     const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
@@ -4702,7 +4724,7 @@ state.cfgCache = {};
 state.cfgEditId = null;
 
 function entrarATabCatalogosBase(){
-  $('cfg-nota-super-admin').style.display = (state.rol === 'Super Admin') ? 'none' : 'block';
+  $('cfg-nota-super-admin').style.display = state.roles.includes('Super Admin') ? 'none' : 'block';
   mostrarSubpanelCatalogosBase(state.cfgTabActivo);
 }
 function mostrarSubpanelCatalogosBase(key){
@@ -4737,7 +4759,7 @@ function renderCatalogoSimple(key){
     : todas;
   state.cfgFilasFiltradas = filas;
   $('cfg-titulo').textContent = cfg.tituloPlural;
-  const soloLectura = cfg.global && state.rol !== 'Super Admin';
+  const soloLectura = cfg.global && !state.roles.includes('Super Admin');
   $('cfg-nuevo').style.display = soloLectura ? 'none' : '';
   const encabezados = cfg.columnas.map(c=>`<th>${c.label}</th>`).join('') + (cfg.tieneActivo ? '<th>Estado</th>' : '') + '<th></th>';
   $('cfg-thead').innerHTML = `<tr>${encabezados}</tr>`;
@@ -4894,7 +4916,7 @@ async function cargarYRenderRoles(){
   ]);
   state.rolesCache = roles || [];
   state.permisosCache = permisos || [];
-  const soloLectura = state.rol !== 'Super Admin';
+  const soloLectura = !state.roles.includes('Super Admin');
   $('rol-nuevo').style.display = soloLectura ? 'none' : '';
   $('rol-tabla-body').innerHTML = state.rolesCache.map(r=>`<tr>
     <td>${r.nombre}</td>
@@ -4989,8 +5011,22 @@ function actualizarAlmacenDerivadoDeCaja(prefijo){
   const almacen = caja ? state.almacenes.find(a=>a.id===caja.almacen_id) : null;
   $(`${prefijo}-almacen-derivado`).textContent = almacen ? almacen.nombre : '(sin asignar — elige una caja)';
 }
+// Ronda 33: el rol pasó de select (1 solo) a checklist (1 a N) — una misma persona puede tener más
+// de un rol en negocios chicos (ej. Cajero Y Comprador). rolesSeleccionados() lee de vuelta cuáles
+// quedaron marcados, en el orden del catálogo.
+function llenarChecklistRoles(prefijo, idsMarcados){
+  const marcados = new Set(idsMarcados || []);
+  $(`${prefijo}-roles-lista`).innerHTML = state.rolesCache.map(r=>`
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+      <input type="checkbox" class="${prefijo}-rol-check" value="${r.id}" style="width:auto;" ${marcados.has(r.id)?'checked':''}> ${r.nombre}
+    </label>
+  `).join('');
+}
+function rolesSeleccionados(prefijo){
+  return Array.from(document.querySelectorAll(`.${prefijo}-rol-check:checked`)).map(el=>el.value);
+}
 async function llenarSelectsAsignacionUsuario(prefijo){
-  $(`${prefijo}-rol`).innerHTML = state.rolesCache.map(r=>`<option value="${r.id}">${r.nombre}</option>`).join('');
+  llenarChecklistRoles(prefijo, []);
   $(`${prefijo}-sucursal`).innerHTML = '<option value="">(sin asignar)</option>' + state.sucursales.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join('');
   await cargarCajasEmpresa();
   $(`${prefijo}-caja`).innerHTML = '<option value="">(sin asignar)</option>' + opcionesCajasPorSucursal($(`${prefijo}-sucursal`).value).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
@@ -5007,7 +5043,7 @@ async function cargarYRenderUsuarios(){
     state.rolesCache = roles || [];
   }
   const { data: asignaciones, error } = await sb.from('usuario_asignaciones')
-    .select('id, usuario_id, rol_id, sucursal_id, almacen_id, caja_id, activo, usuarios(nombre, email, telefono, activo), roles(nombre), sucursales(nombre), cajas(nombre)')
+    .select('id, usuario_id, sucursal_id, almacen_id, caja_id, activo, usuarios(nombre, email, telefono, activo), asignacion_roles(rol_id, roles(nombre)), sucursales(nombre), cajas(nombre)')
     .eq('empresa_id', state.empresaId);
   if(error){ $('usr-tabla-body').innerHTML = `<tr><td colspan="8"><div class="msg-error">${error.message}</div></td></tr>`; return; }
   state.usuariosCache = asignaciones || [];
@@ -5015,7 +5051,7 @@ async function cargarYRenderUsuarios(){
     <td>${a.usuarios?.nombre || '—'}</td>
     <td>${a.usuarios?.email || '—'}</td>
     <td>${a.usuarios?.telefono || '—'}</td>
-    <td>${a.roles?.nombre || '—'}</td>
+    <td>${(a.asignacion_roles||[]).map(ar=>ar.roles?.nombre).filter(Boolean).join(', ') || '—'}</td>
     <td>${a.sucursales?.nombre || '—'}</td>
     <td>${a.cajas?.nombre || '—'}</td>
     <td>${(a.activo && a.usuarios?.activo) ? 'Activo' : 'Inactivo'}</td>
@@ -5063,7 +5099,8 @@ $('usr-nuevo').addEventListener('click', async ()=>{
   $('usr-nuevo-exito').innerHTML = '';
   $('usr-nuevo-botones').style.display = 'flex';
   $('usr-nuevo-cerrar').style.display = 'none';
-  ['usr-nombre','usr-email','usr-telefono','usr-rol','usr-sucursal','usr-caja'].forEach(id=>$(id).disabled = false);
+  ['usr-nombre','usr-email','usr-telefono','usr-sucursal','usr-caja'].forEach(id=>$(id).disabled = false);
+  document.querySelectorAll('.usr-rol-check').forEach(el=>el.disabled = false);
   $('modal-usuario-nuevo').classList.add('activo');
 });
 $('usr-nuevo-cancelar').addEventListener('click', ()=>{ $('modal-usuario-nuevo').classList.remove('activo'); });
@@ -5073,7 +5110,8 @@ $('usr-nuevo-guardar').addEventListener('click', async ()=>{
   const email = $('usr-email').value.trim();
   $('usr-nuevo-error').innerHTML = '';
   if(!nombre || !email){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Nombre y correo son obligatorios.</div>'; return; }
-  if(!$('usr-rol').value){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
+  const rolIds = rolesSeleccionados('usr');
+  if(!rolIds.length){ $('usr-nuevo-error').innerHTML = '<div class="msg-error">Elige al menos un rol.</div>'; return; }
   const cajaSeleccionada = state.cajasEmpresaCache.find(c=>c.id === $('usr-caja').value);
   $('usr-nuevo-guardar').disabled = true;
   const { data, error } = await invocarFuncionAutenticada('crear_usuario', {
@@ -5082,7 +5120,7 @@ $('usr-nuevo-guardar').addEventListener('click', async ()=>{
     sucursal_id: $('usr-sucursal').value || null,
     almacen_id: cajaSeleccionada?.almacen_id || null,
     caja_id: $('usr-caja').value || null,
-    rol_id: $('usr-rol').value,
+    rol_ids: rolIds,
   });
   $('usr-nuevo-guardar').disabled = false;
   if(error || data?.error){
@@ -5096,7 +5134,8 @@ $('usr-nuevo-guardar').addEventListener('click', async ()=>{
   // queda salir del formulario.
   $('usr-nuevo-botones').style.display = 'none';
   $('usr-nuevo-cerrar').style.display = 'block';
-  ['usr-nombre','usr-email','usr-telefono','usr-rol','usr-sucursal','usr-caja'].forEach(id=>$(id).disabled = true);
+  ['usr-nombre','usr-email','usr-telefono','usr-sucursal','usr-caja'].forEach(id=>$(id).disabled = true);
+  document.querySelectorAll('.usr-rol-check').forEach(el=>el.disabled = true);
   await cargarYRenderUsuarios();
 });
 async function abrirModalUsuarioEditar(asignacionId){
@@ -5109,7 +5148,7 @@ async function abrirModalUsuarioEditar(asignacionId){
   $('usre-telefono').value = a.usuarios?.telefono || '';
   $('usre-activo').checked = !!(a.activo && a.usuarios?.activo);
   await llenarSelectsAsignacionUsuario('usre');
-  $('usre-rol').value = a.rol_id || '';
+  llenarChecklistRoles('usre', (a.asignacion_roles||[]).map(ar=>ar.rol_id));
   $('usre-sucursal').value = a.sucursal_id || '';
   // Reconstruir las opciones de caja para ESTA sucursal antes de fijar el valor — si no, la caja
   // guardada podría no estar todavía entre las opciones (llenarSelectsAsignacionUsuario arrancó con
@@ -5125,7 +5164,8 @@ $('usre-guardar').addEventListener('click', async ()=>{
   const nombre = $('usre-nombre').value.trim();
   $('usre-error').innerHTML = '';
   if(!nombre){ $('usre-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
-  if(!$('usre-rol').value){ $('usre-error').innerHTML = '<div class="msg-error">Elige un rol.</div>'; return; }
+  const rolIds = rolesSeleccionados('usre');
+  if(!rolIds.length){ $('usre-error').innerHTML = '<div class="msg-error">Elige al menos un rol.</div>'; return; }
   $('usre-guardar').disabled = true;
   const cajaSeleccionada = state.cajasEmpresaCache.find(c=>c.id === $('usre-caja').value);
   const { error } = await sb.rpc('guardar_asignacion_usuario', { p: {
@@ -5133,7 +5173,7 @@ $('usre-guardar').addEventListener('click', async ()=>{
     usuario_id: state.usuarioEditId,
     nombre,
     telefono: $('usre-telefono').value.trim() || null,
-    rol_id: $('usre-rol').value,
+    rol_ids: rolIds,
     sucursal_id: $('usre-sucursal').value || null,
     almacen_id: cajaSeleccionada?.almacen_id || null,
     caja_id: $('usre-caja').value || null,
@@ -5153,9 +5193,56 @@ function entrarATabAuditoria(){
   const hoy = fechaLocalISO();
   if(!$('aud-caja-desde').value){ $('aud-caja-desde').value = hoy; $('aud-caja-hasta').value = hoy; }
   if(!$('aud-acceso-desde').value){ $('aud-acceso-desde').value = hoy; $('aud-acceso-hasta').value = hoy; }
+  if(!$('aud-prod-desde').value){ $('aud-prod-desde').value = hoy; $('aud-prod-hasta').value = hoy; }
   cargarYRenderAperturasCierresCaja();
   cargarYRenderAccesosSistema();
+  cargarYRenderAuditoriaProductos();
 }
+// Etiquetas legibles para las 3 banderas de producto que sí se auditan (guardar_producto,
+// migración 089) — el resto de campos del producto (nombre, precio, etc.) no se audita aquí.
+const ETIQUETAS_FLAG_PRODUCTO = {
+  inventariable: 'Es inventariable',
+  activo: 'Activo (visible en el POS)',
+  activo_reparto: 'Activo en catálogo de reparto',
+};
+function formatearCambiosAuditoriaProducto(datosAnteriores, datosNuevos){
+  return Object.keys(datosNuevos || {}).map(campo=>{
+    const etiqueta = ETIQUETAS_FLAG_PRODUCTO[campo] || campo;
+    const anterior = datosAnteriores?.[campo] ? 'Sí' : 'No';
+    const nuevo = datosNuevos[campo] ? 'Sí' : 'No';
+    return `${etiqueta}: ${anterior} → ${nuevo}`;
+  }).join('; ');
+}
+async function cargarYRenderAuditoriaProductos(){
+  // "auditoria" es una bitácora genérica (tabla+registro_id) compartida por varios catálogos —
+  // registro_id NO tiene llave foránea real hacia "productos" (no podría, ya que también apunta a
+  // usuarios/ventas/etc. según la fila), así que el nombre del producto se resuelve aquí mismo
+  // contra el catálogo ya cargado en memoria (state.productos), no con un join de Supabase.
+  const desde = $('aud-prod-desde').value, hasta = $('aud-prod-hasta').value;
+  const { data, error } = await sb.from('auditoria')
+    .select('id, registro_id, datos_anteriores, datos_nuevos, creado_en, usuarios(nombre)')
+    .eq('tabla', 'productos')
+    .gte('creado_en', `${desde}T00:00:00`)
+    .lte('creado_en', `${hasta}T23:59:59`)
+    .order('creado_en', { ascending: false });
+  const filas = error ? [] : (data || []);
+  if(!filas.length){
+    $('aud-prod-tabla-body').innerHTML = '';
+    $('aud-prod-vacio').style.display = 'block';
+    return;
+  }
+  $('aud-prod-vacio').style.display = 'none';
+  $('aud-prod-tabla-body').innerHTML = filas.map(a=>{
+    const producto = state.productos.find(p=>p.productoId === a.registro_id);
+    return `<tr>
+      <td>${producto ? (producto.marca ? `${producto.nombre} (${producto.marca})` : producto.nombre) : '(producto ya no está en el catálogo cargado)'}</td>
+      <td>${a.usuarios?.nombre || '—'}</td>
+      <td>${formatearCambiosAuditoriaProducto(a.datos_anteriores, a.datos_nuevos)}</td>
+      <td>${new Date(a.creado_en).toLocaleString('es-MX')}</td>
+    </tr>`;
+  }).join('');
+}
+$('aud-prod-filtrar').addEventListener('click', cargarYRenderAuditoriaProductos);
 async function cargarYRenderAperturasCierresCaja(){
   const desde = $('aud-caja-desde').value, hasta = $('aud-caja-hasta').value;
   const { data, error } = await sb.from('sesiones_caja')
