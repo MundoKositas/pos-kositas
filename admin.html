@@ -690,6 +690,9 @@
     <p class="nota" id="rol-nombre-bloqueado-nota" style="display:none;">Es uno de los 6 roles base del sistema — el nombre no se puede cambiar, pero sí la descripción y los permisos.</p>
     <h3 style="margin-bottom:6px;">Permisos</h3>
     <div id="rol-permisos-lista"></div>
+    <h3 style="margin-bottom:6px;">Acceso a menús y submenús</h3>
+    <p class="nota">Por cada pantalla: "Sin acceso" la oculta por completo del menú; "Consulta" la deja visible pero sin botones de crear/guardar/editar; "Edición" da acceso completo.</p>
+    <div id="rol-menu-lista"></div>
     <div id="rol-modal-error"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button class="btn-gris" style="flex:1;" id="rol-modal-cancelar">Cancelar</button>
@@ -708,7 +711,7 @@
       <div class="campo"><label>Correo (será su usuario para entrar)</label><input type="email" id="usr-email"></div>
       <div class="campo"><label>Teléfono (opcional)</label><input type="text" id="usr-telefono"></div>
     </div>
-    <div class="campo"><label>Rol(es) — puedes marcar más de uno</label><div id="usr-roles-lista"></div>
+    <div class="campo"><label>Rol(es) — puedes marcar más de uno</label><div id="usr-roles-lista"></div></div>
     <div class="grid-2">
       <div class="campo"><label>Sucursal (opcional)</label><select id="usr-sucursal"><option value="">(sin asignar)</option></select></div>
       <div class="campo"><label>Caja (opcional)</label><select id="usr-caja"><option value="">(sin asignar)</option></select></div>
@@ -734,7 +737,7 @@
       <div class="campo"><label>Correo</label><input type="email" id="usre-email" disabled></div>
       <div class="campo"><label>Teléfono (opcional)</label><input type="text" id="usre-telefono"></div>
     </div>
-    <div class="campo"><label>Rol(es) — puedes marcar más de uno</label><div id="usre-roles-lista"></div>
+    <div class="campo"><label>Rol(es) — puedes marcar más de uno</label><div id="usre-roles-lista"></div></div>
     <div class="grid-2">
       <div class="campo"><label>Sucursal (opcional)</label><select id="usre-sucursal"><option value="">(sin asignar)</option></select></div>
       <div class="campo"><label>Caja (opcional)</label><select id="usre-caja"><option value="">(sin asignar)</option></select></div>
@@ -1170,7 +1173,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.16.001';
+const APP_VERSION = '1.17.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1357,6 +1360,7 @@ const state = {
   compraLineas: [], ajusteLineas: [], traspLineas: [],
   xmlPendientes: [], xmlPendientesTotalLote: 0, xmlPendienteActivo: false, xmlProveedorId: null,
   xmlCfdiUuid: null,
+  permisosMenu: {}, // Ronda 35: { 'catalogos_base.roles': 'edicion' | 'consulta', ... } — sin llave = sin acceso
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -1614,18 +1618,20 @@ async function iniciarSesionApp(){
   // Ronda 21: catálogos de apoyo para Compras/Inventario, y los permisos del módulo "inventario"
   // del usuario actual (mismo patrón que mis_permisos_pos() del POS) — deciden si las pestañas
   // nuevas se muestran.
-  const [{ data: sucursales }, { data: almacenes }, { data: proveedores }, { data: usuariosEmpresa }, { data: permisosInv }] = await Promise.all([
+  const [{ data: sucursales }, { data: almacenes }, { data: proveedores }, { data: usuariosEmpresa }, { data: permisosInv }, { data: permisosMenu }] = await Promise.all([
     sb.from('sucursales').select('*').eq('activo', true),
     sb.from('almacenes').select('*'),
     sb.from('proveedores').select('*').eq('activo', true).order('nombre'),
     sb.from('usuarios').select('id, nombre').eq('activo', true).order('nombre'),
     sb.rpc('mis_permisos_inventario'),
+    sb.rpc('mis_permisos_menu'), // Ronda 35: árbol de menú/submenú, consulta vs edición
   ]);
   state.sucursales = sucursales || [];
   state.almacenes = almacenes || [];
   state.proveedores = proveedores || [];
   state.usuariosEmpresa = usuariosEmpresa || [];
   state.permisosInventario = permisosInv || [];
+  state.permisosMenu = Object.fromEntries((permisosMenu || []).map(r=>[r.clave, r.nivel]));
 
   const puedeComprar = state.permisosInventario.includes('inventario.registrar_compra');
   const puedeAjustarTraspasar = state.permisosInventario.includes('inventario.ajuste_salida') || state.permisosInventario.includes('inventario.traspasos');
@@ -1655,6 +1661,8 @@ async function iniciarSesionApp(){
   renderClientesTabla();
   renderCxcTabla();
 
+  ajustarVisibilidadMenus(); // Ronda 35: oculta pestañas sin acceso y desactiva acciones de solo-consulta
+
   mostrarPantalla('pantalla-admin');
 
   // Si se llegó aquí desde el link "Editar producto" de POS (admin.html?variante=<id>), abre
@@ -1671,6 +1679,72 @@ async function iniciarSesionApp(){
 function mostrarError(msg){
   mostrarPantalla('pantalla-login');
   $('login-error').innerHTML = `<div class="msg-error">${msg}</div>`;
+}
+
+// ---------- Ronda 35: árbol de permisos de menú (consulta / edición) ----------
+// Sin llave en state.permisosMenu = sin ningún acceso a ese nodo (se oculta por completo).
+// Si por algún problema de red/RPC el mapa llegó vacío, no se oculta nada (falla abierto) — es
+// preferible mostrar de más por un instante a dejar el sistema en blanco por un permiso que no cargó.
+function tieneAccesoMenu(clave){ return Object.keys(state.permisosMenu).length === 0 ? true : !!state.permisosMenu[clave]; }
+function tieneEdicionMenu(clave){ return Object.keys(state.permisosMenu).length === 0 ? true : state.permisosMenu[clave] === 'edicion'; }
+
+// Mapa botón de pestaña -> clave del nodo en menu_items. Compras/Inventario NO están aquí:
+// esas dos siguen controladas por su propio sistema de permisos (mis_permisos_inventario), ya
+// más granular (compra / ajuste de salida / traspasos), y no se tocan con este árbol nuevo.
+const MAPA_TAB_PRINCIPAL_A_CLAVE = {
+  'tab-catalogo': 'catalogo',
+  'tab-listas': 'listas_precio',
+  'tab-actualizar-precios': 'actualizar_precios',
+  'tab-reporte': 'reporte_precios',
+  'tab-clientes': 'clientes',
+  'tab-catalogos-base': 'catalogos_base',
+};
+const MAPA_CLITAB_A_CLAVE = { 'cli-panel-cxc': 'clientes.cxc' };
+const MAPA_CFGTAB_A_CLAVE = {
+  marcas: 'catalogos_base.marcas', categorias: 'catalogos_base.categorias', lineas: 'catalogos_base.lineas',
+  unidades: 'catalogos_base.unidades', impuestos: 'catalogos_base.impuestos', formas_pago: 'catalogos_base.formas_pago',
+  condiciones_pago: 'catalogos_base.condiciones_pago', proveedores: 'catalogos_base.proveedores',
+  sucursales: 'catalogos_base.sucursales', cajas: 'catalogos_base.cajas', roles: 'catalogos_base.roles',
+  usuarios: 'catalogos_base.usuarios', auditoria: 'catalogos_base.auditoria',
+};
+
+// Oculta por completo las pestañas/subpestañas sin ningún acceso, y — si la que estaba activa por
+// defecto en el HTML quedó oculta — activa la primera visible en su lugar. Las acciones de "solo
+// consulta" (ocultar/deshabilitar Nuevo/Guardar/Editar) se resuelven aparte, en cada pantalla, con
+// tieneEdicionMenu(...).
+function ajustarVisibilidadMenus(){
+  document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn[data-tab]').forEach(btn=>{
+    const clave = MAPA_TAB_PRINCIPAL_A_CLAVE[btn.dataset.tab];
+    if(!clave) return; // tab-compras / tab-inventario: no tocar, tienen su propio sistema
+    btn.style.display = tieneAccesoMenu(clave) ? '' : 'none';
+  });
+  const primeraPrincipalVisible = document.querySelector('#pantalla-admin > .tabs > .tab-btn[data-tab]:not([style*="display: none"])');
+  const activaPrincipal = document.querySelector('#pantalla-admin > .tabs > .tab-btn.activo');
+  if(primeraPrincipalVisible && (!activaPrincipal || activaPrincipal.style.display === 'none')) primeraPrincipalVisible.click();
+
+  document.querySelectorAll('#cli-tabs .tab-btn[data-clitab]').forEach(btn=>{
+    const clave = MAPA_CLITAB_A_CLAVE[btn.dataset.clitab];
+    if(!clave) return; // cli-panel-clientes: cubierto por el acceso al tab "Clientes" en sí
+    btn.style.display = tieneAccesoMenu(clave) ? '' : 'none';
+  });
+
+  document.querySelectorAll('#cfg-tabs .tab-btn[data-cfgtab]').forEach(btn=>{
+    const clave = MAPA_CFGTAB_A_CLAVE[btn.dataset.cfgtab];
+    if(!clave) return;
+    btn.style.display = tieneAccesoMenu(clave) ? '' : 'none';
+  });
+  const primeraCfgVisible = document.querySelector('#cfg-tabs .tab-btn[data-cfgtab]:not([style*="display: none"])');
+  const activaCfg = document.querySelector('#cfg-tabs .tab-btn.activo');
+  if(primeraCfgVisible && (!activaCfg || activaCfg.style.display === 'none')) primeraCfgVisible.click();
+
+  // Botones "+ Nuevo..." / de acción de cada pantalla — consulta-only los oculta. Los botones
+  // "Guardar" de dentro de cada modal se ocultan aparte, al abrir ese modal (abrirProducto/
+  // abrirLista/abrirCliente), porque ahí sí importa distinguir alta vs edición de un registro ya
+  // abierto.
+  $('btn-nuevo-producto').style.display = tieneEdicionMenu('catalogo') ? '' : 'none';
+  $('btn-nueva-lista').style.display = tieneEdicionMenu('listas_precio') ? '' : 'none';
+  $('btn-actualizar-precios').style.display = tieneEdicionMenu('actualizar_precios') ? '' : 'none';
+  $('btn-nuevo-cliente').style.display = tieneEdicionMenu('clientes') ? '' : 'none';
 }
 
 // ---------- TABS (pantalla principal) ----------
@@ -2446,6 +2520,11 @@ function abrirProducto(varianteId){
   $('kardex-vacio').style.display = 'none';
   irAPanelDatos();
 
+  // Ronda 35: si el rol solo tiene "consulta" en Catálogo, se puede abrir y ver el producto,
+  // pero no guardar cambios.
+  const soloLecturaProducto = !tieneEdicionMenu('catalogo');
+  $('prod-guardar').style.display = soloLecturaProducto ? 'none' : '';
+
   $('modal-producto').classList.add('activo');
   $('prod-nombre').focus();
 
@@ -2910,6 +2989,9 @@ async function abrirLista(listaId){
     renderLineasMargen(listaId);
     await renderExcepcionesProducto(listaId);
   }
+
+  // Ronda 35: consulta-only en "Listas de precio" — se puede ver, no guardar.
+  $('lista-guardar').style.display = tieneEdicionMenu('listas_precio') ? '' : 'none';
 
   $('modal-lista').classList.add('activo');
   $('lista-nombre').focus();
@@ -4361,6 +4443,8 @@ function abrirCliente(id){
   $('cliente-activo').checked = c ? c.activo : true;
   state.clienteEditId = c?.id || null;
   actualizarBloqueoLimiteCreditoCliente();
+  // Ronda 35: consulta-only en "Clientes" — se puede ver la ficha, no guardar.
+  $('cliente-guardar').style.display = tieneEdicionMenu('clientes') ? '' : 'none';
   $('modal-cliente').classList.add('activo');
 }
 $('btn-nuevo-cliente').addEventListener('click', ()=>abrirCliente(null));
@@ -4759,7 +4843,9 @@ function renderCatalogoSimple(key){
     : todas;
   state.cfgFilasFiltradas = filas;
   $('cfg-titulo').textContent = cfg.tituloPlural;
-  const soloLectura = cfg.global && !state.roles.includes('Super Admin');
+  // Ronda 35: además de la regla previa (catálogos globales, solo Super Admin edita), si el rol
+  // solo tiene "consulta" en este nodo del árbol de menú, tampoco puede crear/editar.
+  const soloLectura = (cfg.global && !state.roles.includes('Super Admin')) || !tieneEdicionMenu('catalogos_base.'+key);
   $('cfg-nuevo').style.display = soloLectura ? 'none' : '';
   const encabezados = cfg.columnas.map(c=>`<th>${c.label}</th>`).join('') + (cfg.tieneActivo ? '<th>Estado</th>' : '') + '<th></th>';
   $('cfg-thead').innerHTML = `<tr>${encabezados}</tr>`;
@@ -4909,13 +4995,16 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
 // permisos. Un rol nuevo (plantilla_global=false) se puede renombrar, editar y borrar libremente.
 state.rolesCache = [];
 state.permisosCache = [];
+state.menuItemsCache = []; // Ronda 35: árbol de menú/submenú de admin.html (tabla menu_items)
 async function cargarYRenderRoles(){
-  const [{ data: roles }, { data: permisos }] = await Promise.all([
+  const [{ data: roles }, { data: permisos }, { data: menuItems }] = await Promise.all([
     sb.from('roles').select('*').order('nombre'),
     sb.from('permisos').select('*').order('modulo').order('codigo'),
+    sb.from('menu_items').select('*').order('orden'),
   ]);
   state.rolesCache = roles || [];
   state.permisosCache = permisos || [];
+  state.menuItemsCache = menuItems || [];
   const soloLectura = !state.roles.includes('Super Admin');
   $('rol-nuevo').style.display = soloLectura ? 'none' : '';
   $('rol-tabla-body').innerHTML = state.rolesCache.map(r=>`<tr>
@@ -4936,9 +5025,14 @@ async function abrirModalRol(id){
   $('rol-nombre-bloqueado-nota').style.display = (rol && rol.plantilla_global) ? 'block' : 'none';
   $('rol-descripcion').value = rol?.descripcion || '';
   let permisosActuales = [];
+  let menuActuales = {}; // { menu_item_id: 'consulta'|'edicion' }
   if(id){
-    const { data } = await sb.from('rol_permisos').select('permiso_id').eq('rol_id', id);
-    permisosActuales = (data || []).map(p=>p.permiso_id);
+    const [{ data: permisosData }, { data: menuData }] = await Promise.all([
+      sb.from('rol_permisos').select('permiso_id').eq('rol_id', id),
+      sb.from('rol_menu_permisos').select('menu_item_id, nivel').eq('rol_id', id),
+    ]);
+    permisosActuales = (permisosData || []).map(p=>p.permiso_id);
+    menuActuales = Object.fromEntries((menuData || []).map(m=>[m.menu_item_id, m.nivel]));
   }
   const porModulo = {};
   state.permisosCache.forEach(p=>{ (porModulo[p.modulo] = porModulo[p.modulo] || []).push(p); });
@@ -4948,6 +5042,27 @@ async function abrirModalRol(id){
       <input type="checkbox" class="rol-permiso-check" data-id="${p.id}" style="width:auto;" ${permisosActuales.includes(p.id)?'checked':''}> ${p.codigo}
     </label>`).join('')}
   `).join('');
+
+  // Ronda 35: árbol de menú/submenú — un radio de 3 estados (sin acceso / consulta / edición) por
+  // nodo. Los hijos se indentan bajo su padre para que se vea claro qué es submenú de qué.
+  const nodosRaiz = state.menuItemsCache.filter(m=>!m.parent_id);
+  const hijosDe = pid => state.menuItemsCache.filter(m=>m.parent_id===pid);
+  function filaNodo(nodo, nivelIndent){
+    const actual = menuActuales[nodo.id] || 'sin_acceso';
+    const opciones = [['sin_acceso','Sin acceso'],['consulta','Consulta'],['edicion','Edición']];
+    return `<div style="margin:6px 0 6px ${nivelIndent*20}px;">
+      <div style="font-weight:${nivelIndent?'normal':'600'};margin-bottom:2px;">${nodo.nombre}</div>
+      <div style="display:flex;gap:14px;">
+        ${opciones.map(([v,l])=>`<label style="display:flex;align-items:center;gap:4px;font-weight:normal;">
+          <input type="radio" name="rol-menu-${nodo.id}" class="rol-menu-radio" data-menu-id="${nodo.id}" value="${v}" style="width:auto;" ${actual===v?'checked':''}> ${l}
+        </label>`).join('')}
+      </div>
+    </div>`;
+  }
+  $('rol-menu-lista').innerHTML = nodosRaiz.map(raiz=>
+    filaNodo(raiz, 0) + hijosDe(raiz.id).map(h=>filaNodo(h, 1)).join('')
+  ).join('');
+
   $('modal-rol').classList.add('activo');
 }
 $('rol-nuevo').addEventListener('click', ()=>abrirModalRol(null));
@@ -4977,6 +5092,16 @@ $('rol-modal-guardar').addEventListener('click', async ()=>{
   await sb.from('rol_permisos').delete().eq('rol_id', rolId);
   if(permisoIdsElegidos.length){
     await sb.from('rol_permisos').insert(permisoIdsElegidos.map(pid=>({ rol_id: rolId, permiso_id: pid })));
+  }
+  // Ronda 35: mismo patrón (reemplazo completo, no atómico, riesgo bajo) para el árbol de menús —
+  // solo se guarda una fila por nodo que quedó en "consulta" o "edición"; "sin acceso" simplemente
+  // no genera fila (así lo lee mis_permisos_menu()).
+  const menuElegido = [...document.querySelectorAll('.rol-menu-radio:checked')]
+    .map(el=>({ menu_item_id: el.dataset.menuId, nivel: el.value }))
+    .filter(m=>m.nivel !== 'sin_acceso');
+  await sb.from('rol_menu_permisos').delete().eq('rol_id', rolId);
+  if(menuElegido.length){
+    await sb.from('rol_menu_permisos').insert(menuElegido.map(m=>({ rol_id: rolId, menu_item_id: m.menu_item_id, nivel: m.nivel })));
   }
   $('rol-modal-guardar').disabled = false;
   $('modal-rol').classList.remove('activo');
@@ -5047,6 +5172,10 @@ async function cargarYRenderUsuarios(){
     .eq('empresa_id', state.empresaId);
   if(error){ $('usr-tabla-body').innerHTML = `<tr><td colspan="8"><div class="msg-error">${error.message}</div></td></tr>`; return; }
   state.usuariosCache = asignaciones || [];
+  // Ronda 35: si el rol del que entra solo tiene "consulta" en Catálogos base > Usuarios, se ve la
+  // lista completa pero sin botón para crear ni editar.
+  const soloLectura = !tieneEdicionMenu('catalogos_base.usuarios');
+  $('usr-nuevo').style.display = soloLectura ? 'none' : '';
   $('usr-tabla-body').innerHTML = state.usuariosCache.map(a=>`<tr>
     <td>${a.usuarios?.nombre || '—'}</td>
     <td>${a.usuarios?.email || '—'}</td>
@@ -5055,7 +5184,7 @@ async function cargarYRenderUsuarios(){
     <td>${a.sucursales?.nombre || '—'}</td>
     <td>${a.cajas?.nombre || '—'}</td>
     <td>${(a.activo && a.usuarios?.activo) ? 'Activo' : 'Inactivo'}</td>
-    <td><button type="button" class="btn-gris usr-editar" data-id="${a.id}">Editar</button></td>
+    <td>${soloLectura ? '' : `<button type="button" class="btn-gris usr-editar" data-id="${a.id}">Editar</button>`}</td>
   </tr>`).join('');
   $('usr-tabla-body').querySelectorAll('.usr-editar').forEach(b=>b.addEventListener('click', ()=>abrirModalUsuarioEditar(b.dataset.id)));
 }
