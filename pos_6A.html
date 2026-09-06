@@ -604,13 +604,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.006';
-
-// Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
-// reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
-// Compras/Inventario en admin.html, no para atender la caja. Espejo de ROLES_PERMITIDOS de
-// admin.html (que bloquea a Cajero por la razón inversa): aquí se bloquea a Almacenista y Comprador.
-const ROLES_PERMITIDOS_POS = ['Super Admin', 'Admin de Empresa', 'Gerente', 'Cajero'];
+const APP_VERSION = '1.7.005';
 
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -659,7 +653,7 @@ function attachMoneyInput(el){
 }
 
 const state = {
-  usuario: null, rol: null, roles: [],
+  usuario: null, rol: null,
   empresaId: null, empresaNombre: '', desglosarImpuestos: true, logoUrl: '', textoPagare: '',
   sucursalId: null, sucursalNombre: '',
   almacenId: null, cajaId: null, cajaNombre: '',
@@ -869,7 +863,7 @@ async function iniciarSesionApp(){
   state.usuario = usuarioRow;
 
   const { data: asignaciones } = await sb.from('usuario_asignaciones')
-    .select('*, asignacion_roles(roles(nombre))')
+    .select('*, roles(nombre)')
     .eq('usuario_id', usuarioRow.id)
     .eq('activo', true);
 
@@ -884,16 +878,7 @@ async function iniciarSesionApp(){
   // gana — mismo criterio que admin.html, para que nunca pierda sus privilegios globales por tener
   // también una asignación de empresa.
   const asignacion = asignaciones.find(a=>!a.empresa_id) || asignaciones[0];
-  // Ronda 33: una asignación puede tener 1 a N roles (ej. Cajero Y Comprador) — state.roles es el
-  // arreglo real, state.rol solo el texto para el encabezado.
-  state.roles = (asignacion.asignacion_roles || []).map(ar=>ar.roles?.nombre).filter(Boolean);
-  state.rol = state.roles.join(', ') || 'sin rol';
-  if(!state.roles.some(r=>ROLES_PERMITIDOS_POS.includes(r))){
-    await sb.auth.signOut();
-    mostrarPantalla('pantalla-login');
-    $('login-error').innerHTML = `<div class="msg-error">Tu rol (${state.rol}) no tiene acceso al Punto de Venta. Usa Admin Kositas.</div>`;
-    return;
-  }
+  state.rol = asignacion.roles?.nombre || '';
   const esSuperAdmin = !asignacion.empresa_id;
 
   const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true);
