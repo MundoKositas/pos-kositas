@@ -664,6 +664,17 @@
         </div>
         <p class="nota" id="aud-prod-vacio" style="display:none;">Sin registros en este rango.</p>
       </div>
+      <div class="card" id="img-huerfanas-card" style="display:none;">
+        <h2 style="margin-top:0;">Imágenes huérfanas en Storage</h2>
+        <p class="nota" style="margin-top:0;">Cuando se sube una foto de producto y el producto se cancela sin guardar, o se reemplaza la foto de un producto ya existente, el archivo anterior se queda guardado sin que ningún producto lo use. Aquí se buscan esos archivos sueltos (comparando contra la foto actual de todos los productos) y se pueden borrar para no ocupar espacio. Solo Super Admin ve esta tarjeta.</p>
+        <button type="button" class="btn-gris" id="img-huerfanas-buscar">Buscar imágenes huérfanas</button>
+        <p class="nota" id="img-huerfanas-estado" style="margin-top:10px;"></p>
+        <div id="img-huerfanas-lista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:12px;"></div>
+        <div id="img-huerfanas-acciones" style="display:none;margin-top:14px;gap:8px;">
+          <button type="button" class="btn-gris" id="img-huerfanas-marcar-todas">Marcar todas</button>
+          <button type="button" class="btn-primario" style="background:#b3261e;" id="img-huerfanas-borrar">Eliminar las marcadas</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1173,7 +1184,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.17.001';
+const APP_VERSION = '1.17.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5326,6 +5337,12 @@ function entrarATabAuditoria(){
   cargarYRenderAperturasCierresCaja();
   cargarYRenderAccesosSistema();
   cargarYRenderAuditoriaProductos();
+  // Ronda 36: limpieza de imágenes huérfanas — solo Super Admin, y se resetea la búsqueda cada vez
+  // que se entra a la pestaña para no dejar en pantalla un resultado de una revisión anterior.
+  $('img-huerfanas-card').style.display = state.roles.includes('Super Admin') ? 'block' : 'none';
+  $('img-huerfanas-lista').innerHTML = '';
+  $('img-huerfanas-estado').textContent = '';
+  $('img-huerfanas-acciones').style.display = 'none';
 }
 // Etiquetas legibles para las 3 banderas de producto que sí se auditan (guardar_producto,
 // migración 089) — el resto de campos del producto (nombre, precio, etc.) no se audita aquí.
@@ -5372,6 +5389,68 @@ async function cargarYRenderAuditoriaProductos(){
   }).join('');
 }
 $('aud-prod-filtrar').addEventListener('click', cargarYRenderAuditoriaProductos);
+
+// ---------- Ronda 36: limpieza de imágenes huérfanas del bucket "productos" ----------
+// Una imagen queda "huérfana" cuando se sube al elegir el archivo (sube de inmediato, antes de
+// Guardar) y luego el alta/edición se cancela sin guardar, o cuando se reemplaza la foto de un
+// producto ya existente por otra — el archivo anterior nunca se borra solo. Se compara el nombre de
+// cada archivo del bucket contra la columna productos.imagen_url de TODOS los productos (activos e
+// inactivos: un producto dado de baja sigue teniendo derecho a su foto) — lo que no matchea con
+// ningún producto es huérfano de verdad.
+state.imagenesHuerfanas = [];
+function nombreArchivoDesdeUrl(url){
+  if(!url) return null;
+  try { return decodeURIComponent(url.split('/').pop().split('?')[0]); } catch(e){ return null; }
+}
+$('img-huerfanas-buscar').addEventListener('click', async ()=>{
+  $('img-huerfanas-estado').textContent = 'Buscando…';
+  $('img-huerfanas-lista').innerHTML = '';
+  $('img-huerfanas-acciones').style.display = 'none';
+  const [{ data: archivos, error: errStorage }, { data: productosTodos, error: errProd }] = await Promise.all([
+    sb.storage.from('productos').list('', { limit: 1000, sortBy: { column: 'name', order: 'asc' } }),
+    sb.from('productos').select('imagen_url'),
+  ]);
+  if(errStorage){ $('img-huerfanas-estado').textContent = `Error al leer Storage: ${errStorage.message}`; return; }
+  if(errProd){ $('img-huerfanas-estado').textContent = `Error al leer productos: ${errProd.message}`; return; }
+  const referenciados = new Set((productosTodos || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)).filter(Boolean));
+  const huerfanas = (archivos || []).filter(a=>a.id && !referenciados.has(a.name)); // a.id null = "carpeta", se ignora
+  state.imagenesHuerfanas = huerfanas;
+  if((archivos || []).length >= 1000){
+    $('img-huerfanas-estado').textContent = 'Aviso: hay 1000 o más archivos en el bucket — puede que existan más huérfanas de las que se alcanzan a listar aquí de una vez.';
+  } else {
+    $('img-huerfanas-estado').textContent = '';
+  }
+  if(!huerfanas.length){
+    $('img-huerfanas-lista').innerHTML = '<p class="nota">No se encontró ninguna imagen huérfana — todo lo que hay en Storage está en uso.</p>';
+    return;
+  }
+  const { data: pub0 } = sb.storage.from('productos').getPublicUrl('');
+  const baseUrl = pub0.publicUrl;
+  $('img-huerfanas-lista').innerHTML = huerfanas.map(a=>`
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;cursor:pointer;">
+      <img src="${baseUrl}${encodeURIComponent(a.name)}" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd;">
+      <span style="word-break:break-all;">${a.name}</span>
+      <span style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="img-huerfana-check" value="${a.name}" style="width:auto;"> Marcar</span>
+    </label>
+  `).join('');
+  $('img-huerfanas-estado').textContent = `${huerfanas.length} imagen(es) huérfana(s) encontrada(s).`;
+  $('img-huerfanas-acciones').style.display = 'flex';
+});
+$('img-huerfanas-marcar-todas').addEventListener('click', ()=>{
+  document.querySelectorAll('.img-huerfana-check').forEach(el=>el.checked = true);
+});
+$('img-huerfanas-borrar').addEventListener('click', async ()=>{
+  const nombres = [...document.querySelectorAll('.img-huerfana-check:checked')].map(el=>el.value);
+  if(!nombres.length){ $('img-huerfanas-estado').textContent = 'Marca al menos una imagen para eliminar.'; return; }
+  if(!confirm(`¿Eliminar ${nombres.length} imagen(es) de Storage? Esto no se puede deshacer.`)) return;
+  $('img-huerfanas-borrar').disabled = true;
+  const { error } = await sb.storage.from('productos').remove(nombres);
+  $('img-huerfanas-borrar').disabled = false;
+  if(error){ $('img-huerfanas-estado').textContent = `Error al eliminar: ${error.message}`; return; }
+  $('img-huerfanas-estado').textContent = `${nombres.length} imagen(es) eliminada(s).`;
+  $('img-huerfanas-buscar').click(); // vuelve a buscar para refrescar la lista
+});
+
 async function cargarYRenderAperturasCierresCaja(){
   const desde = $('aud-caja-desde').value, hasta = $('aud-caja-hasta').value;
   const { data, error } = await sb.from('sesiones_caja')
