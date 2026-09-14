@@ -362,7 +362,7 @@
 <div class="modal-fondo" id="modal-devolver-venta">
   <div class="modal" style="max-width:560px;">
     <h2 id="dv-titulo">Devolver artículos</h2>
-    <p class="nota">Captura cuántas piezas de cada línea se devuelven (deja en 0 lo que no aplique). El dinero se regresa con la misma forma de pago con la que se pagó el ticket, sin poder pasarse de lo que se pagó con ella.</p>
+    <p class="nota">Captura cuántas piezas de cada línea se devuelven (deja en 0 lo que no aplique).</p>
     <div class="tabla-scroll">
       <table>
         <thead><tr><th>Artículo</th><th class="num">Ya devuelto</th><th class="num">Comprado</th><th class="num">A devolver</th></tr></thead>
@@ -370,13 +370,14 @@
       </table>
     </div>
     <div class="totales" id="dv-total" style="margin-top:10px;"></div>
-    <div class="campo" style="margin-top:10px;">
+    <div class="campo" style="margin-top:10px;" id="dv-pagos-seccion">
       <label>Forma(s) de pago para el reembolso</label>
-      <p class="nota" style="margin:2px 0 6px;">Si ninguna forma de pago sola alcanza para cubrir todo, agrega otra línea para repartir el reembolso — cada una topada a lo que se pagó con ella.</p>
+      <p class="nota" style="margin:2px 0 6px;">El dinero se regresa con la misma forma de pago con la que se pagó el ticket, sin poder pasarse de lo que se pagó con ella. Si ninguna forma de pago sola alcanza para cubrir todo, agrega otra línea para repartir el reembolso.</p>
       <div id="dv-pagos-lista"></div>
       <button type="button" class="btn-gris" id="dv-agregar-pago" style="margin-top:6px;">+ Forma de pago</button>
       <div id="dv-pagos-resumen" class="nota" style="margin-top:6px;"></div>
     </div>
+    <p class="nota" id="dv-credito-nota" style="display:none;margin-top:10px;">Esta venta es a crédito — el cliente no pagó en efectivo/tarjeta al momento, así que no hay nada que reembolsar por esa vía. El monto devuelto se descuenta directo de lo que el cliente debe.</p>
     <div class="campo" style="margin-top:10px;"><label>Motivo</label><input type="text" id="dv-motivo" placeholder="Ej. cliente ya no lo quiso, venía dañado, etc."></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="dv-cancelar">Cerrar</button>
@@ -604,7 +605,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.006';
+const APP_VERSION = '1.7.007';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2966,6 +2967,11 @@ async function abrirDevolverVenta(ventaId){
   $('dv-motivo').value = '';
   $('dv-error').innerHTML = '';
   dvPagos = [];
+  // Venta a crédito: el dinero nunca entró en caja, así que no hay forma de pago que reembolsar —
+  // se oculta esa sección y en su lugar se avisa que la devolución reduce el saldo del cliente.
+  const credito = dvDatos.tipo_venta === 'credito';
+  $('dv-pagos-seccion').style.display = credito ? 'none' : 'block';
+  $('dv-credito-nota').style.display = credito ? 'block' : 'none';
   $('dv-body').innerHTML = data.lineas.map((l,i)=>{
     const disponible = l.cantidad - (l.cantidad_devuelta||0);
     return `<tr>
@@ -2999,6 +3005,12 @@ function renderDevolverTotal(){
   });
   total = redondear2(total);
   $('dv-total').innerHTML = `<div class="linea total-final"><span>Total a devolver</span><span>${money(total)}</span></div>`;
+  // Venta a crédito: no hay forma de pago que repartir — "Registrar devolución" solo depende de
+  // que se haya marcado algo a devolver.
+  if(dvDatos.tipo_venta === 'credito'){
+    $('dv-confirmar').disabled = !(total > 0);
+    return total;
+  }
   // Si todavía no se ha capturado ningún reparto de pago, o el total cambió, se propone un reparto
   // inicial automático: llenar cada forma usada en el ticket original hasta su neto disponible, en
   // el orden en que aparecen los pagos, hasta cubrir el total — el cajero puede ajustarlo a mano.
@@ -3091,24 +3103,28 @@ $('dv-confirmar').addEventListener('click', async ()=>{
   });
   if(!lineas.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura al menos una cantidad a devolver.</div>'; return; }
   const totalDevolver = renderDevolverTotal();
-  if(!dvPagos.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura con qué forma(s) de pago se va a reembolsar.</div>'; return; }
-  const pagosNetos = netoPorForma(dvDatos.pagos);
-  for(const p of dvPagos){
-    const monto = parseMoney(p.monto)||0;
-    if(!(monto > 0)){ $('dv-error').innerHTML = '<div class="msg-error">Cada forma de pago del reembolso debe tener un monto mayor a 0.</div>'; return; }
-    const neto = pagosNetos.find(f=>f.forma_pago_id===p.formaPagoId);
-    if(!neto || monto > neto.neto + 0.005){
-      $('dv-error').innerHTML = '<div class="msg-error">No se puede devolver más de lo que se pagó con alguna de las formas de pago elegidas.</div>';
+  const esCredito = dvDatos.tipo_venta === 'credito';
+  let payloadPagos = [];
+  if(!esCredito){
+    if(!dvPagos.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura con qué forma(s) de pago se va a reembolsar.</div>'; return; }
+    const pagosNetos = netoPorForma(dvDatos.pagos);
+    for(const p of dvPagos){
+      const monto = parseMoney(p.monto)||0;
+      if(!(monto > 0)){ $('dv-error').innerHTML = '<div class="msg-error">Cada forma de pago del reembolso debe tener un monto mayor a 0.</div>'; return; }
+      const neto = pagosNetos.find(f=>f.forma_pago_id===p.formaPagoId);
+      if(!neto || monto > neto.neto + 0.005){
+        $('dv-error').innerHTML = '<div class="msg-error">No se puede devolver más de lo que se pagó con alguna de las formas de pago elegidas.</div>';
+        return;
+      }
+    }
+    const repartido = redondear2(dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0));
+    if(Math.abs(repartido - totalDevolver) > 0.005){
+      $('dv-error').innerHTML = `<div class="msg-error">Lo repartido entre las formas de pago (${money(repartido)}) no coincide con el total a devolver (${money(totalDevolver)}).</div>`;
       return;
     }
-  }
-  const repartido = redondear2(dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0));
-  if(Math.abs(repartido - totalDevolver) > 0.005){
-    $('dv-error').innerHTML = `<div class="msg-error">Lo repartido entre las formas de pago (${money(repartido)}) no coincide con el total a devolver (${money(totalDevolver)}).</div>`;
-    return;
+    payloadPagos = dvPagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0 }));
   }
   $('dv-confirmar').disabled = true;
-  const payloadPagos = dvPagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0 }));
   const { error } = await sb.rpc('devolver_venta', {
     p_venta_id: dvVentaId, p_lineas: lineas, p_motivo: motivo, p_pagos: payloadPagos,
     p_sesion_caja_actual_id: state.sesionCaja.id, p_autorizado_por: dvAutorizadoPor,
