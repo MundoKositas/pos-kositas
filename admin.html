@@ -542,6 +542,7 @@
       <button type="button" class="tab-btn" data-cfgtab="proveedores">Proveedores</button>
       <button type="button" class="tab-btn" data-cfgtab="sucursales">Sucursales</button>
       <button type="button" class="tab-btn" data-cfgtab="cajas">Cajas</button>
+      <button type="button" class="tab-btn" data-cfgtab="periodos">Períodos de operación</button>
       <button type="button" class="tab-btn" data-cfgtab="roles">Roles</button>
       <button type="button" class="tab-btn" data-cfgtab="usuarios">Usuarios</button>
       <button type="button" class="tab-btn" data-cfgtab="auditoria">Auditoría</button>
@@ -556,6 +557,7 @@
             <input type="text" id="cfg-buscar" placeholder="Escribe para filtrar…">
           </div>
           <h2 style="margin:0 auto 0 12px;" id="cfg-titulo">Marcas</h2>
+          <button class="btn-gris" id="cfg-generar-proximo-mes" style="display:none;">Generar próximo mes</button>
           <button class="btn-primario" id="cfg-nuevo">+ Nuevo</button>
         </div>
         <div class="tabla-scroll" style="margin-top:14px;">
@@ -1184,7 +1186,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.17.002';
+const APP_VERSION = '1.18.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1715,8 +1717,8 @@ const MAPA_CFGTAB_A_CLAVE = {
   marcas: 'catalogos_base.marcas', categorias: 'catalogos_base.categorias', lineas: 'catalogos_base.lineas',
   unidades: 'catalogos_base.unidades', impuestos: 'catalogos_base.impuestos', formas_pago: 'catalogos_base.formas_pago',
   condiciones_pago: 'catalogos_base.condiciones_pago', proveedores: 'catalogos_base.proveedores',
-  sucursales: 'catalogos_base.sucursales', cajas: 'catalogos_base.cajas', roles: 'catalogos_base.roles',
-  usuarios: 'catalogos_base.usuarios', auditoria: 'catalogos_base.auditoria',
+  sucursales: 'catalogos_base.sucursales', cajas: 'catalogos_base.cajas', periodos: 'catalogos_base.periodos',
+  roles: 'catalogos_base.roles', usuarios: 'catalogos_base.usuarios', auditoria: 'catalogos_base.auditoria',
 };
 
 // Oculta por completo las pestañas/subpestañas sin ningún acceso, y — si la que estaba activa por
@@ -4806,6 +4808,33 @@ const CATALOGOS_SIMPLES = {
       { label:'Número', valor:r=>r.numero },
     ],
   },
+  // Ronda 37: Períodos de operación — antes solo se creaban a mano con un INSERT directo cada mes
+  // (ver notas de "Siguiente sesión" en versiones anteriores de este documento); sin un período
+  // abierto para la fecha de hoy, el POS no deja abrir caja. Restringido a Super Admin/Admin de
+  // Empresa (ver soloAdminEmpresa más abajo, en renderCatalogoSimple) — no es un catálogo cualquiera,
+  // controla si toda la tienda puede operar.
+  periodos: {
+    tabla: 'periodos_operacion', tituloPlural: 'Períodos de operación', tituloSingular: 'período de operación',
+    // Quién ve/edita esta pantalla se controla por el árbol de menús (Roles → "Acceso a menús y
+    // submenús", clave catalogos_base.periodos, migración 092) en vez de una regla fija en código —
+    // sembrado con: Super Admin y Admin de Empresa en Edición, Gerente en Consulta, Almacenista y
+    // Comprador sin acceso (no ven la pestaña).
+    campos: [
+      { id:'clave', label:'Clave (formato AAAA-MM, ej. 2026-11)', tipo:'texto', requerido:true },
+      { id:'fecha_inicial', label:'Fecha inicial', tipo:'fecha', requerido:true },
+      { id:'fecha_final', label:'Fecha final', tipo:'fecha', requerido:true },
+      { id:'estado_ventas', label:'Ventas (POS)', tipo:'select', opciones:[['abierto','Abierto'],['cerrado','Cerrado']], requerido:true },
+      { id:'estado_compras', label:'Compras', tipo:'select', opciones:[['abierto','Abierto'],['cerrado','Cerrado']], requerido:true },
+    ],
+    tieneActivo: false, orden: 'fecha_inicial',
+    columnas: [
+      { label:'Clave', valor:r=>r.clave },
+      { label:'Del', valor:r=>r.fecha_inicial },
+      { label:'Al', valor:r=>r.fecha_final },
+      { label:'Ventas', valor:r=>r.estado_ventas==='abierto' ? 'Abierto' : 'Cerrado' },
+      { label:'Compras', valor:r=>r.estado_compras==='abierto' ? 'Abierto' : 'Cerrado' },
+    ],
+  },
 };
 const CFG_FUENTES = {
   categorias: () => (state.cfgCache.categorias || state.categorias).map(c=>[c.id, c.nombre]),
@@ -4858,6 +4887,8 @@ function renderCatalogoSimple(key){
   // solo tiene "consulta" en este nodo del árbol de menú, tampoco puede crear/editar.
   const soloLectura = (cfg.global && !state.roles.includes('Super Admin')) || !tieneEdicionMenu('catalogos_base.'+key);
   $('cfg-nuevo').style.display = soloLectura ? 'none' : '';
+  // Ronda 37: atajo para no tener que capturar a mano el mes siguiente cada vez.
+  $('cfg-generar-proximo-mes').style.display = (key === 'periodos' && !soloLectura) ? '' : 'none';
   const encabezados = cfg.columnas.map(c=>`<th>${c.label}</th>`).join('') + (cfg.tieneActivo ? '<th>Estado</th>' : '') + '<th></th>';
   $('cfg-thead').innerHTML = `<tr>${encabezados}</tr>`;
   if(!filas.length){
@@ -4924,6 +4955,9 @@ function abrirModalCfg(key, id){
     if(campo.tipo === 'textarea'){
       return `<div class="campo"><label>${campo.label}</label><textarea id="cfg-campo-${campo.id}" rows="3">${valorActual!=null?String(valorActual):''}</textarea></div>`;
     }
+    if(campo.tipo === 'fecha'){
+      return `<div class="campo"><label>${campo.label}</label><input type="date" id="cfg-campo-${campo.id}" value="${valorActual||''}"></div>`;
+    }
     if(campo.tipo === 'select'){
       const opciones = campo.fuente ? CFG_FUENTES[campo.fuente]() : campo.opciones;
       const optionsHtml = opciones.map(([val,txt])=>`<option value="${val}" ${String(valorActual)===String(val)?'selected':''}>${txt}</option>`).join('');
@@ -4939,6 +4973,28 @@ function abrirModalCfg(key, id){
   $('modal-cfg').classList.add('activo');
 }
 $('cfg-nuevo').addEventListener('click', ()=>abrirModalCfg(state.cfgTabActivo, null));
+// Ronda 37: calcula el mes siguiente al último período ya creado (o el mes actual, si no hay
+// ninguno) y prellena el formulario de alta — así no hay que sacar cuentas de fechas cada vez.
+$('cfg-generar-proximo-mes').addEventListener('click', ()=>{
+  const periodos = state.cfgCache.periodos || [];
+  const ultima = periodos.reduce((max, p) => (!max || p.fecha_final > max.fecha_final) ? p : max, null);
+  let anio, mesIndex; // mesIndex 0-based, como Date
+  if(ultima){
+    const [y, m] = ultima.fecha_final.split('-').map(Number);
+    const d = new Date(y, m - 1, 1);
+    d.setMonth(d.getMonth() + 1);
+    anio = d.getFullYear(); mesIndex = d.getMonth();
+  } else {
+    const hoy = new Date();
+    anio = hoy.getFullYear(); mesIndex = hoy.getMonth();
+  }
+  const mm = String(mesIndex + 1).padStart(2, '0');
+  const ultimoDia = new Date(anio, mesIndex + 1, 0).getDate();
+  abrirModalCfg('periodos', null);
+  $('cfg-campo-clave').value = `${anio}-${mm}`;
+  $('cfg-campo-fecha_inicial').value = `${anio}-${mm}-01`;
+  $('cfg-campo-fecha_final').value = `${anio}-${mm}-${String(ultimoDia).padStart(2,'0')}`;
+});
 $('cfg-modal-cancelar').addEventListener('click', ()=>{ $('modal-cfg').classList.remove('activo'); });
 $('cfg-modal-guardar').addEventListener('click', async ()=>{
   const key = $('modal-cfg').dataset.key;
@@ -4966,6 +5022,18 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
     $('cfg-modal-error').innerHTML = '<div class="msg-error">Elige una categoría.</div>';
     return;
   }
+  // Ronda 37: validaciones propias de Períodos de operación — no tienen sentido genéricas para el
+  // resto de catálogos simples, así que se revisan aparte antes de guardar.
+  if(key === 'periodos'){
+    if(!/^\d{4}-\d{2}$/.test(payload.clave)){
+      $('cfg-modal-error').innerHTML = '<div class="msg-error">La clave debe tener el formato AAAA-MM, por ejemplo 2026-11.</div>';
+      return;
+    }
+    if(payload.fecha_final < payload.fecha_inicial){
+      $('cfg-modal-error').innerHTML = '<div class="msg-error">La fecha final no puede ser anterior a la fecha inicial.</div>';
+      return;
+    }
+  }
   $('cfg-modal-guardar').disabled = true;
   let error;
   if(state.cfgEditId){
@@ -4975,7 +5043,12 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
   }
   $('cfg-modal-guardar').disabled = false;
   if(error){
-    $('cfg-modal-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    // La tabla de períodos no deja repetir la misma clave dos veces en la misma empresa — se
+    // traduce el error técnico de Postgres a algo entendible.
+    const mensaje = (key === 'periodos' && /duplicate key|unique constraint/i.test(error.message))
+      ? `Ya existe un período con la clave "${payload.clave}" — usa otra o edita el que ya existe.`
+      : error.message;
+    $('cfg-modal-error').innerHTML = `<div class="msg-error">${mensaje}</div>`;
     return;
   }
   $('modal-cfg').classList.remove('activo');
