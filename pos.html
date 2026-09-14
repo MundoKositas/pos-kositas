@@ -335,6 +335,7 @@
         <div class="col"><label>Monto del ajuste</label><input type="text" id="mv-ajuste-monto" class="money-input" readonly></div>
       </div>
     </div>
+    <p class="nota" id="mv-credito-nota" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--borde);"></p>
     <div class="campo" style="margin-top:10px;"><label>Motivo de la modificación</label><input type="text" id="mv-motivo" placeholder="Ej. se olvidó escanear un artículo"></div>
     <div style="display:flex;gap:8px;margin-top:6px;">
       <button class="btn-gris" style="flex:1;" id="mv-cancelar">Cancelar</button>
@@ -605,7 +606,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.008';
+const APP_VERSION = '1.7.009';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2829,7 +2830,17 @@ function renderModificarVenta(){
     <div class="linea total-final"><span>Total nuevo</span><span>${money(total)}</span></div>
   `;
   const diferencia = redondear2(total - mvDatos.total);
-  if(Math.abs(diferencia) > 0.005){
+  const credito = mvDatos.tipo_venta === 'credito';
+  if(Math.abs(diferencia) > 0.005 && credito){
+    // Venta a crédito: no hay efectivo/tarjeta que ajustar (el dinero nunca entró) — la diferencia
+    // se aplica directo al saldo que debe el cliente, sin pedir nada aquí (ver Ronda 42).
+    $('mv-ajuste-pago').style.display = 'none';
+    $('mv-credito-nota').style.display = 'block';
+    $('mv-credito-nota').textContent = diferencia < 0
+      ? `Esta venta es a crédito — se le va a reducir ${money(Math.abs(diferencia))} a lo que debe el cliente por esta venta (no se reembolsa efectivo).`
+      : `Esta venta es a crédito — se le va a aumentar ${money(diferencia)} a lo que debe el cliente por esta venta.`;
+  } else if(Math.abs(diferencia) > 0.005){
+    $('mv-credito-nota').style.display = 'none';
     $('mv-ajuste-pago').style.display = 'block';
     $('mv-ajuste-nota').textContent = diferencia < 0
       ? `Hay que reembolsar ${money(Math.abs(diferencia))} al cliente. Solo se puede reembolsar con una forma de pago que se haya usado en el ticket, y hasta lo que se pagó con ella.`
@@ -2848,8 +2859,9 @@ function renderModificarVenta(){
     if(formasDisponibles.some(f=>f.forma_pago_id===valorPrevio)) $('mv-ajuste-forma').value = valorPrevio;
   } else {
     $('mv-ajuste-pago').style.display = 'none';
+    $('mv-credito-nota').style.display = 'none';
   }
-  return { subtotal, descuentoTotal, impuesto, total, diferencia };
+  return { subtotal, descuentoTotal, impuesto, total, diferencia, credito };
 }
 $('mv-buscar').addEventListener('input', ()=>{
   const q = $('mv-buscar').value.trim().toLowerCase();
@@ -2879,9 +2891,9 @@ $('mv-cancelar').addEventListener('click', ()=>{ $('modal-modificar-venta').clas
 $('mv-guardar').addEventListener('click', async ()=>{
   $('mv-error').innerHTML = '';
   if(!mvLineas.length){ $('mv-error').innerHTML = '<div class="msg-error">El ticket no puede quedar sin artículos — usa "Cancelar ticket" si ya no aplica.</div>'; return; }
-  const { diferencia } = renderModificarVenta();
+  const { diferencia, credito } = renderModificarVenta();
   let ajustePago = null;
-  if(Math.abs(diferencia) > 0.005){
+  if(Math.abs(diferencia) > 0.005 && !credito){
     const formaPagoId = $('mv-ajuste-forma').value;
     if(!formaPagoId){ $('mv-error').innerHTML = '<div class="msg-error">Elige la forma de pago del ajuste.</div>'; return; }
     if(diferencia < 0){
@@ -2907,6 +2919,7 @@ $('mv-guardar').addEventListener('click', async ()=>{
   $('modal-modificar-venta').classList.remove('activo');
   await cargarVentasDia();
   await cargarCatalogo(); // refrescar stock en pantalla de vender
+  if(credito) await cargarClientes(); // el ajuste de una venta a crédito acaba de cambiar su saldo
 });
 
 // ---- Cancelar ticket ----
@@ -2940,6 +2953,10 @@ $('cv-confirmar').addEventListener('click', async ()=>{
   $('modal-cancelar-venta').classList.remove('activo');
   await cargarVentasDia();
   await cargarCatalogo();
+  // Si era una venta a crédito, cancelarla acaba de perdonar lo que el cliente debía por ella (ver
+  // Ronda 42) — se refresca por si acaso (no vale la pena consultar antes si era a crédito solo para
+  // decidir si hace falta).
+  await cargarClientes();
 });
 
 // ---- Devolver artículos ----
