@@ -1186,7 +1186,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.18.002';
+const APP_VERSION = '1.18.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4523,7 +4523,13 @@ $('cliente-guardar').addEventListener('click', async ()=>{
   $('modal-cliente').classList.remove('activo');
 });
 
-const nombreMovimientoCliente = (tipo) => tipo === 'cargo' ? 'Cargo (venta a crédito)' : 'Abono';
+// Un 'cargo' normalmente es una venta a crédito nueva (aumenta lo que debe), pero una devolución de
+// una venta a crédito también se guarda como 'cargo' — solo que en negativo, para reducir lo que
+// debe (ver Ronda 40) — por eso aquí se distingue por el texto de referencia, no solo por el tipo.
+const nombreMovimientoCliente = (m) => {
+  if(m.tipo === 'cargo' && (m.referencia||'').startsWith('Devolución de la venta')) return 'Devolución';
+  return m.tipo === 'cargo' ? 'Cargo (venta a crédito)' : 'Abono';
+};
 async function abrirEstadoCuenta(id){
   const c = state.clientes.find(x=>x.id===id);
   if(!c) return;
@@ -4536,12 +4542,19 @@ async function abrirEstadoCuenta(id){
   const { data: movs, error } = await sb.from('cliente_movimientos').select('*').eq('cliente_id', id).order('fecha_hora', {ascending:false});
   if(error){ $('ec-tabla-body').innerHTML = `<tr><td colspan="4" class="msg-error">${error.message}</td></tr>`; return; }
   $('ec-vacio').style.display = (movs && movs.length) ? 'none' : 'block';
-  $('ec-tabla-body').innerHTML = (movs||[]).map(m=>`<tr>
+  $('ec-tabla-body').innerHTML = (movs||[]).map(m=>{
+    // Efecto real sobre el saldo: un cargo lo aumenta, un abono lo reduce — pero un cargo puede
+    // venir en negativo (la nota de crédito de una devolución), así que el signo se calcula sobre
+    // el efecto ya resuelto, no se asume de antemano por el tipo (evita el "+-" cuando monto < 0).
+    const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
+    const signo = efecto < 0 ? '-' : '+';
+    return `<tr>
       <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
-      <td>${nombreMovimientoCliente(m.tipo)}</td>
+      <td>${nombreMovimientoCliente(m)}</td>
       <td>${m.referencia || '—'}</td>
-      <td class="num">${m.tipo === 'cargo' ? '+' : '-'}${money(m.monto)}</td>
-    </tr>`).join('');
+      <td class="num">${signo}${money(Math.abs(efecto))}</td>
+    </tr>`;
+  }).join('');
 }
 $('ec-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta').classList.remove('activo'); });
 

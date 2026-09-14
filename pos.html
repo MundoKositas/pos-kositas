@@ -605,7 +605,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.007';
+const APP_VERSION = '1.7.008';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3134,6 +3134,10 @@ $('dv-confirmar').addEventListener('click', async ()=>{
   $('modal-devolver-venta').classList.remove('activo');
   await cargarVentasDia();
   await cargarCatalogo();
+  // Si era una venta a crédito, la devolución acaba de cambiar el saldo del cliente (ver Ronda 40) —
+  // se refresca aquí para que, si se vuelve a buscar a ese cliente sin recargar la página, ya se vea
+  // el saldo correcto en vez del que tenía antes de la devolución.
+  if(esCredito) await cargarClientes();
 });
 
 // ---------- MOVIMIENTO DE CAJA ----------
