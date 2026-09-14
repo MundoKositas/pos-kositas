@@ -1186,7 +1186,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.18.001';
+const APP_VERSION = '1.18.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2853,13 +2853,29 @@ async function cargarKardex(){
   }
   const filas = data || [];
   const TIPO_LABEL = { entrada: 'Entrada', salida: 'Salida', transferencia: 'Transferencia', ajuste: 'Ajuste' };
+  // El folio de un movimiento originado en el POS es un link al ticket. En 'venta_pos',
+  // 'modificacion_venta_pos' y 'cancelacion_venta', movimientos_inventario.referencia guarda
+  // directo el id de la venta. En 'devolucion_venta' guarda el id de la fila de 'devoluciones'
+  // (no el de la venta), así que hay que resolverlo con una consulta aparte a esa tabla.
+  const CLASIF_VENTA_DIRECTA = ['venta_pos', 'modificacion_venta_pos', 'cancelacion_venta'];
+  const idsDevoluciones = [...new Set(filas
+    .filter(f => f.movimientos_inventario.clasificacion === 'devolucion_venta' && f.movimientos_inventario.referencia)
+    .map(f => f.movimientos_inventario.referencia))];
+  let mapaDevolucionAVenta = {};
+  if(idsDevoluciones.length){
+    const { data: devs } = await sb.from('devoluciones').select('id, venta_id').in('id', idsDevoluciones);
+    (devs || []).forEach(d => { mapaDevolucionAVenta[d.id] = d.venta_id; });
+  }
   $('kardex-tabla-body').innerHTML = filas.map(f=>{
     const mov = f.movimientos_inventario;
-    // El folio de una venta de POS es un link al ticket (movimientos_inventario.referencia guarda
-    // el id de la venta); otros tipos de movimiento (compras, ajustes, etc.) solo muestran el folio.
-    const esVenta = mov.clasificacion === 'venta_pos' && mov.referencia;
-    const folioHtml = esVenta
-      ? `<a href="#" class="link-ticket" data-venta="${mov.referencia}" style="color:var(--azul);">${mov.folio || '—'}</a>`
+    let ventaId = null;
+    if(CLASIF_VENTA_DIRECTA.includes(mov.clasificacion) && mov.referencia){
+      ventaId = mov.referencia;
+    } else if(mov.clasificacion === 'devolucion_venta' && mov.referencia){
+      ventaId = mapaDevolucionAVenta[mov.referencia] || null;
+    }
+    const folioHtml = ventaId
+      ? `<a href="#" class="link-ticket" data-venta="${ventaId}" style="color:var(--azul);">${mov.folio || '—'}</a>`
       : (mov.folio || '—');
     return `<tr>
       <td>${mov.fecha}</td>
@@ -2879,15 +2895,17 @@ async function cargarKardex(){
 $('kardex-actualizar').addEventListener('click', cargarKardex);
 
 // ---------- VER TICKET (desde el folio del Kardex) ----------
-// movimientos_inventario.referencia guarda directamente el id de la venta (ver registrar_venta,
-// migración 039), así que no hace falta pasar por el folio para encontrarla.
+// El id de venta ya llega resuelto desde cargarKardex (directo para venta_pos/modificacion_venta_pos/
+// cancelacion_venta, o resuelto vía la tabla devoluciones para devolucion_venta) — aquí solo se
+// muestra el ticket de esa venta, mostrando siempre los datos ORIGINALES de la venta (no se intenta
+// reconstruir cómo quedó después de una modificación/cancelación/devolución; ver nota en el modal).
 async function abrirTicket(ventaId){
   $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
   $('modal-ticket').classList.add('activo');
 
   const { data: v, error } = await sb.from('ventas')
     .select(`
-      folio, fecha_hora, subtotal, descuento_total, impuesto_total, total, tipo_venta,
+      folio, fecha_hora, subtotal, descuento_total, impuesto_total, total, tipo_venta, estado,
       cliente:clientes(nombre, es_publico_general),
       vendedor:usuarios(nombre),
       detalle:venta_detalle(
@@ -2911,6 +2929,14 @@ async function abrirTicket(ventaId){
 
   const fecha = v.fecha_hora ? new Date(v.fecha_hora).toLocaleString('es-MX') : '—';
   const clienteTxt = (v.cliente && !v.cliente.es_publico_general) ? v.cliente.nombre : 'Público en general';
+  // Este ticket siempre muestra los datos ORIGINALES de la venta, tal como se cobró. Si la venta
+  // fue cancelada o tuvo una devolución después, se avisa con una etiqueta — no se reconstruye
+  // aquí cómo quedó tras esa cancelación/devolución/modificación.
+  const ESTADO_VENTA_BADGE = {
+    cancelada: '<span style="color:#b91c1c;font-weight:600;">· VENTA CANCELADA</span>',
+    con_devolucion: '<span style="color:#b45309;font-weight:600;">· CON DEVOLUCIÓN</span>',
+  };
+  const estadoBadge = ESTADO_VENTA_BADGE[v.estado] || '';
 
   const filasDetalle = (v.detalle||[]).map(d=>{
     const importe = (Number(d.precio_unitario) - Number(d.descuento_unitario||0)) * Number(d.cantidad);
@@ -2940,7 +2966,7 @@ async function abrirTicket(ventaId){
   `).join('');
 
   $('ticket-contenido').innerHTML = `
-    <p class="nota" style="margin:0 0 10px;">Folio ${v.folio} · ${fecha} · ${v.tipo_venta==='credito'?'Crédito':'Contado'} · Cliente: ${clienteTxt}${v.vendedor?.nombre?` · Atendió: ${v.vendedor.nombre}`:''}</p>
+    <p class="nota" style="margin:0 0 10px;">Folio ${v.folio} · ${fecha} · ${v.tipo_venta==='credito'?'Crédito':'Contado'} · Cliente: ${clienteTxt}${v.vendedor?.nombre?` · Atendió: ${v.vendedor.nombre}`:''} ${estadoBadge}</p>
     <div class="tabla-scroll">
       <table>
         <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. unit.</th><th class="num">Importe</th></tr></thead>
