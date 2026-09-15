@@ -606,7 +606,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.009';
+const APP_VERSION = '1.7.010';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2643,7 +2643,7 @@ function renderVentasDiaFiltradas(){
       : (puedeModificar ? 'Modificar' : 'Solo se puede modificar el mismo día, sin devoluciones');
     const hora = v.fecha_hora ? new Date(v.fecha_hora).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
     filasHtml += `<tr>
-      <td>${v.folio}${v.tiene_devolucion ? ' <span class="nota" style="display:inline;">(con devolución)</span>' : ''}</td>
+      <td>${v.folio}${v.tiene_devolucion ? ' <span class="nota" style="display:inline;">(con devolución)</span>' : ''}${v.tiene_modificacion ? ' <span class="nota" style="display:inline;">(Modificado)</span>' : ''}</td>
       <td>${hora}</td>
       <td>${v.cliente}</td>
       <td>${v.cajero}</td>

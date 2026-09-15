@@ -973,7 +973,7 @@
       </div>
       <div class="tabla-scroll" style="margin-top:12px;">
         <table>
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Folio</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Costo unitario</th></tr></thead>
+          <thead><tr><th id="kardex-th-fecha" style="cursor:pointer;user-select:none;" title="Click para cambiar el orden">Fecha <span id="kardex-fecha-flecha">▼</span></th><th>Tipo</th><th>Folio</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Costo unitario</th></tr></thead>
           <tbody id="kardex-tabla-body"></tbody>
         </table>
       </div>
@@ -1186,7 +1186,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.18.003';
+const APP_VERSION = '1.18.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1357,7 +1357,7 @@ const state = {
   usuario: null, rol: null, roles: [], empresaId: null, empresaNombre: '', almacenId: null,
   productos: [], impuestos: [], categorias: [], lineas: [], unidades: [], listasPrecio: [], margenesLinea: [],
   condicionesPago: [], cxcAgrupacion: 'ninguno', cxcVencimientos: [], // Ronda 23
-  productoEditId: null, varianteEditId: null,
+  productoEditId: null, varianteEditId: null, kardexOrdenAsc: false,
   listaEditId: null,
   costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
   catalogoOrden: [], indiceCatalogo: -1,
@@ -2843,7 +2843,7 @@ async function cargarKardex(){
     .eq('variante_id', state.varianteEditId)
     .gte('movimientos_inventario.fecha', desde)
     .lte('movimientos_inventario.fecha', hasta)
-    .order('fecha', { foreignTable: 'movimientos_inventario', ascending: false });
+    .order('fecha', { foreignTable: 'movimientos_inventario', ascending: state.kardexOrdenAsc });
   $('kardex-actualizar').disabled = false;
   if(error){
     $('kardex-tabla-body').innerHTML = '';
@@ -2893,6 +2893,11 @@ async function cargarKardex(){
   });
 }
 $('kardex-actualizar').addEventListener('click', cargarKardex);
+$('kardex-th-fecha').addEventListener('click', ()=>{
+  state.kardexOrdenAsc = !state.kardexOrdenAsc;
+  $('kardex-fecha-flecha').textContent = state.kardexOrdenAsc ? '▲' : '▼';
+  cargarKardex();
+});
 
 // ---------- VER TICKET (desde el folio del Kardex) ----------
 // El id de venta ya llega resuelto desde cargarKardex (directo para venta_pos/modificacion_venta_pos/
@@ -2909,7 +2914,7 @@ async function abrirTicket(ventaId){
       cliente:clientes(nombre, es_publico_general),
       vendedor:usuarios(nombre),
       detalle:venta_detalle(
-        cantidad, precio_unitario, descuento_unitario,
+        cantidad, precio_unitario, descuento_unitario, variante_id,
         variante:variantes(producto:productos(nombre)),
         impuestos:venta_detalle_impuestos(tasa_aplicada, monto, impuesto:impuestos(nombre))
       ),
@@ -2938,10 +2943,26 @@ async function abrirTicket(ventaId){
   };
   const estadoBadge = ESTADO_VENTA_BADGE[v.estado] || '';
 
+  // Si esta venta tuvo una modificación, movimientos_inventario_detalle ya guarda el delta por
+  // producto (una fila 'salida' cuando la cantidad aumentó, una fila 'entrada' cuando disminuyó,
+  // ligadas a movimientos_inventario.clasificacion='modificacion_venta_pos' con referencia=venta_id).
+  // No hace falta guardar nada nuevo: se puede armar la nota "-1 (Modificado)" con lo que ya existe.
+  let deltasPorVariante = {};
+  const { data: movsMod } = await sb.from('movimientos_inventario_detalle')
+    .select('cantidad, variante_id, movimientos_inventario!inner(tipo, clasificacion, referencia)')
+    .eq('movimientos_inventario.clasificacion', 'modificacion_venta_pos')
+    .eq('movimientos_inventario.referencia', ventaId);
+  (movsMod || []).forEach(m=>{
+    const signo = m.movimientos_inventario.tipo === 'salida' ? 1 : -1;
+    deltasPorVariante[m.variante_id] = (deltasPorVariante[m.variante_id] || 0) + signo * Math.abs(Number(m.cantidad));
+  });
+
   const filasDetalle = (v.detalle||[]).map(d=>{
     const importe = (Number(d.precio_unitario) - Number(d.descuento_unitario||0)) * Number(d.cantidad);
+    const delta = deltasPorVariante[d.variante_id];
+    const notaModificado = delta ? `<br><span class="nota" style="color:#b45309;">${delta > 0 ? '+' : ''}${delta} (Modificado)</span>` : '';
     return `<tr>
-      <td>${d.variante?.producto?.nombre || '—'}</td>
+      <td>${d.variante?.producto?.nombre || '—'}${notaModificado}</td>
       <td class="num">${d.cantidad}</td>
       <td class="num">${money(d.precio_unitario)}</td>
       <td class="num">${money(importe)}</td>
