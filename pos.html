@@ -606,7 +606,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.010';
+const APP_VERSION = '1.7.011';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2667,10 +2667,15 @@ function renderVentasDiaFiltradas(){
 }
 
 // ---- Reimprimir ----
-function htmlTicketDesdeDatos(datos){
+function htmlTicketDesdeDatos(datos, deltasPorVariante){
+  deltasPorVariante = deltasPorVariante || {};
   const logoHtml = state.logoUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${state.logoUrl}" alt="" style="max-height:56px;max-width:100%;object-fit:contain;"></div>` : '';
   const fecha = datos.fecha_hora ? new Date(datos.fecha_hora).toLocaleString('es-MX') : '';
-  const filasItems = (datos.lineas||[]).map(l=>`<tr><td>${l.producto} x${l.cantidad}</td><td class="num">${money((l.precio_unitario - l.descuento_unitario) * l.cantidad * (1 + (l.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0),0)))}</td></tr>`).join('');
+  const filasItems = (datos.lineas||[]).map(l=>{
+    const delta = deltasPorVariante[l.variante_id];
+    const notaModificado = delta ? `<br><span class="nota" style="color:#b45309;">${delta > 0 ? '+' : ''}${delta} (Modificado)</span>` : '';
+    return `<tr><td>${l.producto} x${l.cantidad}${notaModificado}</td><td class="num">${money((l.precio_unitario - l.descuento_unitario) * l.cantidad * (1 + (l.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0),0)))}</td></tr>`;
+  }).join('');
   const filasPagos = (datos.pagos||[]).map(p=>`<div class="linea monto-grande"><span>${p.forma_pago}</span><span>${money(p.monto)}</span></div>`).join('');
   return `
     ${logoHtml}
@@ -2687,13 +2692,29 @@ function htmlTicketDesdeDatos(datos){
   `;
 }
 let reimprimirDatosActuales = null;
+// Si el ticket fue modificado, movimientos_inventario_detalle ya guarda el delta por producto (ver
+// admin.html/abrirTicket) — se arma igual aquí para mostrar la misma nota "-1 (Modificado)" al
+// reimprimir desde el POS, sin necesidad de guardar nada nuevo.
+async function obtenerDeltasModificacion(ventaId){
+  const { data: movsMod } = await sb.from('movimientos_inventario_detalle')
+    .select('cantidad, variante_id, movimientos_inventario!inner(tipo, clasificacion, referencia)')
+    .eq('movimientos_inventario.clasificacion', 'modificacion_venta_pos')
+    .eq('movimientos_inventario.referencia', ventaId);
+  const deltas = {};
+  (movsMod || []).forEach(m=>{
+    const signo = m.movimientos_inventario.tipo === 'salida' ? 1 : -1;
+    deltas[m.variante_id] = (deltas[m.variante_id] || 0) + signo * Math.abs(Number(m.cantidad));
+  });
+  return deltas;
+}
 async function abrirReimprimirTicket(ventaId){
   $('vd-error').innerHTML = '';
   const { data, error } = await sb.rpc('venta_detalle_completo', { p_venta_id: ventaId });
   if(error){ $('vd-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
   reimprimirDatosActuales = data;
   $('reimprimir-error').innerHTML = '';
-  const html = htmlTicketDesdeDatos(data);
+  const deltas = await obtenerDeltasModificacion(ventaId);
+  const html = htmlTicketDesdeDatos(data, deltas);
   $('reimprimir-body').innerHTML = html;
   $('ticket-imprimible').innerHTML = html;
   $('modal-reimprimir').classList.add('activo');

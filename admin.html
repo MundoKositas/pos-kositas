@@ -1186,7 +1186,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.18.004';
+const APP_VERSION = '1.18.005';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2838,12 +2838,16 @@ async function cargarKardex(){
   const desde = $('kardex-desde').value;
   const hasta = $('kardex-hasta').value;
   $('kardex-actualizar').disabled = true;
+  // Se ordena por 'creado_en' (fecha y hora real) en vez de 'fecha' (que solo guarda el día, sin
+  // hora) — con 'fecha' varios movimientos del mismo día quedan empatados y no hay nada que
+  // reordenar entre ellos, así que el botón de cambiar orden parecía no hacer nada. 'creado_en' sí
+  // distingue el orden real en que ocurrió cada movimiento, aunque sea el mismo día.
   const { data, error } = await sb.from('movimientos_inventario_detalle')
-    .select('cantidad, costo_unitario, movimientos_inventario!inner(fecha, tipo, folio, descripcion, clasificacion, referencia)')
+    .select('cantidad, costo_unitario, movimientos_inventario!inner(fecha, tipo, folio, descripcion, clasificacion, referencia, creado_en)')
     .eq('variante_id', state.varianteEditId)
     .gte('movimientos_inventario.fecha', desde)
     .lte('movimientos_inventario.fecha', hasta)
-    .order('fecha', { foreignTable: 'movimientos_inventario', ascending: state.kardexOrdenAsc });
+    .order('creado_en', { foreignTable: 'movimientos_inventario', ascending: state.kardexOrdenAsc });
   $('kardex-actualizar').disabled = false;
   if(error){
     $('kardex-tabla-body').innerHTML = '';
