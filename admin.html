@@ -332,6 +332,11 @@
 
   <!-- TAB COMPRAS -->
   <div class="tab-panel" id="tab-compras" style="display:none;">
+    <div class="tabs" id="compras-tabs" style="margin-bottom:14px;">
+      <button type="button" class="tab-btn activo" data-comprastab="compras-panel-compras">Compras</button>
+      <button type="button" class="tab-btn" data-comprastab="compras-panel-cxp">Cuentas por pagar</button>
+    </div>
+    <div id="compras-panel-compras">
     <div class="card">
       <div class="fila" style="justify-content:space-between;align-items:center;">
         <h2 style="margin:0;">Nueva compra</h2>
@@ -360,6 +365,20 @@
         <div class="campo"><label>Folio del documento (factura/remisión)</label><input type="text" id="compra-folio"></div>
         <div class="campo"><label>Fecha de compra</label><input type="date" id="compra-fecha"></div>
       </div>
+      <div class="grid-2">
+        <div class="campo">
+          <label>Tipo de compra</label>
+          <select id="compra-tipo">
+            <option value="contado">De contado</option>
+            <option value="credito">A crédito</option>
+          </select>
+        </div>
+        <div class="campo" id="compra-condicion-pago-campo" style="display:none;">
+          <label>Condición de pago</label>
+          <select id="compra-condicion-pago"></select>
+        </div>
+      </div>
+      <p class="nota" id="compra-credito-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total de la compra.</p>
 
       <h3 class="seccion">Productos de la compra</h3>
       <div class="campo" style="position:relative;">
@@ -405,6 +424,48 @@
         </table>
       </div>
       <p class="nota" id="compras-lista-vacio" style="display:none;">No hay compras registradas en ese rango.</p>
+    </div>
+    </div>
+
+    <!-- CxP (Ronda 45): mismo patrón que Cuentas por cobrar de Clientes, pero del lado de
+         proveedores — con la diferencia de que aquí SÍ se registra el pago (no es solo lectura),
+         porque las compras/proveedores viven en admin.html, no en el POS. -->
+    <div id="compras-panel-cxp" style="display:none;">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+          <h2 style="margin:0;">Cuentas por pagar</h2>
+          <div class="fila" style="gap:8px;">
+            <select id="cxp-formato-exportar" style="width:auto;">
+              <option value="excel">Excel</option>
+              <option value="pdf">PDF</option>
+            </select>
+            <button type="button" class="btn-secundario" id="cxp-exportar">Exportar</button>
+          </div>
+        </div>
+        <div class="fila" style="gap:10px;flex-wrap:wrap;margin-top:8px;">
+          <div class="col" style="min-width:220px;">
+            <label>Buscar proveedor</label>
+            <input type="text" id="cxp-buscar" placeholder="Nombre del proveedor…">
+          </div>
+          <div class="col" style="min-width:220px;">
+            <label>Agrupar por</label>
+            <select id="cxp-agrupar">
+              <option value="">Sin agrupar</option>
+              <option value="vencimiento">Fecha de vencimiento</option>
+            </select>
+          </div>
+        </div>
+        <div class="tabla-scroll" style="margin-top:14px;">
+          <table>
+            <thead id="cxp-thead"><tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo actual</th><th></th></tr></thead>
+            <tbody id="cxp-tabla-body"></tbody>
+          </table>
+        </div>
+        <p class="nota" id="cxp-vacio" style="display:none;">Ningún proveedor tiene saldo pendiente.</p>
+        <div class="totales" style="margin-top:10px;">
+          <div class="linea total-final"><span>Total por pagar</span><span id="cxp-total">$0.00</span></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -873,6 +934,40 @@
   </div>
 </div>
 
+<!-- MODAL: estado de cuenta / pagar a un proveedor (Ronda 45) — a diferencia del de cliente, aquí SÍ
+     se registra el pago (no es solo lectura), porque las compras/proveedores viven en admin.html. -->
+<div class="modal-fondo" id="modal-estado-cuenta-proveedor">
+  <div class="modal" style="max-width:640px;">
+    <h2 id="ecp-titulo">Estado de cuenta</h2>
+    <p class="nota" id="ecp-resumen"></p>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
+        <tbody id="ecp-tabla-body"></tbody>
+      </table>
+    </div>
+    <p class="nota" id="ecp-vacio" style="display:none;">Este proveedor no tiene movimientos todavía.</p>
+
+    <div id="ecp-pago-seccion" style="margin-top:16px;border-top:1px solid var(--borde);padding-top:14px;">
+      <h3 class="seccion" style="margin-top:0;">Registrar pago</h3>
+      <div class="grid-2">
+        <div class="campo"><label>Monto a pagar</label><input type="text" inputmode="decimal" id="ecp-monto"></div>
+        <div class="campo"><label>Forma de pago</label><select id="ecp-forma-pago"></select></div>
+      </div>
+      <div class="campo" id="ecp-caja-campo" style="display:none;">
+        <label>Caja de la que sale el efectivo</label>
+        <select id="ecp-caja"></select>
+        <p class="nota" id="ecp-caja-vacio" style="display:none;">No hay ninguna caja con turno abierto en este momento — no se puede registrar un pago en efectivo hasta que un cajero abra su caja.</p>
+      </div>
+      <div class="campo"><label>Referencia (opcional)</label><input type="text" id="ecp-referencia" placeholder="Ej. núm. de transferencia"></div>
+      <div id="ecp-error"></div>
+      <button class="btn-primario" style="width:100%;" id="ecp-pagar">Registrar pago</button>
+    </div>
+
+    <button class="btn-gris" style="width:100%;margin-top:14px;" id="ecp-cerrar">Cerrar</button>
+  </div>
+</div>
+
 <!-- MODAL: producto -->
 <div class="modal-fondo" id="modal-producto">
   <div class="modal ancho" id="card-producto">
@@ -1186,7 +1281,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.18.006';
+const APP_VERSION = '1.19.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1795,7 +1890,7 @@ document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
 
 // ---------- CATÁLOGOS BASE ----------
 async function cargarCatalogosBase(){
-  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}] = await Promise.all([
+  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}, {data: formasPago}] = await Promise.all([
     sb.from('impuestos').select('*').order('nombre'),
     sb.from('categorias').select('*').order('nombre'),
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
@@ -1804,6 +1899,7 @@ async function cargarCatalogosBase(){
     sb.from('listas_precio_margen_linea').select('*'),
     sb.from('marcas').select('*').eq('activo', true).order('nombre'),
     sb.from('condiciones_pago').select('*').eq('activo', true).order('dias'), // Ronda 23
+    sb.from('formas_pago').select('*').eq('activo', true).order('nombre'), // Ronda 45 — pago a proveedores (CxP)
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
@@ -1813,6 +1909,7 @@ async function cargarCatalogosBase(){
   state.margenesLinea = margenesLinea || [];
   state.marcas = marcas || [];
   state.condicionesPago = condicionesPago || [];
+  state.formasPago = formasPago || [];
 
   llenarSelect('prod-categoria', state.categorias, c=>c.id, c=>c.nombre);
   habilitarComboBuscable('prod-categoria');
@@ -3421,6 +3518,9 @@ function prepararPantallaCompras(){
   $('compra-con-impuestos').checked = state.desglosarImpuestos === false;
   $('compra-xml-estado').innerHTML = '';
   $('compra-error').innerHTML = '';
+  $('compra-tipo').value = 'contado';
+  llenarSelect('compra-condicion-pago', state.condicionesPago || [], c=>c.id, c=>`${c.nombre} (${c.dias} días)`);
+  actualizarVisibilidadCreditoCompra();
   state.compraLineas = [];
   state.xmlCfdiUuid = null;
   state.xmlPendientes = [];
@@ -3446,6 +3546,13 @@ function renderProveedorSelect(){
   if(valorPrevio && state.proveedores.some(p=>p.id===valorPrevio)) $('compra-proveedor').value = valorPrevio;
   habilitarComboBuscable('compra-proveedor');
 }
+function actualizarVisibilidadCreditoCompra(){
+  const esCredito = $('compra-tipo').value === 'credito';
+  $('compra-condicion-pago-campo').style.display = esCredito ? 'block' : 'none';
+  $('compra-credito-nota').style.display = esCredito ? 'block' : 'none';
+}
+$('compra-tipo').addEventListener('change', actualizarVisibilidadCreditoCompra);
+
 $('compra-proveedor-nuevo-abrir').addEventListener('click', ()=>{
   $('compra-proveedor-nuevo').style.display = 'flex';
   $('compra-proveedor-nuevo-nombre').value = '';
@@ -3567,6 +3674,11 @@ $('compra-registrar').addEventListener('click', async ()=>{
   $('compra-error').innerHTML = '';
   if(!state.compraLineas.length){ $('compra-error').innerHTML = '<div class="msg-error">Agrega al menos un producto a la compra.</div>'; return; }
   if(!$('compra-fecha').value){ $('compra-error').innerHTML = '<div class="msg-error">Captura la fecha de compra.</div>'; return; }
+  const tipoCompra = $('compra-tipo').value;
+  if(tipoCompra === 'credito' && !$('compra-proveedor').value){
+    $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito debe tener un proveedor asignado.</div>';
+    return;
+  }
   const listaPublica = obtenerListaPublica();
   const payload = {
     empresa_id: state.empresaId,
@@ -3579,6 +3691,8 @@ $('compra-registrar').addEventListener('click', async ()=>{
     origen: 'manual',
     lista_publico_id: listaPublica ? listaPublica.id : null,
     cfdi_uuid: state.xmlCfdiUuid || null,
+    tipo_compra: tipoCompra,
+    condicion_pago_id: tipoCompra === 'credito' ? ($('compra-condicion-pago').value || null) : null,
     lineas: state.compraLineas.map(l=>({
       variante_id: l.varianteId, cantidad: Number(l.cantidad)||0, costo_unitario: Number(l.costoUnitario)||0,
       precio_publico: l.precioPublico != null && l.precioPublico !== '' ? Number(l.precioPublico) : null,
@@ -3591,9 +3705,16 @@ $('compra-registrar').addEventListener('click', async ()=>{
   state.compraLineas = [];
   state.xmlCfdiUuid = null;
   $('compra-folio').value = '';
+  $('compra-tipo').value = 'contado';
+  actualizarVisibilidadCreditoCompra();
   renderLineasCompra();
   await cargarProductos();
   await cargarComprasLista();
+  if(tipoCompra === 'credito'){
+    const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+    state.proveedores = proveedores || [];
+    renderProveedorSelect();
+  }
 });
 
 $('compras-lista-buscar').addEventListener('click', cargarComprasLista);
@@ -4722,6 +4843,199 @@ $('cxc-exportar').addEventListener('click', async ()=>{
     exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxC', encabezados, filas, tipos, [2,3,4]);
   } else {
     await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por cobrar', state.empresaNombre, encabezados, filas, tipos, [2,3,4], [2,3,4]);
+  }
+});
+
+// ---------- CUENTAS POR PAGAR (Ronda 45) — espejo de Cuentas por cobrar, pero de proveedores. A
+// diferencia de CxC (donde los abonos se registran desde el POS y esta pantalla es solo lectura),
+// aquí el pago SÍ se registra desde admin.html, porque Compras/Proveedores vive solo aquí.
+document.querySelectorAll('#compras-tabs .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#compras-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
+    btn.classList.add('activo');
+    ['compras-panel-compras','compras-panel-cxp'].forEach(id=>{
+      $(id).style.display = (id === btn.dataset.comprastab) ? 'block' : 'none';
+    });
+    if(btn.dataset.comprastab === 'compras-panel-cxp') renderCxpTabla();
+  });
+});
+
+function nombreMovimientoProveedor(m){
+  return m.tipo === 'cargo' ? 'Cargo (compra a crédito)' : 'Pago';
+}
+async function abrirEstadoCuentaProveedor(id){
+  const p = state.proveedores.find(x=>x.id===id);
+  if(!p) return;
+  state.ecpProveedorActual = p;
+  $('ecp-titulo').textContent = `Estado de cuenta — ${p.nombre}`;
+  $('ecp-resumen').textContent = `Saldo actual: ${money(p.saldo_actual)}`;
+  $('ecp-tabla-body').innerHTML = '<tr><td colspan="4" class="nota">Cargando…</td></tr>';
+  $('ecp-error').innerHTML = '';
+  $('ecp-monto').value = '';
+  $('ecp-referencia').value = '';
+  llenarSelect('ecp-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
+  await actualizarCajaPagoProveedor();
+  $('modal-estado-cuenta-proveedor').classList.add('activo');
+  const { data: movs, error } = await sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false});
+  if(error){ $('ecp-tabla-body').innerHTML = `<tr><td colspan="4" class="msg-error">${error.message}</td></tr>`; return; }
+  $('ecp-vacio').style.display = (movs && movs.length) ? 'none' : 'block';
+  $('ecp-tabla-body').innerHTML = (movs||[]).map(m=>{
+    const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
+    const signo = efecto < 0 ? '-' : '+';
+    return `<tr>
+      <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
+      <td>${nombreMovimientoProveedor(m)}</td>
+      <td>${m.referencia || '—'}</td>
+      <td class="num">${signo}${money(Math.abs(efecto))}</td>
+    </tr>`;
+  }).join('');
+  $('ecp-pago-seccion').style.display = Number(p.saldo_actual) > 0 ? 'block' : 'none';
+}
+$('ecp-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta-proveedor').classList.remove('activo'); });
+
+// El pago en efectivo debe salir de una caja con turno abierto EN ESTE MOMENTO (a petición explícita
+// de Adrián: el pago sí debe afectar el efectivo esperado de esa caja) — se listan todas las cajas
+// abiertas de todas las sucursales, porque admin.html no está atado a una sola sucursal como el POS.
+async function cajasAbiertasAhora(){
+  const { data, error } = await sb.from('sesiones_caja')
+    .select('id, cajas(nombre, sucursal_id), usuarios(nombre)')
+    .eq('estado', 'abierta');
+  if(error){ console.error(error); return []; }
+  return data || [];
+}
+function formaPagoProveedorEsEfectivo(){
+  const forma = state.formasPago.find(f=>f.id===$('ecp-forma-pago').value);
+  return forma?.nombre === 'Efectivo';
+}
+async function actualizarCajaPagoProveedor(){
+  const esEfectivo = formaPagoProveedorEsEfectivo();
+  $('ecp-caja-campo').style.display = esEfectivo ? 'block' : 'none';
+  if(!esEfectivo) return;
+  const cajas = await cajasAbiertasAhora();
+  $('ecp-caja-vacio').style.display = cajas.length ? 'none' : 'block';
+  $('ecp-caja').innerHTML = cajas.map(s=>{
+    const sucursal = state.sucursales.find(x=>x.id === s.cajas?.sucursal_id);
+    return `<option value="${s.id}">${s.cajas?.nombre || '—'} — ${sucursal?.nombre || '—'} (turno de ${s.usuarios?.nombre || '—'})</option>`;
+  }).join('');
+}
+$('ecp-forma-pago').addEventListener('change', actualizarCajaPagoProveedor);
+$('ecp-pagar').addEventListener('click', async ()=>{
+  $('ecp-error').innerHTML = '';
+  const p = state.ecpProveedorActual;
+  const monto = parseMoney($('ecp-monto').value);
+  const formaPagoId = $('ecp-forma-pago').value;
+  if(!p || !monto || monto<=0 || !formaPagoId){
+    $('ecp-error').innerHTML = '<div class="msg-error">Captura un monto válido y la forma de pago.</div>';
+    return;
+  }
+  const esEfectivo = formaPagoProveedorEsEfectivo();
+  const sesionCajaId = esEfectivo ? ($('ecp-caja').value || null) : null;
+  if(esEfectivo && !sesionCajaId){
+    $('ecp-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
+    return;
+  }
+  const referencia = $('ecp-referencia').value.trim() || null;
+  $('ecp-pagar').disabled = true;
+  const { error } = await sb.rpc('registrar_pago_proveedor', {
+    p_proveedor_id: p.id, p_monto: monto, p_forma_pago_id: formaPagoId,
+    p_sesion_caja_id: sesionCajaId, p_referencia: referencia,
+  });
+  $('ecp-pagar').disabled = false;
+  if(error){
+    $('ecp-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  state.proveedores = proveedores || [];
+  renderProveedorSelect();
+  await abrirEstadoCuentaProveedor(p.id);
+  renderCxpTabla();
+});
+
+function proveedoresConSaldo(){
+  return state.proveedores.filter(p => Number(p.saldo_actual) > 0)
+    .sort((a,b)=> Number(b.saldo_actual) - Number(a.saldo_actual));
+}
+function proveedoresConSaldoFiltrados(){
+  const q = ($('cxp-buscar').value || '').trim().toLowerCase();
+  const items = proveedoresConSaldo();
+  return q ? items.filter(p => (p.nombre||'').toLowerCase().includes(q)) : items;
+}
+async function cxpVencimientosFiltrados(){
+  const { data, error } = await sb.rpc('reporte_cxp_vencimientos', { p_empresa_id: state.empresaId });
+  if(error){ console.error('reporte_cxp_vencimientos:', error); return []; }
+  state.cxpVencimientos = data || [];
+  const q = ($('cxp-buscar').value || '').trim().toLowerCase();
+  return q ? state.cxpVencimientos.filter(v => (v.proveedor_nombre||'').toLowerCase().includes(q)) : state.cxpVencimientos;
+}
+function filaAccionProveedor(proveedorId){ return `<button type="button" class="btn-gris cxp-estado-cuenta" data-id="${proveedorId}">Estado de cuenta</button>`; }
+function conectarBotonesEstadoCuentaProveedor(){
+  $('cxp-tabla-body').querySelectorAll('.cxp-estado-cuenta').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirEstadoCuentaProveedor(btn.dataset.id));
+  });
+}
+const THEAD_CXP_NORMAL = '<tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo actual</th><th></th></tr>';
+const THEAD_CXP_VENCIMIENTO = '<tr><th>Proveedor</th><th>Referencia</th><th>Fecha de vencimiento</th><th class="num">Importe que vence</th><th></th></tr>';
+async function renderCxpTabla(){
+  const modo = $('cxp-agrupar').value;
+  $('cxp-thead').innerHTML = modo === 'vencimiento' ? THEAD_CXP_VENCIMIENTO : THEAD_CXP_NORMAL;
+
+  if(modo === 'vencimiento'){
+    const filas = await cxpVencimientosFiltrados();
+    $('cxp-vacio').style.display = filas.length ? 'none' : 'block';
+    $('cxp-tabla-body').innerHTML = filas.map(v=>`<tr>
+        <td>${v.proveedor_nombre}</td><td>${v.referencia || '—'}</td>
+        <td>${v.fecha_vencimiento ? new Date(v.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-MX') : '(sin condición de pago)'}</td>
+        <td class="num">${money(v.monto_pendiente)}</td>
+        <td>${filaAccionProveedor(v.proveedor_id)}</td>
+      </tr>`).join('');
+    conectarBotonesEstadoCuentaProveedor();
+    $('cxp-total').textContent = money(filas.reduce((s,v)=>s+Number(v.monto_pendiente),0));
+    return;
+  }
+
+  const items = proveedoresConSaldoFiltrados();
+  $('cxp-vacio').style.display = items.length ? 'none' : 'block';
+  $('cxp-tabla-body').innerHTML = items.map(p=>`<tr>
+      <td>${p.nombre}</td><td>${p.telefono || '—'}</td>
+      <td class="num">${money(p.saldo_actual)}</td>
+      <td>${filaAccionProveedor(p.id)}</td>
+    </tr>`).join('');
+  conectarBotonesEstadoCuentaProveedor();
+  $('cxp-total').textContent = money(items.reduce((s,p)=>s+Number(p.saldo_actual),0));
+}
+$('cxp-buscar').addEventListener('input', renderCxpTabla);
+$('cxp-agrupar').addEventListener('change', renderCxpTabla);
+
+$('cxp-exportar').addEventListener('click', async ()=>{
+  const modo = $('cxp-agrupar').value;
+  const nombreArchivoBase = `cuentas_por_pagar_${modo === 'vencimiento' ? 'por_vencimiento_' : ''}${fechaLocalISO()}`;
+
+  if(modo === 'vencimiento'){
+    const filas0 = await cxpVencimientosFiltrados();
+    const encabezados = ['Proveedor','Referencia','Fecha de vencimiento','Condición de pago','Importe que vence'];
+    const filas = filas0.map(v=>[v.proveedor_nombre, v.referencia || '—', v.fecha_vencimiento ? new Date(v.fecha_vencimiento+'T00:00:00').toLocaleDateString('es-MX') : '(sin condición)', v.condicion_pago_nombre || '—', Number(v.monto_pendiente)||0]);
+    const tipos = filas0.map(()=>'producto');
+    filas.push(['TOTAL GENERAL', '', '', '', redondear2(filas0.reduce((s,v)=>s+Number(v.monto_pendiente),0))]);
+    tipos.push('total');
+    if($('cxp-formato-exportar').value === 'excel'){
+      exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxP', encabezados, filas, tipos, [4]);
+    } else {
+      await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por pagar — por fecha de vencimiento', state.empresaNombre, encabezados, filas, tipos, [4], [4]);
+    }
+    return;
+  }
+
+  const items = proveedoresConSaldoFiltrados();
+  const encabezados = ['Proveedor','Teléfono','Saldo actual'];
+  const filas = items.map(p=>[p.nombre, p.telefono || '—', Number(p.saldo_actual)||0]);
+  const tipos = items.map(()=>'producto');
+  filas.push(['TOTAL GENERAL', '', redondear2(items.reduce((s,p)=>s+Number(p.saldo_actual),0))]);
+  tipos.push('total');
+  if($('cxp-formato-exportar').value === 'excel'){
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxP', encabezados, filas, tipos, [2]);
+  } else {
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por pagar', state.empresaNombre, encabezados, filas, tipos, [2], [2]);
   }
 });
 
