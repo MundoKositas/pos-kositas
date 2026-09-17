@@ -970,7 +970,7 @@
     </div>
     <div class="tabla-scroll">
       <table>
-        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Forma de pago</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Movimiento</th><th class="num">Monto</th><th>Forma de pago</th><th>Referencia</th></tr></thead>
         <tbody id="ecp-tabla-body"></tbody>
       </table>
     </div>
@@ -1349,7 +1349,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.21.001';
+const APP_VERSION = '1.21.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5031,12 +5031,13 @@ function renderEcpTabla(){
     const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
     const signo = efecto < 0 ? '-' : '+';
     const forma = state.formasPago.find(f=>f.id===m.forma_pago_id);
+    const referencia = m.referencia || '—';
     return `<tr>
-      <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
-      <td>${etiquetaMovimientoProveedor(m)}</td>
-      <td>${forma ? forma.nombre : '—'}</td>
-      <td>${m.referencia || '—'}</td>
-      <td class="num">${signo}${money(Math.abs(efecto))}</td>
+      <td style="white-space:nowrap;">${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
+      <td style="white-space:nowrap;">${etiquetaMovimientoProveedor(m)}</td>
+      <td class="num" style="white-space:nowrap;">${signo}${money(Math.abs(efecto))}</td>
+      <td style="white-space:nowrap;">${forma ? forma.nombre : '—'}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${referencia}">${referencia}</td>
     </tr>`;
   }).join('');
   $('ecp-pagina-info').textContent = movs.length
@@ -5056,18 +5057,18 @@ $('ecp-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta-proveedor
 $('ecp-exportar').addEventListener('click', async ()=>{
   const p = state.ecpProveedorActual;
   if(!p) return;
-  const encabezados = ['Fecha','Movimiento','Forma de pago','Referencia','Monto'];
+  const encabezados = ['Fecha','Movimiento','Monto','Forma de pago','Referencia'];
   const filas = state.ecpMovimientos.map(m=>{
     const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
     const forma = state.formasPago.find(f=>f.id===m.forma_pago_id);
-    return [new Date(m.fecha_hora).toLocaleString('es-MX'), etiquetaMovimientoProveedor(m), forma ? forma.nombre : '—', m.referencia || '—', redondear2(efecto)];
+    return [new Date(m.fecha_hora).toLocaleString('es-MX'), etiquetaMovimientoProveedor(m), redondear2(efecto), forma ? forma.nombre : '—', m.referencia || '—'];
   });
   const tipos = filas.map(()=>'producto');
   const nombreArchivoBase = `estado_cuenta_${p.nombre.replace(/[^a-z0-9]+/gi,'_')}_${fechaLocalISO()}`;
   if($('ecp-formato-exportar').value === 'excel'){
-    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'Estado de cuenta', encabezados, filas, tipos, [4]);
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'Estado de cuenta', encabezados, filas, tipos, [2]);
   } else {
-    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, `Estado de cuenta — ${p.nombre}`, state.empresaNombre, encabezados, filas, tipos, [4], [4]);
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, `Estado de cuenta — ${p.nombre}`, state.empresaNombre, encabezados, filas, tipos, [2], [2]);
   }
 });
 
