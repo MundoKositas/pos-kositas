@@ -372,6 +372,7 @@
             <option value="contado">De contado</option>
             <option value="anticipo">Con anticipo (ya pagué un depósito)</option>
             <option value="credito">A crédito</option>
+            <option value="mixto">Combinando varias formas de pago</option>
           </select>
         </div>
         <div class="campo" id="compra-condicion-pago-campo" style="display:none;">
@@ -386,6 +387,48 @@
       </div>
       <p class="nota" id="compra-credito-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total de la compra, con impuestos incluidos.</p>
       <p class="nota" id="compra-anticipo-nota" style="display:none;">Se aplicará el anticipo elegido por el total de esta compra (con impuestos). Si el anticipo no alcanza a cubrirlo, no se podrá registrar así — elige otro anticipo o cambia el tipo de compra.</p>
+
+      <div class="campo" id="compra-mixto-campo" style="display:none;">
+        <label>Formas de pago combinadas</label>
+        <p class="nota">Agrega las líneas que necesites (anticipo, pago inmediato en cualquier forma habilitada, y/o crédito) hasta cubrir el total exacto de la compra.</p>
+        <div class="nota" id="compra-mixto-resumen" style="margin-bottom:8px;"></div>
+        <table style="width:100%;margin-bottom:10px;">
+          <tbody id="compra-mixto-lineas-body"></tbody>
+        </table>
+        <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="campo" style="flex:1;min-width:150px;">
+            <label>Tipo</label>
+            <select id="compra-mixto-nueva-tipo">
+              <option value="anticipo">Anticipo</option>
+              <option value="pago">Pago inmediato</option>
+              <option value="credito">A crédito</option>
+            </select>
+          </div>
+          <div class="campo" id="compra-mixto-nueva-anticipo-campo" style="flex:1;min-width:190px;">
+            <label>Anticipo</label>
+            <select id="compra-mixto-nueva-anticipo"></select>
+          </div>
+          <div class="campo" id="compra-mixto-nueva-forma-campo" style="flex:1;min-width:160px;display:none;">
+            <label>Forma de pago</label>
+            <select id="compra-mixto-nueva-forma"></select>
+          </div>
+          <div class="campo" id="compra-mixto-nueva-caja-campo" style="flex:1;min-width:190px;display:none;">
+            <label>Caja</label>
+            <select id="compra-mixto-nueva-caja"></select>
+            <p class="nota" id="compra-mixto-nueva-caja-vacio" style="display:none;">No hay cajas con turno abierto.</p>
+          </div>
+          <div class="campo" id="compra-mixto-nueva-condicion-campo" style="flex:1;min-width:170px;display:none;">
+            <label>Condición de pago</label>
+            <select id="compra-mixto-nueva-condicion"></select>
+          </div>
+          <div class="campo" style="width:120px;">
+            <label>Monto</label>
+            <span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" id="compra-mixto-nueva-monto" class="num-libre" data-dec="2" style="width:100px;text-align:right;"></span>
+          </div>
+          <button type="button" class="btn-secundario" id="compra-mixto-agregar-linea">+ Agregar línea</button>
+        </div>
+        <div id="compra-mixto-error"></div>
+      </div>
 
       <h3 class="seccion">Productos de la compra</h3>
       <div class="campo" style="position:relative;">
@@ -1349,7 +1392,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.22.001';
+const APP_VERSION = '1.23.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1561,6 +1604,21 @@ function mostrarPantalla(id){
   $(id).classList.add('activa');
 }
 $('version-tag').textContent = APP_VERSION;
+
+// Ronda 51: mismo fix que en pos.html — cuando la sesión caduca (falla el refresco del token),
+// supabase-js dispara este evento con session=null. Si había una sesión activa, no debe seguir
+// mostrando pantallas/datos de esa sesión: se limpia el estado y se manda a login de inmediato en
+// vez de esperar a que alguien note algo raro y le dé F5.
+let sesionAdminActiva = false;
+sb.auth.onAuthStateChange((_event, session) => {
+  if(session){ sesionAdminActiva = true; return; }
+  if(!sesionAdminActiva) return; // estado inicial antes de loguearse — nada que limpiar
+  sesionAdminActiva = false;
+  state.usuario = null; state.rol = null; state.roles = []; state.empresaId = null;
+  $('header-app').style.display = 'none';
+  mostrarPantalla('pantalla-login');
+  $('login-error').innerHTML = '<div class="msg-error">Tu sesión expiró — vuelve a iniciar sesión.</div>';
+});
 
 habilitarEnterSecuencial($('card-login'), $('btn-login'));
 habilitarEnterSecuencial($('card-producto'), $('prod-guardar'));
@@ -3620,14 +3678,154 @@ function actualizarVisibilidadCreditoCompra(){
   const tipo = $('compra-tipo').value;
   const esCredito = tipo === 'credito';
   const esAnticipo = tipo === 'anticipo';
+  const esMixto = tipo === 'mixto';
   $('compra-condicion-pago-campo').style.display = esCredito ? 'block' : 'none';
   $('compra-anticipo-campo').style.display = esAnticipo ? 'block' : 'none';
+  $('compra-mixto-campo').style.display = esMixto ? 'block' : 'none';
   $('compra-credito-nota').style.display = esCredito ? 'block' : 'none';
   $('compra-anticipo-nota').style.display = esAnticipo ? 'block' : 'none';
   if(esAnticipo) cargarAnticiposDisponiblesCompra();
+  if(esMixto){ state.compraMixtoLineas = []; prepararMixtoCompra(); }
 }
 $('compra-tipo').addEventListener('change', actualizarVisibilidadCreditoCompra);
-$('compra-proveedor').addEventListener('change', ()=>{ if($('compra-tipo').value === 'anticipo') cargarAnticiposDisponiblesCompra(); });
+$('compra-proveedor').addEventListener('change', ()=>{
+  if($('compra-tipo').value === 'anticipo') cargarAnticiposDisponiblesCompra();
+  if($('compra-tipo').value === 'mixto') prepararMixtoCompra();
+});
+
+// Ronda 51: compra 'mixta' — combina cualquier número de anticipos, pagos inmediatos (en cualquier
+// forma de pago habilitada) y una porción a crédito, hasta cubrir el total exacto (con impuestos).
+// Adrián lo pidió porque un anticipo casi nunca cae en un monto exacto ("tengo el anticipo de $80 y
+// el saldo de $0.99 — no veo donde agregar otro anticipo u otra forma de pago").
+state.compraMixtoLineas = [];
+async function prepararMixtoCompra(){
+  const proveedorId = $('compra-proveedor').value;
+  const sel = $('compra-mixto-nueva-anticipo');
+  if(!proveedorId){
+    sel.innerHTML = '<option value="">(elige primero un proveedor)</option>';
+  } else {
+    const { data, error } = await sb.rpc('anticipos_disponibles_proveedor', { p_proveedor_id: proveedorId });
+    if(error || !data || !data.length){
+      sel.innerHTML = '<option value="">(sin anticipos disponibles)</option>';
+    } else {
+      sel.innerHTML = data.map(a=>`<option value="${a.id}" data-disponible="${a.monto_disponible}">${money(a.monto_disponible)} disponible — ${new Date(a.fecha_hora).toLocaleDateString('es-MX')}${a.referencia ? ' — ' + a.referencia : ''}</option>`).join('');
+    }
+  }
+  llenarSelect('compra-mixto-nueva-forma', state.formasPago, f=>f.id, f=>f.nombre);
+  llenarSelect('compra-mixto-nueva-condicion', state.condicionesPago || [], c=>c.id, c=>`${c.nombre} (${c.dias} días)`);
+  actualizarTipoLineaMixto();
+  renderMixtoLineas();
+}
+
+function actualizarTipoLineaMixto(){
+  const tipo = $('compra-mixto-nueva-tipo').value;
+  $('compra-mixto-nueva-anticipo-campo').style.display = tipo === 'anticipo' ? 'block' : 'none';
+  $('compra-mixto-nueva-forma-campo').style.display = tipo === 'pago' ? 'block' : 'none';
+  $('compra-mixto-nueva-condicion-campo').style.display = tipo === 'credito' ? 'block' : 'none';
+  actualizarCajaMixtoCompra();
+}
+$('compra-mixto-nueva-tipo').addEventListener('change', actualizarTipoLineaMixto);
+
+function mixtoFormaEsEfectivo(){
+  const forma = state.formasPago.find(f=>f.id===$('compra-mixto-nueva-forma').value);
+  return forma?.nombre === 'Efectivo';
+}
+async function actualizarCajaMixtoCompra(){
+  const tipo = $('compra-mixto-nueva-tipo').value;
+  const mostrarCaja = tipo === 'pago' && mixtoFormaEsEfectivo();
+  $('compra-mixto-nueva-caja-campo').style.display = mostrarCaja ? 'block' : 'none';
+  if(!mostrarCaja) return;
+  const cajas = await cajasAbiertasAhora();
+  $('compra-mixto-nueva-caja-vacio').style.display = cajas.length ? 'none' : 'block';
+  $('compra-mixto-nueva-caja').innerHTML = cajas.map(s=>{
+    const sucursal = state.sucursales.find(x=>x.id === s.cajas?.sucursal_id);
+    return `<option value="${s.id}">${s.cajas?.nombre || '—'} — ${sucursal?.nombre || '—'} (turno de ${s.usuarios?.nombre || '—'})</option>`;
+  }).join('');
+}
+$('compra-mixto-nueva-forma').addEventListener('change', actualizarCajaMixtoCompra);
+
+// El total a cubrir SIEMPRE es con impuestos (así lo carga el proveedor), sin importar si el
+// checkbox "capturar con impuestos incluidos" está marcado — ese checkbox solo cambia cómo se
+// teclean costo/precio en pantalla, no el total real de la compra.
+function totalCompraConImpuestosPreview(){
+  return redondear2(state.compraLineas.reduce((s,l)=>{
+    const factor = 1 + (Number(l.tasa)||0);
+    const importe = redondear2((Number(l.cantidad)||0) * (Number(l.costoUnitario)||0));
+    return s + redondear2(importe * factor);
+  },0));
+}
+
+function renderMixtoLineas(){
+  const total = totalCompraConImpuestosPreview();
+  const cubierto = redondear2(state.compraMixtoLineas.reduce((s,l)=>s+Number(l.monto),0));
+  const falta = redondear2(total - cubierto);
+  if(falta > 0.004){
+    $('compra-mixto-resumen').innerHTML = `Total: ${money(total)} · Cubierto: ${money(cubierto)} · <strong>Falta: ${money(falta)}</strong>`;
+  } else if(falta < -0.004){
+    $('compra-mixto-resumen').innerHTML = `Total: ${money(total)} · Cubierto: ${money(cubierto)} · <strong style="color:#c0392b;">Sobran ${money(-falta)} — ajusta los montos</strong>`;
+  } else {
+    $('compra-mixto-resumen').innerHTML = `Total: ${money(total)} · Cubierto: ${money(cubierto)} · <strong style="color:#1e8e3e;">Cubierto ✓</strong>`;
+  }
+
+  $('compra-mixto-lineas-body').innerHTML = (state.compraMixtoLineas.map((l,i)=>{
+    let detalle = '';
+    if(l.tipo === 'anticipo') detalle = `Anticipo (${money(l.anticipoDisponible)} disp.)`;
+    else if(l.tipo === 'pago') detalle = l.formaPagoNombre + (l.sesionCajaNombre ? ` — ${l.sesionCajaNombre}` : '');
+    else detalle = 'A crédito' + (l.condicionPagoNombre ? ` (${l.condicionPagoNombre})` : '');
+    return `<tr>
+      <td>${detalle}</td>
+      <td class="num">${money(l.monto)}</td>
+      <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
+    </tr>`;
+  }).join('')) || '<tr><td colspan="3" class="nota">Todavía no agregas ninguna forma de pago.</td></tr>';
+
+  $('compra-mixto-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{
+    state.compraMixtoLineas.splice(Number(btn.dataset.idx),1);
+    renderMixtoLineas();
+  }));
+}
+
+$('compra-mixto-agregar-linea').addEventListener('click', ()=>{
+  $('compra-mixto-error').innerHTML = '';
+  const tipo = $('compra-mixto-nueva-tipo').value;
+  const monto = parseMoney($('compra-mixto-nueva-monto').value);
+  if(!monto || monto <= 0){
+    $('compra-mixto-error').innerHTML = '<div class="msg-error">Captura un monto válido.</div>';
+    return;
+  }
+  if(tipo === 'anticipo'){
+    const anticipoId = $('compra-mixto-nueva-anticipo').value;
+    if(!anticipoId){
+      $('compra-mixto-error').innerHTML = '<div class="msg-error">Elige el anticipo a aplicar.</div>';
+      return;
+    }
+    const opt = $('compra-mixto-nueva-anticipo').selectedOptions[0];
+    state.compraMixtoLineas.push({ tipo:'anticipo', anticipoId, anticipoDisponible: Number(opt?.dataset.disponible||0), monto });
+  } else if(tipo === 'pago'){
+    const formaPagoId = $('compra-mixto-nueva-forma').value;
+    if(!formaPagoId){
+      $('compra-mixto-error').innerHTML = '<div class="msg-error">Elige la forma de pago.</div>';
+      return;
+    }
+    const forma = state.formasPago.find(f=>f.id===formaPagoId);
+    let sesionCajaId = null, sesionCajaNombre = null;
+    if(forma?.nombre === 'Efectivo'){
+      sesionCajaId = $('compra-mixto-nueva-caja').value || null;
+      if(!sesionCajaId){
+        $('compra-mixto-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
+        return;
+      }
+      sesionCajaNombre = $('compra-mixto-nueva-caja').selectedOptions[0]?.textContent || '';
+    }
+    state.compraMixtoLineas.push({ tipo:'pago', formaPagoId, formaPagoNombre: forma?.nombre || 'Pago', sesionCajaId, sesionCajaNombre, monto });
+  } else {
+    const condicionPagoId = $('compra-mixto-nueva-condicion').value || null;
+    const condicionPagoNombre = $('compra-mixto-nueva-condicion').selectedOptions[0]?.textContent || null;
+    state.compraMixtoLineas.push({ tipo:'credito', condicionPagoId, condicionPagoNombre, monto });
+  }
+  $('compra-mixto-nueva-monto').value = '';
+  renderMixtoLineas();
+});
 
 // Ronda 47: en vez de netearse automáticamente por fecha, Adrián pidió elegir explícitamente QUÉ
 // anticipo (de los que le quedan disponibles a este proveedor) se aplica a esta compra — si el
@@ -3743,6 +3941,7 @@ function renderLineasCompra(scrollAlFinal){
   });
   $('compra-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.compraLineas.splice(Number(btn.dataset.idx),1); renderLineasCompra(); }));
   $('compra-total').textContent = money(totalCompraLineas());
+  if($('compra-tipo').value === 'mixto') renderMixtoLineas();
   if(scrollAlFinal){ const cont = $('compra-lineas-scroll'); cont.scrollTop = cont.scrollHeight; }
 }
 
@@ -3765,6 +3964,7 @@ function actualizarImporteFilaCompra(i){
   const celda = $(`compra-importe-${i}`);
   if(celda) celda.textContent = money(redondear2((Number(l.cantidad)||0) * costoMostrado));
   $('compra-total').textContent = money(totalCompraLineas());
+  if($('compra-tipo').value === 'mixto') renderMixtoLineas();
 }
 
 $('compra-registrar').addEventListener('click', async ()=>{
@@ -3772,13 +3972,25 @@ $('compra-registrar').addEventListener('click', async ()=>{
   if(!state.compraLineas.length){ $('compra-error').innerHTML = '<div class="msg-error">Agrega al menos un producto a la compra.</div>'; return; }
   if(!$('compra-fecha').value){ $('compra-error').innerHTML = '<div class="msg-error">Captura la fecha de compra.</div>'; return; }
   const tipoCompra = $('compra-tipo').value;
-  if((tipoCompra === 'credito' || tipoCompra === 'anticipo') && !$('compra-proveedor').value){
-    $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito o con anticipo debe tener un proveedor asignado.</div>';
+  if((tipoCompra === 'credito' || tipoCompra === 'anticipo' || tipoCompra === 'mixto') && !$('compra-proveedor').value){
+    $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito, con anticipo o mixta debe tener un proveedor asignado.</div>';
     return;
   }
   if(tipoCompra === 'anticipo' && !$('compra-anticipo-select').value){
     $('compra-error').innerHTML = '<div class="msg-error">Selecciona el anticipo a aplicar (o regístrale uno a este proveedor desde Cuentas por pagar).</div>';
     return;
+  }
+  if(tipoCompra === 'mixto'){
+    if(!state.compraMixtoLineas.length){
+      $('compra-error').innerHTML = '<div class="msg-error">Agrega al menos una forma de pago (anticipo, pago inmediato o crédito).</div>';
+      return;
+    }
+    const total = totalCompraConImpuestosPreview();
+    const cubierto = redondear2(state.compraMixtoLineas.reduce((s,l)=>s+Number(l.monto),0));
+    if(Math.abs(total - cubierto) > 0.01){
+      $('compra-error').innerHTML = `<div class="msg-error">Las formas de pago capturadas suman ${money(cubierto)} y la compra requiere ${money(total)} (con impuestos) — ajusta los montos hasta cubrir el total exacto.</div>`;
+      return;
+    }
   }
   const listaPublica = obtenerListaPublica();
   const payload = {
@@ -3795,6 +4007,14 @@ $('compra-registrar').addEventListener('click', async ()=>{
     tipo_compra: tipoCompra,
     condicion_pago_id: tipoCompra === 'credito' ? ($('compra-condicion-pago').value || null) : null,
     anticipo_id: tipoCompra === 'anticipo' ? ($('compra-anticipo-select').value || null) : null,
+    pagos: tipoCompra === 'mixto' ? state.compraMixtoLineas.map(l=>({
+      tipo: l.tipo,
+      anticipo_id: l.anticipoId || null,
+      forma_pago_id: l.formaPagoId || null,
+      sesion_caja_id: l.sesionCajaId || null,
+      condicion_pago_id: l.condicionPagoId || null,
+      monto: l.monto,
+    })) : null,
     lineas: state.compraLineas.map(l=>({
       variante_id: l.varianteId, cantidad: Number(l.cantidad)||0, costo_unitario: Number(l.costoUnitario)||0,
       precio_publico: l.precioPublico != null && l.precioPublico !== '' ? Number(l.precioPublico) : null,
@@ -3805,6 +4025,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   $('compra-registrar').disabled = false;
   if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
   state.compraLineas = [];
+  state.compraMixtoLineas = [];
   state.xmlCfdiUuid = null;
   $('compra-folio').value = '';
   $('compra-tipo').value = 'contado';
@@ -3812,7 +4033,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   renderLineasCompra();
   await cargarProductos();
   await cargarComprasLista();
-  if(tipoCompra === 'credito' || tipoCompra === 'anticipo'){
+  if(tipoCompra === 'credito' || tipoCompra === 'anticipo' || tipoCompra === 'mixto'){
     const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
     state.proveedores = proveedores || [];
     renderProveedorSelect();
@@ -4989,7 +5210,10 @@ $('cxp-anticipo-ver-estado').addEventListener('click', ()=>{
 // se rompía con cualquier referencia personalizada, ej. "anticipo aqua" en minúsculas) a usar las
 // columnas estructurales anticipo_id/compra_id, que siempre las llena el backend y nunca el usuario.
 function etiquetaMovimientoProveedor(m){
-  if(m.tipo === 'cargo') return m.anticipo_id ? 'Cargo (compra con anticipo)' : 'Cargo (compra a crédito)';
+  if(m.tipo === 'cargo'){
+    if(m.compras?.tipo_compra === 'mixto') return 'Cargo (compra mixta)';
+    return m.anticipo_id ? 'Cargo (compra con anticipo)' : 'Cargo (compra a crédito)';
+  }
   if(m.anticipo_id && m.compra_id) return 'Aplicación de anticipo';
   if(m.anticipo_id) return 'Anticipo';
   return 'Pago';
@@ -5023,7 +5247,7 @@ async function abrirEstadoCuentaProveedor(id){
   $('ecp-tabla-body').innerHTML = '<tr><td colspan="5" class="nota">Cargando…</td></tr>';
   $('modal-estado-cuenta-proveedor').classList.add('activo');
   const [{ data: movs, error }, { data: anticipos }] = await Promise.all([
-    sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false}),
+    sb.from('proveedor_movimientos').select('*, compras(tipo_compra)').eq('proveedor_id', id).order('fecha_hora', {ascending:false}),
     sb.from('anticipos_proveedor').select('monto_disponible').eq('proveedor_id', id).gt('monto_disponible', 0)
   ]);
   if(error){ $('ecp-tabla-body').innerHTML = `<tr><td colspan="5" class="msg-error">${error.message}</td></tr>`; return; }
