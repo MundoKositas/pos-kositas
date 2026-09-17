@@ -1349,7 +1349,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.21.003';
+const APP_VERSION = '1.21.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4985,9 +4985,14 @@ $('cxp-anticipo-ver-estado').addEventListener('click', ()=>{
 // modal. Ahora son 3 acciones independientes por proveedor.
 // Etiqueta del tipo de movimiento — la forma de pago se muestra en su propia columna (más clara que
 // meterla entre paréntesis), así que aquí solo se distingue cargo/pago/anticipo/aplicación.
+// Ronda 48: se cambió de comparar texto de "referencia" (editable libremente por el usuario, así que
+// se rompía con cualquier referencia personalizada, ej. "anticipo aqua" en minúsculas) a usar las
+// columnas estructurales anticipo_id/compra_id, que siempre las llena el backend y nunca el usuario.
 function etiquetaMovimientoProveedor(m){
-  if(m.tipo === 'cargo') return (m.referencia||'').startsWith('Compra con anticipo') ? 'Cargo (compra con anticipo)' : 'Cargo (compra a crédito)';
-  return (m.referencia||'').startsWith('Aplicación de anticipo') ? 'Aplicación de anticipo' : ((m.referencia||'').startsWith('Anticipo') ? 'Anticipo' : 'Pago');
+  if(m.tipo === 'cargo') return m.anticipo_id ? 'Cargo (compra con anticipo)' : 'Cargo (compra a crédito)';
+  if(m.anticipo_id && m.compra_id) return 'Aplicación de anticipo';
+  if(m.anticipo_id) return 'Anticipo';
+  return 'Pago';
 }
 
 // El pago/anticipo en efectivo debe salir de una caja con turno abierto EN ESTE MOMENTO (a petición
@@ -5201,7 +5206,9 @@ $('ap-registrar').addEventListener('click', async ()=>{
 });
 
 function proveedoresConSaldo(){
-  return state.proveedores.filter(p => Number(p.saldo_actual) > 0)
+  // Ronda 48: antes solo listaba saldo_actual > 0. Adrián pidió incluir también saldo negativo
+  // (proveedor a favor, por anticipos aún no aplicados) para poder ubicarlo y darle seguimiento.
+  return state.proveedores.filter(p => Number(p.saldo_actual) !== 0)
     .sort((a,b)=> Number(b.saldo_actual) - Number(a.saldo_actual));
 }
 function proveedoresConSaldoFiltrados(){
