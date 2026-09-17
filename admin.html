@@ -370,6 +370,7 @@
           <label>Tipo de compra</label>
           <select id="compra-tipo">
             <option value="contado">De contado</option>
+            <option value="anticipo">Con anticipo (ya pagué un depósito)</option>
             <option value="credito">A crédito</option>
           </select>
         </div>
@@ -378,7 +379,8 @@
           <select id="compra-condicion-pago"></select>
         </div>
       </div>
-      <p class="nota" id="compra-credito-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total de la compra.</p>
+      <p class="nota" id="compra-credito-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total de la compra, con impuestos incluidos.</p>
+      <p class="nota" id="compra-anticipo-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total con impuestos incluidos. Si ya le registraste un anticipo a este proveedor, se aplicará automáticamente contra este cargo.</p>
 
       <h3 class="seccion">Productos de la compra</h3>
       <div class="campo" style="position:relative;">
@@ -431,6 +433,17 @@
          proveedores — con la diferencia de que aquí SÍ se registra el pago (no es solo lectura),
          porque las compras/proveedores viven en admin.html, no en el POS. -->
     <div id="compras-panel-cxp" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Registrar anticipo a un proveedor</h2>
+        <p class="nota">Para un depósito que pagas ANTES de que llegue la mercancía. Se aplica al proveedor que elijas, aunque todavía no tenga saldo pendiente, y se descontará automáticamente del cargo cuando registres la compra correspondiente.</p>
+        <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="col" style="min-width:260px;">
+            <label>Proveedor</label>
+            <select id="cxp-anticipo-proveedor"></select>
+          </div>
+          <button type="button" class="btn-secundario" id="cxp-anticipo-abrir">Ver estado de cuenta / registrar anticipo</button>
+        </div>
+      </div>
       <div class="card">
         <div class="fila" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
           <h2 style="margin:0;">Cuentas por pagar</h2>
@@ -964,6 +977,23 @@
       <button class="btn-primario" style="width:100%;" id="ecp-pagar">Registrar pago</button>
     </div>
 
+    <div id="ecp-anticipo-seccion" style="margin-top:16px;border-top:1px solid var(--borde);padding-top:14px;">
+      <h3 class="seccion" style="margin-top:0;">Registrar anticipo</h3>
+      <p class="nota" style="margin-top:0;">Depósito que pagas antes de que llegue la mercancía — se aplicará automáticamente al cargo de la próxima compra a este proveedor.</p>
+      <div class="grid-2">
+        <div class="campo"><label>Monto del anticipo</label><input type="text" inputmode="decimal" id="ecp-anticipo-monto"></div>
+        <div class="campo"><label>Forma de pago</label><select id="ecp-anticipo-forma-pago"></select></div>
+      </div>
+      <div class="campo" id="ecp-anticipo-caja-campo" style="display:none;">
+        <label>Caja de la que sale el efectivo</label>
+        <select id="ecp-anticipo-caja"></select>
+        <p class="nota" id="ecp-anticipo-caja-vacio" style="display:none;">No hay ninguna caja con turno abierto en este momento — no se puede registrar un anticipo en efectivo hasta que un cajero abra su caja.</p>
+      </div>
+      <div class="campo"><label>Referencia (opcional)</label><input type="text" id="ecp-anticipo-referencia" placeholder="Ej. núm. de transferencia"></div>
+      <div id="ecp-anticipo-error"></div>
+      <button class="btn-primario" style="width:100%;" id="ecp-anticipo-registrar">Registrar anticipo</button>
+    </div>
+
     <button class="btn-gris" style="width:100%;margin-top:14px;" id="ecp-cerrar">Cerrar</button>
   </div>
 </div>
@@ -1281,7 +1311,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.19.001';
+const APP_VERSION = '1.20.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1890,7 +1920,7 @@ document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
 
 // ---------- CATÁLOGOS BASE ----------
 async function cargarCatalogosBase(){
-  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}, {data: formasPago}] = await Promise.all([
+  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}, {data: formasPago}, {data: formasPagoSat}] = await Promise.all([
     sb.from('impuestos').select('*').order('nombre'),
     sb.from('categorias').select('*').order('nombre'),
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
@@ -1900,6 +1930,7 @@ async function cargarCatalogosBase(){
     sb.from('marcas').select('*').eq('activo', true).order('nombre'),
     sb.from('condiciones_pago').select('*').eq('activo', true).order('dias'), // Ronda 23
     sb.from('formas_pago').select('*').eq('activo', true).order('nombre'), // Ronda 45 — pago a proveedores (CxP)
+    sb.from('formas_pago_sat').select('*').order('orden'), // Ronda 46 — catálogo SAT c_FormaPago para clave_sat
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
@@ -1910,6 +1941,7 @@ async function cargarCatalogosBase(){
   state.marcas = marcas || [];
   state.condicionesPago = condicionesPago || [];
   state.formasPago = formasPago || [];
+  state.formasPagoSat = formasPagoSat || [];
 
   llenarSelect('prod-categoria', state.categorias, c=>c.id, c=>c.nombre);
   habilitarComboBuscable('prod-categoria');
@@ -3547,9 +3579,12 @@ function renderProveedorSelect(){
   habilitarComboBuscable('compra-proveedor');
 }
 function actualizarVisibilidadCreditoCompra(){
-  const esCredito = $('compra-tipo').value === 'credito';
-  $('compra-condicion-pago-campo').style.display = esCredito ? 'block' : 'none';
+  const tipo = $('compra-tipo').value;
+  const esCredito = tipo === 'credito';
+  const esAnticipo = tipo === 'anticipo';
+  $('compra-condicion-pago-campo').style.display = (esCredito || esAnticipo) ? 'block' : 'none';
   $('compra-credito-nota').style.display = esCredito ? 'block' : 'none';
+  $('compra-anticipo-nota').style.display = esAnticipo ? 'block' : 'none';
 }
 $('compra-tipo').addEventListener('change', actualizarVisibilidadCreditoCompra);
 
@@ -3675,8 +3710,8 @@ $('compra-registrar').addEventListener('click', async ()=>{
   if(!state.compraLineas.length){ $('compra-error').innerHTML = '<div class="msg-error">Agrega al menos un producto a la compra.</div>'; return; }
   if(!$('compra-fecha').value){ $('compra-error').innerHTML = '<div class="msg-error">Captura la fecha de compra.</div>'; return; }
   const tipoCompra = $('compra-tipo').value;
-  if(tipoCompra === 'credito' && !$('compra-proveedor').value){
-    $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito debe tener un proveedor asignado.</div>';
+  if((tipoCompra === 'credito' || tipoCompra === 'anticipo') && !$('compra-proveedor').value){
+    $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito o con anticipo debe tener un proveedor asignado.</div>';
     return;
   }
   const listaPublica = obtenerListaPublica();
@@ -3692,7 +3727,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
     lista_publico_id: listaPublica ? listaPublica.id : null,
     cfdi_uuid: state.xmlCfdiUuid || null,
     tipo_compra: tipoCompra,
-    condicion_pago_id: tipoCompra === 'credito' ? ($('compra-condicion-pago').value || null) : null,
+    condicion_pago_id: (tipoCompra === 'credito' || tipoCompra === 'anticipo') ? ($('compra-condicion-pago').value || null) : null,
     lineas: state.compraLineas.map(l=>({
       variante_id: l.varianteId, cantidad: Number(l.cantidad)||0, costo_unitario: Number(l.costoUnitario)||0,
       precio_publico: l.precioPublico != null && l.precioPublico !== '' ? Number(l.precioPublico) : null,
@@ -3710,7 +3745,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   renderLineasCompra();
   await cargarProductos();
   await cargarComprasLista();
-  if(tipoCompra === 'credito'){
+  if(tipoCompra === 'credito' || tipoCompra === 'anticipo'){
     const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
     state.proveedores = proveedores || [];
     renderProveedorSelect();
@@ -4856,12 +4891,26 @@ document.querySelectorAll('#compras-tabs .tab-btn').forEach(btn=>{
     ['compras-panel-compras','compras-panel-cxp'].forEach(id=>{
       $(id).style.display = (id === btn.dataset.comprastab) ? 'block' : 'none';
     });
-    if(btn.dataset.comprastab === 'compras-panel-cxp') renderCxpTabla();
+    if(btn.dataset.comprastab === 'compras-panel-cxp'){ renderProveedorSelectAnticipoCxp(); renderCxpTabla(); }
   });
 });
 
+// A diferencia de la tabla de "Cuentas por pagar" (que solo lista proveedores con saldo_actual > 0),
+// este selector incluye a TODOS los proveedores activos — un anticipo se registra deliberadamente
+// ANTES de que exista deuda, así que el proveedor puede tener saldo en $0 (o incluso ya a favor).
+function renderProveedorSelectAnticipoCxp(){
+  $('cxp-anticipo-proveedor').innerHTML = state.proveedores.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('');
+  habilitarComboBuscable('cxp-anticipo-proveedor');
+}
+$('cxp-anticipo-abrir').addEventListener('click', ()=>{
+  const id = $('cxp-anticipo-proveedor').value;
+  if(!id) return;
+  abrirEstadoCuentaProveedor(id);
+});
+
 function nombreMovimientoProveedor(m){
-  return m.tipo === 'cargo' ? 'Cargo (compra a crédito)' : 'Pago';
+  if(m.tipo === 'cargo') return (m.referencia||'').startsWith('Compra con anticipo') ? 'Cargo (compra con anticipo)' : 'Cargo (compra a crédito)';
+  return (m.referencia||'').startsWith('Anticipo') ? 'Anticipo' : 'Pago';
 }
 async function abrirEstadoCuentaProveedor(id){
   const p = state.proveedores.find(x=>x.id===id);
@@ -4873,8 +4922,13 @@ async function abrirEstadoCuentaProveedor(id){
   $('ecp-error').innerHTML = '';
   $('ecp-monto').value = '';
   $('ecp-referencia').value = '';
+  $('ecp-anticipo-error').innerHTML = '';
+  $('ecp-anticipo-monto').value = '';
+  $('ecp-anticipo-referencia').value = '';
   llenarSelect('ecp-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
+  llenarSelect('ecp-anticipo-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
   await actualizarCajaPagoProveedor();
+  await actualizarCajaAnticipoProveedor();
   $('modal-estado-cuenta-proveedor').classList.add('activo');
   const { data: movs, error } = await sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false});
   if(error){ $('ecp-tabla-body').innerHTML = `<tr><td colspan="4" class="msg-error">${error.message}</td></tr>`; return; }
@@ -4918,6 +4972,55 @@ async function actualizarCajaPagoProveedor(){
     return `<option value="${s.id}">${s.cajas?.nombre || '—'} — ${sucursal?.nombre || '—'} (turno de ${s.usuarios?.nombre || '—'})</option>`;
   }).join('');
 }
+function formaPagoAnticipoEsEfectivo(){
+  const forma = state.formasPago.find(f=>f.id===$('ecp-anticipo-forma-pago').value);
+  return forma?.nombre === 'Efectivo';
+}
+async function actualizarCajaAnticipoProveedor(){
+  const esEfectivo = formaPagoAnticipoEsEfectivo();
+  $('ecp-anticipo-caja-campo').style.display = esEfectivo ? 'block' : 'none';
+  if(!esEfectivo) return;
+  const cajas = await cajasAbiertasAhora();
+  $('ecp-anticipo-caja-vacio').style.display = cajas.length ? 'none' : 'block';
+  $('ecp-anticipo-caja').innerHTML = cajas.map(s=>{
+    const sucursal = state.sucursales.find(x=>x.id === s.cajas?.sucursal_id);
+    return `<option value="${s.id}">${s.cajas?.nombre || '—'} — ${sucursal?.nombre || '—'} (turno de ${s.usuarios?.nombre || '—'})</option>`;
+  }).join('');
+}
+$('ecp-anticipo-forma-pago').addEventListener('change', actualizarCajaAnticipoProveedor);
+$('ecp-anticipo-registrar').addEventListener('click', async ()=>{
+  $('ecp-anticipo-error').innerHTML = '';
+  const p = state.ecpProveedorActual;
+  const monto = parseMoney($('ecp-anticipo-monto').value);
+  const formaPagoId = $('ecp-anticipo-forma-pago').value;
+  if(!p || !monto || monto<=0 || !formaPagoId){
+    $('ecp-anticipo-error').innerHTML = '<div class="msg-error">Captura un monto válido y la forma de pago.</div>';
+    return;
+  }
+  const esEfectivo = formaPagoAnticipoEsEfectivo();
+  const sesionCajaId = esEfectivo ? ($('ecp-anticipo-caja').value || null) : null;
+  if(esEfectivo && !sesionCajaId){
+    $('ecp-anticipo-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
+    return;
+  }
+  const referencia = $('ecp-anticipo-referencia').value.trim() || null;
+  $('ecp-anticipo-registrar').disabled = true;
+  const { error } = await sb.rpc('registrar_anticipo_proveedor', {
+    p_proveedor_id: p.id, p_monto: monto, p_forma_pago_id: formaPagoId,
+    p_sesion_caja_id: sesionCajaId, p_referencia: referencia,
+  });
+  $('ecp-anticipo-registrar').disabled = false;
+  if(error){
+    $('ecp-anticipo-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  state.proveedores = proveedores || [];
+  renderProveedorSelect();
+  renderProveedorSelectAnticipoCxp();
+  await abrirEstadoCuentaProveedor(p.id);
+  renderCxpTabla();
+});
 $('ecp-forma-pago').addEventListener('change', actualizarCajaPagoProveedor);
 $('ecp-pagar').addEventListener('click', async ()=>{
   $('ecp-error').innerHTML = '';
@@ -5105,7 +5208,7 @@ const CATALOGOS_SIMPLES = {
     tabla: 'formas_pago', tituloPlural: 'Formas de pago', tituloSingular: 'forma de pago',
     campos: [
       { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
-      { id:'clave_sat', label:'Clave SAT (opcional)', tipo:'texto' },
+      { id:'clave_sat', label:'Clave SAT (para CFDI, opcional)', tipo:'select', fuente:'formasPagoSat' },
       { id:'requiere_autorizacion', label:'Requiere autorización de un supervisor', tipo:'bool' },
       { id:'permite_multiple', label:'Se puede usar más de una vez en el mismo ticket', tipo:'bool' },
     ],
@@ -5225,6 +5328,7 @@ const CFG_FUENTES = {
   almacenes: () => state.almacenes.map(a=>[a.id, a.nombre]),
   usuarios: () => state.usuariosEmpresa.map(u=>[u.id, u.nombre]),
   listasPrecio: () => state.listasPrecio.map(l=>[l.id, l.nombre]),
+  formasPagoSat: () => state.formasPagoSat.map(f=>[f.clave, `${f.clave} - ${f.descripcion}`]),
 };
 state.cfgTabActivo = 'marcas';
 state.cfgCache = {};
