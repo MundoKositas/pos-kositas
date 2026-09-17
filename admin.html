@@ -46,6 +46,15 @@
   .fila{display:flex;gap:16px;flex-wrap:wrap;}
   .col{flex:1;min-width:220px;}
   .tabla-scroll{overflow-x:auto;}
+  /* Ronda 53: encabezados de columna fijos para listas largas — Adrián pidió no perder de vista
+     el nombre de cada columna al bajar en Catálogo, Kardex, estado de cuenta y Auditoría. La tabla
+     se vuelve su propia "ventana" con scroll interno (en vez de que crezca con toda la página) y el
+     encabezado se queda pegado arriba de esa ventana mientras se hace scroll dentro de ella. */
+  .tabla-fija{overflow-y:auto;max-height:min(58vh,520px);}
+  .tabla-fija thead th{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 var(--borde);}
+  /* Ronda 53: menú principal de admin.html fijo — Adrián pidió no tener que subir hasta arriba de
+     una lista larga para cambiar de sección. */
+  #tabs-principal{position:sticky;top:0;background:var(--bg);z-index:15;padding:10px 0 6px;margin:-16px 0 10px;}
   table{width:100%;border-collapse:collapse;font-size:.9rem;}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--borde);white-space:nowrap;}
   td.num, th.num{text-align:right;}
@@ -136,7 +145,7 @@
 
 <!-- ADMIN -->
 <div class="pantalla" id="pantalla-admin">
-  <div class="tabs">
+  <div class="tabs" id="tabs-principal">
     <button class="tab-btn activo" data-tab="tab-catalogo">Catálogo</button>
     <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
@@ -172,7 +181,7 @@
         </div>
         <button class="btn-primario" id="btn-nuevo-producto">+ Nuevo producto</button>
       </div>
-      <div class="tabla-scroll" style="margin-top:14px;">
+      <div class="tabla-scroll tabla-fija" style="margin-top:14px;">
         <table>
           <thead><tr>
             <th>Producto</th><th>Marca</th><th class="num" id="cat-th-costo">Costo</th><th class="num" id="cat-th-precio">Precio público</th>
@@ -743,14 +752,25 @@
          ya aplica a la tabla `auditoria` de Compras) — con otro rol, ambas consultas regresan
          vacío, así que simplemente se muestra "sin registros" en vez de fallar. -->
     <div id="cfg-panel-auditoria" style="display:none;">
-      <div class="card">
+      <!-- Ronda 53: las 4 secciones de Auditoría antes vivían apiladas en una sola pantalla larga
+           (encabezados de columna que se perdían al bajar, y las 4 consultas se disparaban todas de
+           golpe aunque solo se quisiera ver una) — ahora son sub-pestañas: cada una carga sus datos
+           solo cuando se abre. -->
+      <div class="tabs" id="aud-subtabs" style="margin-bottom:14px;">
+        <button type="button" class="tab-btn activo" data-audtab="caja">Aperturas y cierres de caja</button>
+        <button type="button" class="tab-btn" data-audtab="acceso">Accesos al sistema</button>
+        <button type="button" class="tab-btn" data-audtab="prod">Cambios de estado en productos</button>
+        <button type="button" class="tab-btn" id="aud-subtab-btn-imagenes" data-audtab="imagenes" style="display:none;">Imágenes huérfanas en Storage</button>
+      </div>
+
+      <div class="card" id="aud-panel-caja">
         <h2 style="margin-top:0;">Aperturas y cierres de caja</h2>
         <div class="fila" style="align-items:flex-end;gap:10px;flex-wrap:wrap;">
           <div class="col"><label>Desde</label><input type="date" id="aud-caja-desde"></div>
           <div class="col"><label>Hasta</label><input type="date" id="aud-caja-hasta"></div>
           <button type="button" class="btn-gris" id="aud-caja-filtrar">Filtrar</button>
         </div>
-        <div class="tabla-scroll" style="margin-top:14px;">
+        <div class="tabla-scroll tabla-fija" style="margin-top:14px;">
           <table>
             <thead><tr><th>Caja</th><th>Sucursal</th><th>Usuario</th><th>Apertura</th><th>Fondo inicial</th><th>Cierre</th><th>Efectivo esperado</th><th>Efectivo contado</th><th>Diferencia</th><th>Estado</th></tr></thead>
             <tbody id="aud-caja-tabla-body"></tbody>
@@ -758,14 +778,14 @@
         </div>
         <p class="nota" id="aud-caja-vacio" style="display:none;">Sin registros en este rango.</p>
       </div>
-      <div class="card">
+      <div class="card" id="aud-panel-acceso" style="display:none;">
         <h2 style="margin-top:0;">Accesos al sistema (entradas/salidas)</h2>
         <div class="fila" style="align-items:flex-end;gap:10px;flex-wrap:wrap;">
           <div class="col"><label>Desde</label><input type="date" id="aud-acceso-desde"></div>
           <div class="col"><label>Hasta</label><input type="date" id="aud-acceso-hasta"></div>
           <button type="button" class="btn-gris" id="aud-acceso-filtrar">Filtrar</button>
         </div>
-        <div class="tabla-scroll" style="margin-top:14px;">
+        <div class="tabla-scroll tabla-fija" style="margin-top:14px;">
           <table>
             <thead><tr><th>Usuario</th><th>App</th><th>Tipo</th><th>Fecha y hora</th></tr></thead>
             <tbody id="aud-acceso-tabla-body"></tbody>
@@ -773,7 +793,7 @@
         </div>
         <p class="nota" id="aud-acceso-vacio" style="display:none;">Sin registros en este rango.</p>
       </div>
-      <div class="card">
+      <div class="card" id="aud-panel-prod" style="display:none;">
         <h2 style="margin-top:0;">Cambios de estado en productos</h2>
         <p class="nota" style="margin-top:0;">Cada vez que se cambia "Es inventariable", "Activo" o "Activo en el catálogo del servicio a domicilio" al editar un producto, queda aquí quién lo hizo y cuándo (fecha del servidor).</p>
         <div class="fila" style="align-items:flex-end;gap:10px;flex-wrap:wrap;">
@@ -781,7 +801,7 @@
           <div class="col"><label>Hasta</label><input type="date" id="aud-prod-hasta"></div>
           <button type="button" class="btn-gris" id="aud-prod-filtrar">Filtrar</button>
         </div>
-        <div class="tabla-scroll" style="margin-top:14px;">
+        <div class="tabla-scroll tabla-fija" style="margin-top:14px;">
           <table>
             <thead><tr><th>Producto</th><th>Usuario</th><th>Cambios</th><th>Fecha y hora</th></tr></thead>
             <tbody id="aud-prod-tabla-body"></tbody>
@@ -985,7 +1005,7 @@
   <div class="modal" style="max-width:640px;">
     <h2 id="ec-titulo">Estado de cuenta</h2>
     <p class="nota" id="ec-resumen"></p>
-    <div class="tabla-scroll">
+    <div class="tabla-scroll tabla-fija">
       <table>
         <thead><tr><th>Fecha</th><th>Movimiento</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
         <tbody id="ec-tabla-body"></tbody>
@@ -1011,7 +1031,7 @@
       </select>
       <button type="button" class="btn-secundario" id="ecp-exportar">Exportar</button>
     </div>
-    <div class="tabla-scroll">
+    <div class="tabla-scroll tabla-fija">
       <table>
         <thead><tr><th>Fecha</th><th>Movimiento</th><th class="num">Monto</th><th>Forma de pago</th><th>Referencia</th></tr></thead>
         <tbody id="ecp-tabla-body"></tbody>
@@ -1177,16 +1197,16 @@
         <div class="col" style="min-width:140px;"><label>Hasta</label><input type="date" id="kardex-hasta"></div>
         <button type="button" class="btn-secundario" id="kardex-actualizar">Actualizar</button>
       </div>
-      <div class="tabla-scroll" style="margin-top:12px;">
+      <div class="tabla-scroll tabla-fija" style="margin-top:12px;">
         <table>
-          <thead><tr><th id="kardex-th-fecha" style="cursor:pointer;user-select:none;" title="Click para cambiar el orden">Fecha <span id="kardex-fecha-flecha">▼</span></th><th>Tipo</th><th>Folio</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Costo unitario</th></tr></thead>
+          <thead><tr><th id="kardex-th-fecha" style="cursor:pointer;user-select:none;" title="Click para cambiar el orden">Fecha <span id="kardex-fecha-flecha">▼</span></th><th>Tipo</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th>Folio</th><th>Descripción</th></tr></thead>
           <tbody id="kardex-tabla-body"></tbody>
         </table>
       </div>
       <p class="nota" id="kardex-vacio" style="display:none;"></p>
     </div>
 
-    <div style="display:flex;gap:8px;margin-top:14px;">
+    <div style="display:flex;gap:8px;margin-top:14px;position:sticky;bottom:-22px;background:#fff;padding:10px 0 10px;margin:14px -22px -22px;padding-left:22px;padding-right:22px;border-top:1px solid var(--borde);">
       <button class="btn-gris" style="flex:1;" id="prod-cancelar">Cancelar <span class="tecla">F9</span></button>
       <button class="btn-primario" style="flex:1;" id="prod-guardar">Guardar <span class="tecla">F10</span></button>
     </div>
@@ -1392,7 +1412,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.23.002';
+const APP_VERSION = '1.24.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1556,6 +1576,23 @@ document.addEventListener('keydown', (e)=>{
   if($('modal-lista').classList.contains('activo')){
     if(e.key==='F9') $('lista-cancelar').click();
     else if(e.key==='F10' && !$('lista-guardar').disabled) $('lista-guardar').click();
+  }
+});
+
+// Ronda 53: Adrián pidió que ESC funcione para salir de cualquier modal (no todos usan las teclas de
+// función F9/F10). Se toma el modal activo "de más arriba" (el último en el HTML entre los que están
+// abiertos — así, si hay un modal encima de otro, como "cambios sin guardar" sobre la ficha de
+// producto, se cierra primero el de encima) y se le da clic a su botón de Cancelar/Cerrar visible —
+// así se respeta cualquier confirmación que ese botón ya dispare (ej. el aviso de cambios sin guardar
+// de la ficha de producto), en vez de cerrar a la fuerza sin avisar.
+document.addEventListener('keydown', (e)=>{
+  if(e.key !== 'Escape') return;
+  const activos = Array.from(document.querySelectorAll('.modal-fondo.activo'));
+  if(!activos.length) return;
+  const modal = activos[activos.length - 1];
+  const candidatos = modal.querySelectorAll('button[id$="-cancelar"], button[id$="-cerrar"], button[id$="-cancelar-edicion"], #confirmar-salida-continuar');
+  for(const btn of candidatos){
+    if(btn.offsetParent !== null && !btn.disabled){ e.preventDefault(); btn.click(); return; }
   }
 });
 
@@ -3111,13 +3148,14 @@ async function cargarKardex(){
     const folioHtml = ventaId
       ? `<a href="#" class="link-ticket" data-venta="${ventaId}" style="color:var(--azul);">${mov.folio || '—'}</a>`
       : (mov.folio || '—');
+    const descripcion = mov.descripcion || '—';
     return `<tr>
       <td>${mov.fecha}</td>
       <td>${TIPO_LABEL[mov.tipo] || mov.tipo}</td>
-      <td>${folioHtml}</td>
-      <td>${mov.descripcion || '—'}</td>
       <td class="num">${f.cantidad}</td>
       <td class="num">${f.costo_unitario!=null ? money(f.costo_unitario) : '—'}</td>
+      <td>${folioHtml}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${descripcion.replace(/"/g,'&quot;')}">${descripcion}</td>
     </tr>`;
   }).join('');
   $('kardex-vacio').textContent = 'No hay movimientos registrados en este rango de fechas.';
@@ -6316,21 +6354,39 @@ $('usre-guardar').addEventListener('click', async ()=>{
 // Ambas consultas ya vienen filtradas por RLS a lo que el rol actual puede ver (Admin de
 // Empresa/Super Admin) — con otro rol regresan vacío en vez de fallar, igual que la sección "Editó"
 // de Compras (Ronda 25).
+// Ronda 53: Auditoría pasó de 4 secciones apiladas en una sola pantalla a sub-pestañas — cada una
+// carga su consulta solo la primera vez que se abre (no las 4 de golpe al entrar a Auditoría), y las
+// fechas por default (hoy) se fijan sin disparar la carga de las secciones que no se han abierto.
+state.audTabActivo = 'caja';
+state.audCargado = { caja:false, acceso:false, prod:false };
 function entrarATabAuditoria(){
   const hoy = fechaLocalISO();
   if(!$('aud-caja-desde').value){ $('aud-caja-desde').value = hoy; $('aud-caja-hasta').value = hoy; }
   if(!$('aud-acceso-desde').value){ $('aud-acceso-desde').value = hoy; $('aud-acceso-hasta').value = hoy; }
   if(!$('aud-prod-desde').value){ $('aud-prod-desde').value = hoy; $('aud-prod-hasta').value = hoy; }
-  cargarYRenderAperturasCierresCaja();
-  cargarYRenderAccesosSistema();
-  cargarYRenderAuditoriaProductos();
   // Ronda 36: limpieza de imágenes huérfanas — solo Super Admin, y se resetea la búsqueda cada vez
   // que se entra a la pestaña para no dejar en pantalla un resultado de una revisión anterior.
-  $('img-huerfanas-card').style.display = state.roles.includes('Super Admin') ? 'block' : 'none';
+  $('aud-subtab-btn-imagenes').style.display = state.roles.includes('Super Admin') ? '' : 'none';
   $('img-huerfanas-lista').innerHTML = '';
   $('img-huerfanas-estado').textContent = '';
   $('img-huerfanas-acciones').style.display = 'none';
+  state.audCargado = { caja:false, acceso:false, prod:false };
+  mostrarSubtabAuditoria(state.audTabActivo);
 }
+function mostrarSubtabAuditoria(key){
+  state.audTabActivo = key;
+  document.querySelectorAll('#aud-subtabs .tab-btn').forEach(b=>b.classList.toggle('activo', b.dataset.audtab === key));
+  $('aud-panel-caja').style.display = key === 'caja' ? 'block' : 'none';
+  $('aud-panel-acceso').style.display = key === 'acceso' ? 'block' : 'none';
+  $('aud-panel-prod').style.display = key === 'prod' ? 'block' : 'none';
+  $('img-huerfanas-card').style.display = (key === 'imagenes' && state.roles.includes('Super Admin')) ? 'block' : 'none';
+  if(key === 'caja' && !state.audCargado.caja){ state.audCargado.caja = true; cargarYRenderAperturasCierresCaja(); }
+  else if(key === 'acceso' && !state.audCargado.acceso){ state.audCargado.acceso = true; cargarYRenderAccesosSistema(); }
+  else if(key === 'prod' && !state.audCargado.prod){ state.audCargado.prod = true; cargarYRenderAuditoriaProductos(); }
+}
+document.querySelectorAll('#aud-subtabs .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=> mostrarSubtabAuditoria(btn.dataset.audtab));
+});
 // Etiquetas legibles para las 3 banderas de producto que sí se auditan (guardar_producto,
 // migración 089) — el resto de campos del producto (nombre, precio, etc.) no se audita aquí.
 const ETIQUETAS_FLAG_PRODUCTO = {
