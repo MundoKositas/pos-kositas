@@ -378,9 +378,14 @@
           <label>Condición de pago</label>
           <select id="compra-condicion-pago"></select>
         </div>
+        <div class="campo" id="compra-anticipo-campo" style="display:none;">
+          <label>Anticipo a aplicar</label>
+          <select id="compra-anticipo-select"></select>
+          <p class="nota" id="compra-anticipo-vacio" style="display:none;">Este proveedor no tiene anticipos disponibles — regístrale uno primero desde Cuentas por pagar, o elige otro tipo de compra.</p>
+        </div>
       </div>
       <p class="nota" id="compra-credito-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total de la compra, con impuestos incluidos.</p>
-      <p class="nota" id="compra-anticipo-nota" style="display:none;">Esta compra se cargará a la cuenta del proveedor (Cuentas por pagar) por el total con impuestos incluidos. Si ya le registraste un anticipo a este proveedor, se aplicará automáticamente contra este cargo.</p>
+      <p class="nota" id="compra-anticipo-nota" style="display:none;">Se aplicará el anticipo elegido por el total de esta compra (con impuestos). Si el anticipo no alcanza a cubrirlo, no se podrá registrar así — elige otro anticipo o cambia el tipo de compra.</p>
 
       <h3 class="seccion">Productos de la compra</h3>
       <div class="campo" style="position:relative;">
@@ -435,13 +440,14 @@
     <div id="compras-panel-cxp" style="display:none;">
       <div class="card">
         <h2 style="margin-top:0;">Registrar anticipo a un proveedor</h2>
-        <p class="nota">Para un depósito que pagas ANTES de que llegue la mercancía. Se aplica al proveedor que elijas, aunque todavía no tenga saldo pendiente, y se descontará automáticamente del cargo cuando registres la compra correspondiente.</p>
+        <p class="nota">Para un depósito que pagas ANTES de que llegue la mercancía. Se aplica al proveedor que elijas, aunque todavía no tenga saldo pendiente — al registrar la compra correspondiente, elige "Con anticipo" como tipo de compra y selecciona este anticipo para aplicarlo.</p>
         <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
           <div class="col" style="min-width:260px;">
             <label>Proveedor</label>
             <select id="cxp-anticipo-proveedor"></select>
           </div>
-          <button type="button" class="btn-secundario" id="cxp-anticipo-abrir">Ver estado de cuenta / registrar anticipo</button>
+          <button type="button" class="btn-secundario" id="cxp-anticipo-abrir">Registrar anticipo</button>
+          <button type="button" class="btn-gris" id="cxp-anticipo-ver-estado">Ver estado de cuenta</button>
         </div>
       </div>
       <div class="card">
@@ -947,54 +953,86 @@
   </div>
 </div>
 
-<!-- MODAL: estado de cuenta / pagar a un proveedor (Ronda 45) — a diferencia del de cliente, aquí SÍ
-     se registra el pago (no es solo lectura), porque las compras/proveedores viven en admin.html. -->
+<!-- MODAL: estado de cuenta de un proveedor (Ronda 47) — SOLO LECTURA de movimientos, ancho (para que
+     los importes se vean sin tener que desplazar a la derecha), paginado y con exportar Excel/PDF.
+     Registrar pago y registrar anticipo ahora son 2 modales aparte (ver abajo) — Adrián pidió
+     separarlos porque, con muchas compras, esas secciones quedaban muy abajo del todo. -->
 <div class="modal-fondo" id="modal-estado-cuenta-proveedor">
-  <div class="modal" style="max-width:640px;">
+  <div class="modal" style="max-width:920px;">
     <h2 id="ecp-titulo">Estado de cuenta</h2>
     <p class="nota" id="ecp-resumen"></p>
+    <div class="fila" style="justify-content:flex-end;gap:8px;margin-bottom:8px;">
+      <select id="ecp-formato-exportar" style="width:auto;">
+        <option value="excel">Excel</option>
+        <option value="pdf">PDF</option>
+      </select>
+      <button type="button" class="btn-secundario" id="ecp-exportar">Exportar</button>
+    </div>
     <div class="tabla-scroll">
       <table>
-        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Forma de pago</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
         <tbody id="ecp-tabla-body"></tbody>
       </table>
     </div>
     <p class="nota" id="ecp-vacio" style="display:none;">Este proveedor no tiene movimientos todavía.</p>
-
-    <div id="ecp-pago-seccion" style="margin-top:16px;border-top:1px solid var(--borde);padding-top:14px;">
-      <h3 class="seccion" style="margin-top:0;">Registrar pago</h3>
-      <div class="grid-2">
-        <div class="campo"><label>Monto a pagar</label><input type="text" inputmode="decimal" id="ecp-monto"></div>
-        <div class="campo"><label>Forma de pago</label><select id="ecp-forma-pago"></select></div>
+    <div class="fila" style="justify-content:space-between;align-items:center;margin-top:10px;">
+      <p class="nota" id="ecp-pagina-info" style="margin:0;"></p>
+      <div class="fila" style="gap:8px;align-items:center;">
+        <label class="nota" style="margin:0;">Por página</label>
+        <select id="ecp-pagina-tamano" style="width:auto;">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+        <button type="button" class="btn-gris" id="ecp-pagina-anterior">‹ Anterior</button>
+        <button type="button" class="btn-gris" id="ecp-pagina-siguiente">Siguiente ›</button>
       </div>
-      <div class="campo" id="ecp-caja-campo" style="display:none;">
-        <label>Caja de la que sale el efectivo</label>
-        <select id="ecp-caja"></select>
-        <p class="nota" id="ecp-caja-vacio" style="display:none;">No hay ninguna caja con turno abierto en este momento — no se puede registrar un pago en efectivo hasta que un cajero abra su caja.</p>
-      </div>
-      <div class="campo"><label>Referencia (opcional)</label><input type="text" id="ecp-referencia" placeholder="Ej. núm. de transferencia"></div>
-      <div id="ecp-error"></div>
-      <button class="btn-primario" style="width:100%;" id="ecp-pagar">Registrar pago</button>
-    </div>
-
-    <div id="ecp-anticipo-seccion" style="margin-top:16px;border-top:1px solid var(--borde);padding-top:14px;">
-      <h3 class="seccion" style="margin-top:0;">Registrar anticipo</h3>
-      <p class="nota" style="margin-top:0;">Depósito que pagas antes de que llegue la mercancía — se aplicará automáticamente al cargo de la próxima compra a este proveedor.</p>
-      <div class="grid-2">
-        <div class="campo"><label>Monto del anticipo</label><input type="text" inputmode="decimal" id="ecp-anticipo-monto"></div>
-        <div class="campo"><label>Forma de pago</label><select id="ecp-anticipo-forma-pago"></select></div>
-      </div>
-      <div class="campo" id="ecp-anticipo-caja-campo" style="display:none;">
-        <label>Caja de la que sale el efectivo</label>
-        <select id="ecp-anticipo-caja"></select>
-        <p class="nota" id="ecp-anticipo-caja-vacio" style="display:none;">No hay ninguna caja con turno abierto en este momento — no se puede registrar un anticipo en efectivo hasta que un cajero abra su caja.</p>
-      </div>
-      <div class="campo"><label>Referencia (opcional)</label><input type="text" id="ecp-anticipo-referencia" placeholder="Ej. núm. de transferencia"></div>
-      <div id="ecp-anticipo-error"></div>
-      <button class="btn-primario" style="width:100%;" id="ecp-anticipo-registrar">Registrar anticipo</button>
     </div>
 
     <button class="btn-gris" style="width:100%;margin-top:14px;" id="ecp-cerrar">Cerrar</button>
+  </div>
+</div>
+
+<!-- MODAL: registrar pago a un proveedor (Ronda 47, separado del estado de cuenta) -->
+<div class="modal-fondo" id="modal-pago-proveedor">
+  <div class="modal" style="max-width:520px;">
+    <h2 id="pp-titulo">Registrar pago</h2>
+    <p class="nota" id="pp-resumen"></p>
+    <div class="grid-2">
+      <div class="campo"><label>Monto a pagar</label><input type="text" inputmode="decimal" id="pp-monto"></div>
+      <div class="campo"><label>Forma de pago</label><select id="pp-forma-pago"></select></div>
+    </div>
+    <div class="campo" id="pp-caja-campo" style="display:none;">
+      <label>Caja de la que sale el efectivo</label>
+      <select id="pp-caja"></select>
+      <p class="nota" id="pp-caja-vacio" style="display:none;">No hay ninguna caja con turno abierto en este momento — no se puede registrar un pago en efectivo hasta que un cajero abra su caja.</p>
+    </div>
+    <div class="campo"><label>Referencia (opcional)</label><input type="text" id="pp-referencia" placeholder="Ej. núm. de transferencia"></div>
+    <div id="pp-error"></div>
+    <button class="btn-primario" style="width:100%;" id="pp-pagar">Registrar pago</button>
+    <button class="btn-gris" style="width:100%;margin-top:10px;" id="pp-cerrar">Cerrar</button>
+  </div>
+</div>
+
+<!-- MODAL: registrar anticipo a un proveedor (Ronda 47, separado del estado de cuenta) -->
+<div class="modal-fondo" id="modal-anticipo-proveedor">
+  <div class="modal" style="max-width:520px;">
+    <h2 id="ap-titulo">Registrar anticipo</h2>
+    <p class="nota" style="margin-top:0;">Depósito que pagas antes de que llegue la mercancía — al registrar la compra correspondiente, se elige este anticipo para aplicarlo (Compras → Tipo de compra: "Con anticipo").</p>
+    <div class="grid-2">
+      <div class="campo"><label>Monto del anticipo</label><input type="text" inputmode="decimal" id="ap-monto"></div>
+      <div class="campo"><label>Forma de pago</label><select id="ap-forma-pago"></select></div>
+    </div>
+    <div class="campo" id="ap-caja-campo" style="display:none;">
+      <label>Caja de la que sale el efectivo</label>
+      <select id="ap-caja"></select>
+      <p class="nota" id="ap-caja-vacio" style="display:none;">No hay ninguna caja con turno abierto en este momento — no se puede registrar un anticipo en efectivo hasta que un cajero abra su caja.</p>
+    </div>
+    <div class="campo"><label>Referencia (opcional)</label><input type="text" id="ap-referencia" placeholder="Ej. núm. de transferencia"></div>
+    <div id="ap-error"></div>
+    <button class="btn-primario" style="width:100%;" id="ap-registrar">Registrar anticipo</button>
+    <button class="btn-gris" style="width:100%;margin-top:10px;" id="ap-cerrar">Cerrar</button>
   </div>
 </div>
 
@@ -1311,7 +1349,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.20.001';
+const APP_VERSION = '1.21.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3582,11 +3620,35 @@ function actualizarVisibilidadCreditoCompra(){
   const tipo = $('compra-tipo').value;
   const esCredito = tipo === 'credito';
   const esAnticipo = tipo === 'anticipo';
-  $('compra-condicion-pago-campo').style.display = (esCredito || esAnticipo) ? 'block' : 'none';
+  $('compra-condicion-pago-campo').style.display = esCredito ? 'block' : 'none';
+  $('compra-anticipo-campo').style.display = esAnticipo ? 'block' : 'none';
   $('compra-credito-nota').style.display = esCredito ? 'block' : 'none';
   $('compra-anticipo-nota').style.display = esAnticipo ? 'block' : 'none';
+  if(esAnticipo) cargarAnticiposDisponiblesCompra();
 }
 $('compra-tipo').addEventListener('change', actualizarVisibilidadCreditoCompra);
+$('compra-proveedor').addEventListener('change', ()=>{ if($('compra-tipo').value === 'anticipo') cargarAnticiposDisponiblesCompra(); });
+
+// Ronda 47: en vez de netearse automáticamente por fecha, Adrián pidió elegir explícitamente QUÉ
+// anticipo (de los que le quedan disponibles a este proveedor) se aplica a esta compra — si el
+// elegido no alcanza, registrar_compra lo rechaza y hay que elegir otro anticipo o cambiar el tipo.
+async function cargarAnticiposDisponiblesCompra(){
+  const proveedorId = $('compra-proveedor').value;
+  const sel = $('compra-anticipo-select');
+  if(!proveedorId){
+    sel.innerHTML = '<option value="">(elige primero un proveedor)</option>';
+    $('compra-anticipo-vacio').style.display = 'none';
+    return;
+  }
+  const { data, error } = await sb.rpc('anticipos_disponibles_proveedor', { p_proveedor_id: proveedorId });
+  if(error || !data || !data.length){
+    sel.innerHTML = '<option value="">(sin anticipos disponibles)</option>';
+    $('compra-anticipo-vacio').style.display = 'block';
+    return;
+  }
+  $('compra-anticipo-vacio').style.display = 'none';
+  sel.innerHTML = data.map(a=>`<option value="${a.id}">${money(a.monto_disponible)} disponible — ${new Date(a.fecha_hora).toLocaleDateString('es-MX')}${a.referencia ? ' — ' + a.referencia : ''}</option>`).join('');
+}
 
 $('compra-proveedor-nuevo-abrir').addEventListener('click', ()=>{
   $('compra-proveedor-nuevo').style.display = 'flex';
@@ -3714,6 +3776,10 @@ $('compra-registrar').addEventListener('click', async ()=>{
     $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito o con anticipo debe tener un proveedor asignado.</div>';
     return;
   }
+  if(tipoCompra === 'anticipo' && !$('compra-anticipo-select').value){
+    $('compra-error').innerHTML = '<div class="msg-error">Selecciona el anticipo a aplicar (o regístrale uno a este proveedor desde Cuentas por pagar).</div>';
+    return;
+  }
   const listaPublica = obtenerListaPublica();
   const payload = {
     empresa_id: state.empresaId,
@@ -3727,7 +3793,8 @@ $('compra-registrar').addEventListener('click', async ()=>{
     lista_publico_id: listaPublica ? listaPublica.id : null,
     cfdi_uuid: state.xmlCfdiUuid || null,
     tipo_compra: tipoCompra,
-    condicion_pago_id: (tipoCompra === 'credito' || tipoCompra === 'anticipo') ? ($('compra-condicion-pago').value || null) : null,
+    condicion_pago_id: tipoCompra === 'credito' ? ($('compra-condicion-pago').value || null) : null,
+    anticipo_id: tipoCompra === 'anticipo' ? ($('compra-anticipo-select').value || null) : null,
     lineas: state.compraLineas.map(l=>({
       variante_id: l.varianteId, cantidad: Number(l.cantidad)||0, costo_unitario: Number(l.costoUnitario)||0,
       precio_publico: l.precioPublico != null && l.precioPublico !== '' ? Number(l.precioPublico) : null,
@@ -4905,50 +4972,26 @@ function renderProveedorSelectAnticipoCxp(){
 $('cxp-anticipo-abrir').addEventListener('click', ()=>{
   const id = $('cxp-anticipo-proveedor').value;
   if(!id) return;
+  abrirAnticipoProveedor(id);
+});
+$('cxp-anticipo-ver-estado').addEventListener('click', ()=>{
+  const id = $('cxp-anticipo-proveedor').value;
+  if(!id) return;
   abrirEstadoCuentaProveedor(id);
 });
 
-function nombreMovimientoProveedor(m){
+// Ronda 47: Adrián pidió separar "Estado de cuenta" (solo lectura, paginado) de "Registrar pago" y
+// "Registrar anticipo" — con muchas compras, esas 2 secciones quedaban muy abajo dentro del mismo
+// modal. Ahora son 3 acciones independientes por proveedor.
+// Etiqueta del tipo de movimiento — la forma de pago se muestra en su propia columna (más clara que
+// meterla entre paréntesis), así que aquí solo se distingue cargo/pago/anticipo/aplicación.
+function etiquetaMovimientoProveedor(m){
   if(m.tipo === 'cargo') return (m.referencia||'').startsWith('Compra con anticipo') ? 'Cargo (compra con anticipo)' : 'Cargo (compra a crédito)';
-  return (m.referencia||'').startsWith('Anticipo') ? 'Anticipo' : 'Pago';
+  return (m.referencia||'').startsWith('Aplicación de anticipo') ? 'Aplicación de anticipo' : ((m.referencia||'').startsWith('Anticipo') ? 'Anticipo' : 'Pago');
 }
-async function abrirEstadoCuentaProveedor(id){
-  const p = state.proveedores.find(x=>x.id===id);
-  if(!p) return;
-  state.ecpProveedorActual = p;
-  $('ecp-titulo').textContent = `Estado de cuenta — ${p.nombre}`;
-  $('ecp-resumen').textContent = `Saldo actual: ${money(p.saldo_actual)}`;
-  $('ecp-tabla-body').innerHTML = '<tr><td colspan="4" class="nota">Cargando…</td></tr>';
-  $('ecp-error').innerHTML = '';
-  $('ecp-monto').value = '';
-  $('ecp-referencia').value = '';
-  $('ecp-anticipo-error').innerHTML = '';
-  $('ecp-anticipo-monto').value = '';
-  $('ecp-anticipo-referencia').value = '';
-  llenarSelect('ecp-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
-  llenarSelect('ecp-anticipo-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
-  await actualizarCajaPagoProveedor();
-  await actualizarCajaAnticipoProveedor();
-  $('modal-estado-cuenta-proveedor').classList.add('activo');
-  const { data: movs, error } = await sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false});
-  if(error){ $('ecp-tabla-body').innerHTML = `<tr><td colspan="4" class="msg-error">${error.message}</td></tr>`; return; }
-  $('ecp-vacio').style.display = (movs && movs.length) ? 'none' : 'block';
-  $('ecp-tabla-body').innerHTML = (movs||[]).map(m=>{
-    const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
-    const signo = efecto < 0 ? '-' : '+';
-    return `<tr>
-      <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
-      <td>${nombreMovimientoProveedor(m)}</td>
-      <td>${m.referencia || '—'}</td>
-      <td class="num">${signo}${money(Math.abs(efecto))}</td>
-    </tr>`;
-  }).join('');
-  $('ecp-pago-seccion').style.display = Number(p.saldo_actual) > 0 ? 'block' : 'none';
-}
-$('ecp-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta-proveedor').classList.remove('activo'); });
 
-// El pago en efectivo debe salir de una caja con turno abierto EN ESTE MOMENTO (a petición explícita
-// de Adrián: el pago sí debe afectar el efectivo esperado de esa caja) — se listan todas las cajas
+// El pago/anticipo en efectivo debe salir de una caja con turno abierto EN ESTE MOMENTO (a petición
+// explícita de Adrián: sí debe afectar el efectivo esperado de esa caja) — se listan todas las cajas
 // abiertas de todas las sucursales, porque admin.html no está atado a una sola sucursal como el POS.
 async function cajasAbiertasAhora(){
   const { data, error } = await sb.from('sesiones_caja')
@@ -4957,101 +5000,202 @@ async function cajasAbiertasAhora(){
   if(error){ console.error(error); return []; }
   return data || [];
 }
+
+// ---------- Estado de cuenta (solo lectura, paginado, exportable) ----------
+state.ecpMovimientos = [];
+state.ecpPagina = 1;
+state.ecpPorPagina = 25;
+async function abrirEstadoCuentaProveedor(id){
+  const p = state.proveedores.find(x=>x.id===id);
+  if(!p) return;
+  state.ecpProveedorActual = p;
+  state.ecpPagina = 1;
+  $('ecp-titulo').textContent = `Estado de cuenta — ${p.nombre}`;
+  $('ecp-resumen').textContent = `Saldo actual: ${money(p.saldo_actual)}`;
+  $('ecp-tabla-body').innerHTML = '<tr><td colspan="5" class="nota">Cargando…</td></tr>';
+  $('modal-estado-cuenta-proveedor').classList.add('activo');
+  const { data: movs, error } = await sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false});
+  if(error){ $('ecp-tabla-body').innerHTML = `<tr><td colspan="5" class="msg-error">${error.message}</td></tr>`; return; }
+  state.ecpMovimientos = movs || [];
+  renderEcpTabla();
+}
+function renderEcpTabla(){
+  const movs = state.ecpMovimientos;
+  $('ecp-vacio').style.display = movs.length ? 'none' : 'block';
+  const totalPaginas = Math.max(1, Math.ceil(movs.length / state.ecpPorPagina));
+  if(state.ecpPagina > totalPaginas) state.ecpPagina = totalPaginas;
+  if(state.ecpPagina < 1) state.ecpPagina = 1;
+  const inicio = (state.ecpPagina - 1) * state.ecpPorPagina;
+  const pagina = movs.slice(inicio, inicio + state.ecpPorPagina);
+  $('ecp-tabla-body').innerHTML = pagina.map(m=>{
+    const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
+    const signo = efecto < 0 ? '-' : '+';
+    const forma = state.formasPago.find(f=>f.id===m.forma_pago_id);
+    return `<tr>
+      <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
+      <td>${etiquetaMovimientoProveedor(m)}</td>
+      <td>${forma ? forma.nombre : '—'}</td>
+      <td>${m.referencia || '—'}</td>
+      <td class="num">${signo}${money(Math.abs(efecto))}</td>
+    </tr>`;
+  }).join('');
+  $('ecp-pagina-info').textContent = movs.length
+    ? `Página ${state.ecpPagina} de ${totalPaginas} — ${movs.length} movimiento${movs.length===1?'':'s'}`
+    : '';
+  $('ecp-pagina-anterior').disabled = state.ecpPagina <= 1;
+  $('ecp-pagina-siguiente').disabled = state.ecpPagina >= totalPaginas;
+}
+$('ecp-pagina-tamano').addEventListener('change', ()=>{
+  state.ecpPorPagina = Number($('ecp-pagina-tamano').value) || 25;
+  state.ecpPagina = 1;
+  renderEcpTabla();
+});
+$('ecp-pagina-anterior').addEventListener('click', ()=>{ if(state.ecpPagina > 1){ state.ecpPagina--; renderEcpTabla(); } });
+$('ecp-pagina-siguiente').addEventListener('click', ()=>{ state.ecpPagina++; renderEcpTabla(); });
+$('ecp-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta-proveedor').classList.remove('activo'); });
+$('ecp-exportar').addEventListener('click', async ()=>{
+  const p = state.ecpProveedorActual;
+  if(!p) return;
+  const encabezados = ['Fecha','Movimiento','Forma de pago','Referencia','Monto'];
+  const filas = state.ecpMovimientos.map(m=>{
+    const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
+    const forma = state.formasPago.find(f=>f.id===m.forma_pago_id);
+    return [new Date(m.fecha_hora).toLocaleString('es-MX'), etiquetaMovimientoProveedor(m), forma ? forma.nombre : '—', m.referencia || '—', redondear2(efecto)];
+  });
+  const tipos = filas.map(()=>'producto');
+  const nombreArchivoBase = `estado_cuenta_${p.nombre.replace(/[^a-z0-9]+/gi,'_')}_${fechaLocalISO()}`;
+  if($('ecp-formato-exportar').value === 'excel'){
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'Estado de cuenta', encabezados, filas, tipos, [4]);
+  } else {
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, `Estado de cuenta — ${p.nombre}`, state.empresaNombre, encabezados, filas, tipos, [4], [4]);
+  }
+});
+
+// ---------- Registrar pago (modal aparte) ----------
 function formaPagoProveedorEsEfectivo(){
-  const forma = state.formasPago.find(f=>f.id===$('ecp-forma-pago').value);
+  const forma = state.formasPago.find(f=>f.id===$('pp-forma-pago').value);
   return forma?.nombre === 'Efectivo';
 }
 async function actualizarCajaPagoProveedor(){
   const esEfectivo = formaPagoProveedorEsEfectivo();
-  $('ecp-caja-campo').style.display = esEfectivo ? 'block' : 'none';
+  $('pp-caja-campo').style.display = esEfectivo ? 'block' : 'none';
   if(!esEfectivo) return;
   const cajas = await cajasAbiertasAhora();
-  $('ecp-caja-vacio').style.display = cajas.length ? 'none' : 'block';
-  $('ecp-caja').innerHTML = cajas.map(s=>{
+  $('pp-caja-vacio').style.display = cajas.length ? 'none' : 'block';
+  $('pp-caja').innerHTML = cajas.map(s=>{
     const sucursal = state.sucursales.find(x=>x.id === s.cajas?.sucursal_id);
     return `<option value="${s.id}">${s.cajas?.nombre || '—'} — ${sucursal?.nombre || '—'} (turno de ${s.usuarios?.nombre || '—'})</option>`;
   }).join('');
 }
+async function abrirPagoProveedor(id){
+  const p = state.proveedores.find(x=>x.id===id);
+  if(!p) return;
+  state.ppProveedorActual = p;
+  $('pp-titulo').textContent = `Registrar pago — ${p.nombre}`;
+  $('pp-resumen').textContent = `Saldo actual: ${money(p.saldo_actual)}`;
+  $('pp-error').innerHTML = '';
+  $('pp-monto').value = '';
+  $('pp-referencia').value = '';
+  llenarSelect('pp-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
+  await actualizarCajaPagoProveedor();
+  $('modal-pago-proveedor').classList.add('activo');
+}
+$('pp-cerrar').addEventListener('click', ()=>{ $('modal-pago-proveedor').classList.remove('activo'); });
+$('pp-forma-pago').addEventListener('change', actualizarCajaPagoProveedor);
+$('pp-pagar').addEventListener('click', async ()=>{
+  $('pp-error').innerHTML = '';
+  const p = state.ppProveedorActual;
+  const monto = parseMoney($('pp-monto').value);
+  const formaPagoId = $('pp-forma-pago').value;
+  if(!p || !monto || monto<=0 || !formaPagoId){
+    $('pp-error').innerHTML = '<div class="msg-error">Captura un monto válido y la forma de pago.</div>';
+    return;
+  }
+  const esEfectivo = formaPagoProveedorEsEfectivo();
+  const sesionCajaId = esEfectivo ? ($('pp-caja').value || null) : null;
+  if(esEfectivo && !sesionCajaId){
+    $('pp-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
+    return;
+  }
+  const referencia = $('pp-referencia').value.trim() || null;
+  $('pp-pagar').disabled = true;
+  const { error } = await sb.rpc('registrar_pago_proveedor', {
+    p_proveedor_id: p.id, p_monto: monto, p_forma_pago_id: formaPagoId,
+    p_sesion_caja_id: sesionCajaId, p_referencia: referencia,
+  });
+  $('pp-pagar').disabled = false;
+  if(error){
+    $('pp-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  state.proveedores = proveedores || [];
+  renderProveedorSelect();
+  $('modal-pago-proveedor').classList.remove('activo');
+  renderCxpTabla();
+});
+
+// ---------- Registrar anticipo (modal aparte) ----------
 function formaPagoAnticipoEsEfectivo(){
-  const forma = state.formasPago.find(f=>f.id===$('ecp-anticipo-forma-pago').value);
+  const forma = state.formasPago.find(f=>f.id===$('ap-forma-pago').value);
   return forma?.nombre === 'Efectivo';
 }
 async function actualizarCajaAnticipoProveedor(){
   const esEfectivo = formaPagoAnticipoEsEfectivo();
-  $('ecp-anticipo-caja-campo').style.display = esEfectivo ? 'block' : 'none';
+  $('ap-caja-campo').style.display = esEfectivo ? 'block' : 'none';
   if(!esEfectivo) return;
   const cajas = await cajasAbiertasAhora();
-  $('ecp-anticipo-caja-vacio').style.display = cajas.length ? 'none' : 'block';
-  $('ecp-anticipo-caja').innerHTML = cajas.map(s=>{
+  $('ap-caja-vacio').style.display = cajas.length ? 'none' : 'block';
+  $('ap-caja').innerHTML = cajas.map(s=>{
     const sucursal = state.sucursales.find(x=>x.id === s.cajas?.sucursal_id);
     return `<option value="${s.id}">${s.cajas?.nombre || '—'} — ${sucursal?.nombre || '—'} (turno de ${s.usuarios?.nombre || '—'})</option>`;
   }).join('');
 }
-$('ecp-anticipo-forma-pago').addEventListener('change', actualizarCajaAnticipoProveedor);
-$('ecp-anticipo-registrar').addEventListener('click', async ()=>{
-  $('ecp-anticipo-error').innerHTML = '';
-  const p = state.ecpProveedorActual;
-  const monto = parseMoney($('ecp-anticipo-monto').value);
-  const formaPagoId = $('ecp-anticipo-forma-pago').value;
+async function abrirAnticipoProveedor(id){
+  const p = state.proveedores.find(x=>x.id===id);
+  if(!p) return;
+  state.apProveedorActual = p;
+  $('ap-titulo').textContent = `Registrar anticipo — ${p.nombre}`;
+  $('ap-error').innerHTML = '';
+  $('ap-monto').value = '';
+  $('ap-referencia').value = '';
+  llenarSelect('ap-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
+  await actualizarCajaAnticipoProveedor();
+  $('modal-anticipo-proveedor').classList.add('activo');
+}
+$('ap-cerrar').addEventListener('click', ()=>{ $('modal-anticipo-proveedor').classList.remove('activo'); });
+$('ap-forma-pago').addEventListener('change', actualizarCajaAnticipoProveedor);
+$('ap-registrar').addEventListener('click', async ()=>{
+  $('ap-error').innerHTML = '';
+  const p = state.apProveedorActual;
+  const monto = parseMoney($('ap-monto').value);
+  const formaPagoId = $('ap-forma-pago').value;
   if(!p || !monto || monto<=0 || !formaPagoId){
-    $('ecp-anticipo-error').innerHTML = '<div class="msg-error">Captura un monto válido y la forma de pago.</div>';
+    $('ap-error').innerHTML = '<div class="msg-error">Captura un monto válido y la forma de pago.</div>';
     return;
   }
   const esEfectivo = formaPagoAnticipoEsEfectivo();
-  const sesionCajaId = esEfectivo ? ($('ecp-anticipo-caja').value || null) : null;
+  const sesionCajaId = esEfectivo ? ($('ap-caja').value || null) : null;
   if(esEfectivo && !sesionCajaId){
-    $('ecp-anticipo-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
+    $('ap-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
     return;
   }
-  const referencia = $('ecp-anticipo-referencia').value.trim() || null;
-  $('ecp-anticipo-registrar').disabled = true;
+  const referencia = $('ap-referencia').value.trim() || null;
+  $('ap-registrar').disabled = true;
   const { error } = await sb.rpc('registrar_anticipo_proveedor', {
     p_proveedor_id: p.id, p_monto: monto, p_forma_pago_id: formaPagoId,
     p_sesion_caja_id: sesionCajaId, p_referencia: referencia,
   });
-  $('ecp-anticipo-registrar').disabled = false;
+  $('ap-registrar').disabled = false;
   if(error){
-    $('ecp-anticipo-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    $('ap-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
     return;
   }
   const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
   state.proveedores = proveedores || [];
   renderProveedorSelect();
   renderProveedorSelectAnticipoCxp();
-  await abrirEstadoCuentaProveedor(p.id);
-  renderCxpTabla();
-});
-$('ecp-forma-pago').addEventListener('change', actualizarCajaPagoProveedor);
-$('ecp-pagar').addEventListener('click', async ()=>{
-  $('ecp-error').innerHTML = '';
-  const p = state.ecpProveedorActual;
-  const monto = parseMoney($('ecp-monto').value);
-  const formaPagoId = $('ecp-forma-pago').value;
-  if(!p || !monto || monto<=0 || !formaPagoId){
-    $('ecp-error').innerHTML = '<div class="msg-error">Captura un monto válido y la forma de pago.</div>';
-    return;
-  }
-  const esEfectivo = formaPagoProveedorEsEfectivo();
-  const sesionCajaId = esEfectivo ? ($('ecp-caja').value || null) : null;
-  if(esEfectivo && !sesionCajaId){
-    $('ecp-error').innerHTML = '<div class="msg-error">Elige de qué caja sale el efectivo (debe tener un turno abierto).</div>';
-    return;
-  }
-  const referencia = $('ecp-referencia').value.trim() || null;
-  $('ecp-pagar').disabled = true;
-  const { error } = await sb.rpc('registrar_pago_proveedor', {
-    p_proveedor_id: p.id, p_monto: monto, p_forma_pago_id: formaPagoId,
-    p_sesion_caja_id: sesionCajaId, p_referencia: referencia,
-  });
-  $('ecp-pagar').disabled = false;
-  if(error){
-    $('ecp-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
-    return;
-  }
-  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
-  state.proveedores = proveedores || [];
-  renderProveedorSelect();
-  await abrirEstadoCuentaProveedor(p.id);
+  $('modal-anticipo-proveedor').classList.remove('activo');
   renderCxpTabla();
 });
 
@@ -5071,10 +5215,24 @@ async function cxpVencimientosFiltrados(){
   const q = ($('cxp-buscar').value || '').trim().toLowerCase();
   return q ? state.cxpVencimientos.filter(v => (v.proveedor_nombre||'').toLowerCase().includes(q)) : state.cxpVencimientos;
 }
-function filaAccionProveedor(proveedorId){ return `<button type="button" class="btn-gris cxp-estado-cuenta" data-id="${proveedorId}">Estado de cuenta</button>`; }
+// Ronda 47: Adrián pidió 3 botones por proveedor en vez de uno solo con todo adentro — más práctico
+// cuando hay muchas compras, porque cada acción abre su propio modal enfocado.
+function filaAccionProveedor(proveedorId){
+  return `<div class="fila" style="gap:6px;flex-wrap:wrap;">
+    <button type="button" class="btn-gris cxp-estado-cuenta" data-id="${proveedorId}">Estado de cuenta</button>
+    <button type="button" class="btn-secundario cxp-pago-btn" data-id="${proveedorId}">Pago</button>
+    <button type="button" class="btn-secundario cxp-anticipo-fila-btn" data-id="${proveedorId}">Anticipo</button>
+  </div>`;
+}
 function conectarBotonesEstadoCuentaProveedor(){
   $('cxp-tabla-body').querySelectorAll('.cxp-estado-cuenta').forEach(btn=>{
     btn.addEventListener('click', ()=>abrirEstadoCuentaProveedor(btn.dataset.id));
+  });
+  $('cxp-tabla-body').querySelectorAll('.cxp-pago-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirPagoProveedor(btn.dataset.id));
+  });
+  $('cxp-tabla-body').querySelectorAll('.cxp-anticipo-fila-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>abrirAnticipoProveedor(btn.dataset.id));
   });
 }
 const THEAD_CXP_NORMAL = '<tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo actual</th><th></th></tr>';
