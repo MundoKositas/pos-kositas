@@ -476,11 +476,11 @@
         </div>
         <div class="tabla-scroll" style="margin-top:14px;">
           <table>
-            <thead id="cxp-thead"><tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo actual</th><th></th></tr></thead>
+            <thead id="cxp-thead"><tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo de crédito</th><th class="num">Anticipo disponible</th><th></th></tr></thead>
             <tbody id="cxp-tabla-body"></tbody>
           </table>
         </div>
-        <p class="nota" id="cxp-vacio" style="display:none;">Ningún proveedor tiene saldo pendiente.</p>
+        <p class="nota" id="cxp-vacio" style="display:none;">Ningún proveedor tiene saldo de crédito ni anticipo disponible.</p>
         <div class="totales" style="margin-top:10px;">
           <div class="linea total-final"><span>Total por pagar</span><span id="cxp-total">$0.00</span></div>
         </div>
@@ -1349,7 +1349,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.21.004';
+const APP_VERSION = '1.22.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5016,11 +5016,19 @@ async function abrirEstadoCuentaProveedor(id){
   state.ecpProveedorActual = p;
   state.ecpPagina = 1;
   $('ecp-titulo').textContent = `Estado de cuenta — ${p.nombre}`;
-  $('ecp-resumen').textContent = `Saldo actual: ${money(p.saldo_actual)}`;
+  // Ronda 50: el saldo de crédito y el saldo de anticipos son 2 cosas separadas — un anticipo es
+  // dinero prepagado para mercancía futura, nunca se resta del saldo de crédito. Se muestran ambos
+  // por separado para que quede claro que no se netean entre sí.
+  $('ecp-resumen').textContent = `Saldo de crédito: ${money(p.saldo_actual)} · Anticipos disponibles: ${money(0)}`;
   $('ecp-tabla-body').innerHTML = '<tr><td colspan="5" class="nota">Cargando…</td></tr>';
   $('modal-estado-cuenta-proveedor').classList.add('activo');
-  const { data: movs, error } = await sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false});
+  const [{ data: movs, error }, { data: anticipos }] = await Promise.all([
+    sb.from('proveedor_movimientos').select('*').eq('proveedor_id', id).order('fecha_hora', {ascending:false}),
+    sb.from('anticipos_proveedor').select('monto_disponible').eq('proveedor_id', id).gt('monto_disponible', 0)
+  ]);
   if(error){ $('ecp-tabla-body').innerHTML = `<tr><td colspan="5" class="msg-error">${error.message}</td></tr>`; return; }
+  const totalAnticipos = (anticipos || []).reduce((s,a)=>s+Number(a.monto_disponible), 0);
+  $('ecp-resumen').textContent = `Saldo de crédito: ${money(p.saldo_actual)} · Anticipos disponibles: ${money(totalAnticipos)}`;
   state.ecpMovimientos = movs || [];
   renderEcpTabla();
 }
@@ -5205,10 +5213,21 @@ $('ap-registrar').addEventListener('click', async ()=>{
   renderCxpTabla();
 });
 
+// Ronda 50: el saldo de crédito (saldo_actual) y el saldo de anticipos disponibles son 2 cosas
+// separadas — un anticipo nunca se resta del saldo de crédito, así que ya no hay proveedores con
+// saldo_actual negativo por anticipos (eso era el fix de la Ronda 48, ya no aplica). Lo que sí debe
+// verse en Cuentas por pagar es un proveedor que tenga anticipo disponible aunque su saldo de crédito
+// esté en $0 — para que Adrián no pierda de vista dinero ya entregado a cuenta de mercancía futura.
+state.anticiposDisponiblesPorProveedor = {};
+async function cargarAnticiposDisponiblesTotales(){
+  const { data, error } = await sb.from('anticipos_proveedor').select('proveedor_id, monto_disponible').gt('monto_disponible', 0);
+  if(error){ console.error('anticipos_proveedor (totales):', error); state.anticiposDisponiblesPorProveedor = {}; return; }
+  const mapa = {};
+  (data || []).forEach(a => { mapa[a.proveedor_id] = (mapa[a.proveedor_id] || 0) + Number(a.monto_disponible); });
+  state.anticiposDisponiblesPorProveedor = mapa;
+}
 function proveedoresConSaldo(){
-  // Ronda 48: antes solo listaba saldo_actual > 0. Adrián pidió incluir también saldo negativo
-  // (proveedor a favor, por anticipos aún no aplicados) para poder ubicarlo y darle seguimiento.
-  return state.proveedores.filter(p => Number(p.saldo_actual) !== 0)
+  return state.proveedores.filter(p => Number(p.saldo_actual) > 0 || (state.anticiposDisponiblesPorProveedor[p.id] || 0) > 0)
     .sort((a,b)=> Number(b.saldo_actual) - Number(a.saldo_actual));
 }
 function proveedoresConSaldoFiltrados(){
@@ -5243,11 +5262,12 @@ function conectarBotonesEstadoCuentaProveedor(){
     btn.addEventListener('click', ()=>abrirAnticipoProveedor(btn.dataset.id));
   });
 }
-const THEAD_CXP_NORMAL = '<tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo actual</th><th></th></tr>';
+const THEAD_CXP_NORMAL = '<tr><th>Proveedor</th><th>Teléfono</th><th class="num">Saldo de crédito</th><th class="num">Anticipo disponible</th><th></th></tr>';
 const THEAD_CXP_VENCIMIENTO = '<tr><th>Proveedor</th><th>Referencia</th><th>Fecha de vencimiento</th><th class="num">Importe que vence</th><th></th></tr>';
 async function renderCxpTabla(){
   const modo = $('cxp-agrupar').value;
   $('cxp-thead').innerHTML = modo === 'vencimiento' ? THEAD_CXP_VENCIMIENTO : THEAD_CXP_NORMAL;
+  await cargarAnticiposDisponiblesTotales();
 
   if(modo === 'vencimiento'){
     const filas = await cxpVencimientosFiltrados();
@@ -5268,9 +5288,12 @@ async function renderCxpTabla(){
   $('cxp-tabla-body').innerHTML = items.map(p=>`<tr>
       <td>${p.nombre}</td><td>${p.telefono || '—'}</td>
       <td class="num">${money(p.saldo_actual)}</td>
+      <td class="num">${money(state.anticiposDisponiblesPorProveedor[p.id] || 0)}</td>
       <td>${filaAccionProveedor(p.id)}</td>
     </tr>`).join('');
   conectarBotonesEstadoCuentaProveedor();
+  // Ronda 50: el total general es solo del saldo de crédito — el anticipo disponible es dinero a
+  // favor para compras futuras, no se resta ni se suma al total que se le debe al proveedor.
   $('cxp-total').textContent = money(items.reduce((s,p)=>s+Number(p.saldo_actual),0));
 }
 $('cxp-buscar').addEventListener('input', renderCxpTabla);
@@ -5295,16 +5318,17 @@ $('cxp-exportar').addEventListener('click', async ()=>{
     return;
   }
 
+  await cargarAnticiposDisponiblesTotales();
   const items = proveedoresConSaldoFiltrados();
-  const encabezados = ['Proveedor','Teléfono','Saldo actual'];
-  const filas = items.map(p=>[p.nombre, p.telefono || '—', Number(p.saldo_actual)||0]);
+  const encabezados = ['Proveedor','Teléfono','Saldo de crédito','Anticipo disponible'];
+  const filas = items.map(p=>[p.nombre, p.telefono || '—', Number(p.saldo_actual)||0, Number(state.anticiposDisponiblesPorProveedor[p.id]||0)]);
   const tipos = items.map(()=>'producto');
-  filas.push(['TOTAL GENERAL', '', redondear2(items.reduce((s,p)=>s+Number(p.saldo_actual),0))]);
+  filas.push(['TOTAL GENERAL', '', redondear2(items.reduce((s,p)=>s+Number(p.saldo_actual),0)), redondear2(items.reduce((s,p)=>s+Number(state.anticiposDisponiblesPorProveedor[p.id]||0),0))]);
   tipos.push('total');
   if($('cxp-formato-exportar').value === 'excel'){
-    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxP', encabezados, filas, tipos, [2]);
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'CxP', encabezados, filas, tipos, [2,3]);
   } else {
-    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por pagar', state.empresaNombre, encabezados, filas, tipos, [2], [2]);
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, 'Cuentas por pagar', state.empresaNombre, encabezados, filas, tipos, [2,3], [2,3]);
   }
 });
 
