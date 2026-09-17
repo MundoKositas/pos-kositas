@@ -1392,7 +1392,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.23.001';
+const APP_VERSION = '1.23.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3800,7 +3800,20 @@ $('compra-mixto-agregar-linea').addEventListener('click', ()=>{
       return;
     }
     const opt = $('compra-mixto-nueva-anticipo').selectedOptions[0];
-    state.compraMixtoLineas.push({ tipo:'anticipo', anticipoId, anticipoDisponible: Number(opt?.dataset.disponible||0), monto });
+    const disponible = Number(opt?.dataset.disponible||0);
+    // Ronda 52 — ajuste: si ya agregaste este mismo anticipo en otra línea de esta misma compra,
+    // hay que descontar lo ya capturado antes de validar — si no, la pantalla dejaba "agregar" el
+    // mismo anticipo dos veces mostrando siempre su disponible original, sin avisar que ya se había
+    // comprometido (el servidor lo hubiera rechazado hasta el final, pero no debía llegar hasta ahí).
+    const yaUsado = state.compraMixtoLineas.filter(l=>l.tipo==='anticipo' && l.anticipoId===anticipoId).reduce((s,l)=>s+Number(l.monto),0);
+    const restante = redondear2(disponible - yaUsado);
+    if(monto > restante + 0.004){
+      $('compra-mixto-error').innerHTML = restante > 0.004
+        ? `<div class="msg-error">Ese anticipo tiene ${money(restante)} disponible después de lo que ya agregaste en esta compra — ajusta el monto o elige otro anticipo.</div>`
+        : `<div class="msg-error">Ese anticipo ya lo agregaste por su total disponible (${money(disponible)}) — elige otro anticipo o cambia el tipo de línea.</div>`;
+      return;
+    }
+    state.compraMixtoLineas.push({ tipo:'anticipo', anticipoId, anticipoDisponible: disponible, monto });
   } else if(tipo === 'pago'){
     const formaPagoId = $('compra-mixto-nueva-forma').value;
     if(!formaPagoId){
