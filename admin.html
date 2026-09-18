@@ -52,9 +52,13 @@
      encabezado se queda pegado arriba de esa ventana mientras se hace scroll dentro de ella. */
   .tabla-fija{overflow-y:auto;max-height:min(58vh,520px);}
   .tabla-fija thead th{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 var(--borde);}
-  /* Ronda 53: menú principal de admin.html fijo — Adrián pidió no tener que subir hasta arriba de
-     una lista larga para cambiar de sección. */
-  #tabs-principal{position:sticky;top:0;background:var(--bg);z-index:15;padding:10px 0 6px;margin:-16px 0 10px;}
+  /* Ronda 53/54: menú principal de admin.html fijo — Adrián pidió no tener que subir hasta arriba de
+     una lista larga para cambiar de sección, y luego señaló que el encabezado azul (con
+     "Configuración de empresa"/"Salir") se seguía perdiendo al bajar, porque solo el menú era fijo.
+     Ahora el encabezado azul TAMBIÉN es fijo y el menú se pega justo debajo de él — el offset exacto
+     se calcula por JS (--header-alto) porque la altura del encabezado varía (con/sin logotipo). */
+  header#header-app{position:sticky;top:0;z-index:16;}
+  #tabs-principal{position:sticky;top:var(--header-alto, 64px);background:var(--bg);z-index:15;padding:10px 0 6px;margin:-16px 0 10px;}
   table{width:100%;border-collapse:collapse;font-size:.9rem;}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--borde);white-space:nowrap;}
   td.num, th.num{text-align:right;}
@@ -1412,7 +1416,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.24.001';
+const APP_VERSION = '1.25.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1635,6 +1639,20 @@ function actualizarLogoHeader(){
     $('hdr-logo-caja').style.display = 'none';
   }
 }
+
+// Ronda 54: el encabezado azul (header#header-app) ahora es sticky junto con el menú principal
+// (#tabs-principal), así que el menú debe "pegarse" justo debajo del encabezado y no debajo de
+// donde estaría si no fuera fijo. Como la altura del encabezado varía (con/sin logotipo, cómo
+// envuelve en pantallas angostas), se mide su alto real y se guarda en la variable CSS
+// --header-alto, que #tabs-principal usa como su "top". Se vuelve a medir si cambia el tamaño de
+// la ventana o si el logotipo termina de cargar (puede cambiar el alto del encabezado).
+function ajustarOffsetMenuFijo(){
+  const header = $('header-app');
+  if(!header || header.style.display === 'none') return;
+  document.documentElement.style.setProperty('--header-alto', header.offsetHeight + 'px');
+}
+window.addEventListener('resize', ajustarOffsetMenuFijo);
+$('hdr-logo').addEventListener('load', ajustarOffsetMenuFijo);
 
 function mostrarPantalla(id){
   document.querySelectorAll('.pantalla').forEach(p=>p.classList.remove('activa'));
@@ -1915,6 +1933,7 @@ async function iniciarSesionApp(){
   $('hdr-info').textContent = `${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
   $('header-app').style.display = 'flex';
   actualizarLogoHeader();
+  ajustarOffsetMenuFijo();
 
   await cargarCatalogosBase();
   await cargarProductos();
@@ -1935,6 +1954,7 @@ async function iniciarSesionApp(){
   ajustarVisibilidadMenus(); // Ronda 35: oculta pestañas sin acceso y desactiva acciones de solo-consulta
 
   mostrarPantalla('pantalla-admin');
+  ajustarOffsetMenuFijo(); // Ronda 54: vuelve a medir ya con la pantalla de admin realmente visible
 
   // Si se llegó aquí desde el link "Editar producto" de POS (admin.html?variante=<id>), abre
   // directamente la ficha de ese producto sin que el usuario tenga que buscarlo en el catálogo.

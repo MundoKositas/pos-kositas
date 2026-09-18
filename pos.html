@@ -606,7 +606,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.011';
+const APP_VERSION = '1.7.013';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -735,6 +735,73 @@ function mostrarPantalla(id){
   $(id).classList.add('activa');
 }
 $('version-tag').textContent = 'v' + APP_VERSION;
+
+// Ronda 51: Adrián reportó que, cuando la sesión caduca (el token de refresco deja de ser válido),
+// el POS se quedaba mostrando la última pantalla e información desactualizada (ej. "Cerrar caja" sin
+// los movimientos más recientes) en vez de mandarlo a login — solo se daba cuenta al dar F5, y ahí sí
+// lo mandaba a login y ya reflejaba todo bien. Esto es peligroso: no se debe seguir mostrando
+// información de una sesión que ya no es válida. supabase-js dispara este evento con session=null
+// cuando la sesión deja de existir (logout explícito O el refresco del token falla) — si había una
+// sesión activa, se limpia el estado sensible y se manda a login de inmediato, sin esperar a que el
+// usuario note algo raro y le dé F5.
+let sesionPosActiva = false;
+// Ronda 54: Adrián señaló que si la sesión caduca mientras se están agregando MUCHOS artículos, no se
+// da cuenta hasta que le da "Cobrar" — para entonces, si no se guarda nada, tendría que volver a
+// capturar todo desde cero. Detectar la expiración más temprano no es confiable (el refresco de
+// sesión corre en segundo plano en su propio momento, fuera de nuestro control), así que en vez de
+// eso se guarda la venta en curso ANTES de limpiar el estado, y se recupera sola en cuanto vuelva a
+// entrar (ver restaurarVentaPendienteSiExiste, llamada desde entrarAlPOS). Se respalda también en
+// sessionStorage por si además hay una recarga completa de página entre el aviso y el reingreso.
+let ventaPendienteTrasRelogin = null;
+sb.auth.onAuthStateChange((_event, session) => {
+  if(session){ sesionPosActiva = true; return; }
+  if(!sesionPosActiva) return; // estado inicial antes de loguearse — nada que limpiar
+  sesionPosActiva = false;
+  let seGuardoVenta = false;
+  if(state.carrito && state.carrito.length){
+    ventaPendienteTrasRelogin = {
+      carrito: state.carrito, pagos: state.pagos,
+      clienteId: state.clienteId, listaPrecioId: state.listaPrecioId,
+    };
+    try{ sessionStorage.setItem('mk_pos_venta_pendiente', JSON.stringify(ventaPendienteTrasRelogin)); }catch(e){}
+    seGuardoVenta = true;
+  }
+  state.usuario = null; state.rol = null; state.roles = [];
+  state.empresaId = null; state.sesionCaja = null; state.cajaId = null; state.cajaNombre = '';
+  state.carrito = []; state.pagos = [];
+  $('header-app').style.display = 'none';
+  mostrarPantalla('pantalla-login');
+  $('login-error').innerHTML = seGuardoVenta
+    ? '<div class="msg-error">Tu sesión expiró — vuelve a iniciar sesión. La venta que tenías en curso se recuperará sola.</div>'
+    : '<div class="msg-error">Tu sesión expiró — vuelve a iniciar sesión.</div>';
+});
+// Se llama desde entrarAlPOS(), justo después de reiniciarVenta() (que deja el carrito en []).
+function restaurarVentaPendienteSiExiste(){
+  let pendiente = ventaPendienteTrasRelogin;
+  if(!pendiente){
+    try{
+      const guardado = sessionStorage.getItem('mk_pos_venta_pendiente');
+      if(guardado) pendiente = JSON.parse(guardado);
+    }catch(e){}
+  }
+  ventaPendienteTrasRelogin = null;
+  try{ sessionStorage.removeItem('mk_pos_venta_pendiente'); }catch(e){}
+  if(!pendiente || !pendiente.carrito || !pendiente.carrito.length) return;
+  state.carrito = pendiente.carrito;
+  state.pagos = pendiente.pagos || [];
+  if(pendiente.clienteId){
+    state.clienteId = pendiente.clienteId;
+    if(state.clientes.some(c=>c.id === pendiente.clienteId)){
+      $('sel-cliente').value = pendiente.clienteId;
+      actualizarNotaCreditoCliente();
+    }
+  }
+  if(pendiente.listaPrecioId) state.listaPrecioId = pendiente.listaPrecioId;
+  renderCarrito();
+  renderPagos();
+  const n = pendiente.carrito.length;
+  $('cobro-error').innerHTML = `<div class="msg-ok">Se recuperó tu venta en curso (${n} artículo${n===1?'':'s'}) — la sesión había expirado justo antes de terminarla.</div>`;
+}
 
 // ---------- NAVEGACIÓN POR TECLADO (para no depender del mouse) ----------
 // En cada contenedor: Enter en un campo mueve el foco al siguiente campo visible;
@@ -1031,6 +1098,7 @@ async function entrarAlPOS(){
   await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
   actualizarBloqueosPermisos();
   reiniciarVenta();
+  restaurarVentaPendienteSiExiste();
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
   suscribirStockEnVivo();
