@@ -151,6 +151,7 @@
 <div class="pantalla" id="pantalla-admin">
   <div class="tabs" id="tabs-principal">
     <button class="tab-btn activo" data-tab="tab-catalogo">Catálogo</button>
+    <button class="tab-btn" data-tab="tab-combos">Combos</button>
     <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
@@ -216,6 +217,23 @@
         </select>
         <button type="button" class="btn-gris" id="cat-exportar-existencias">Reporte de existencias</button>
         <button type="button" class="btn-gris" id="cat-exportar-resurtido">Reporte de resurtido</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB COMBOS (Ronda 55) -->
+  <div class="tab-panel" id="tab-combos" style="display:none;">
+    <div class="card">
+      <div class="fila" style="justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;">Combos / paquetes de productos</h2>
+        <button class="btn-primario" id="btn-nuevo-combo">+ Nuevo combo</button>
+      </div>
+      <p class="nota">Un combo es un producto más (con su propio código de barras) armado con una receta de otros productos — al venderlo, se descuenta el inventario de cada componente según su cantidad, no una existencia propia del combo. El costo del combo para el reporte de utilidad siempre se calcula sumando el costo real de sus componentes.</p>
+      <div class="tabla-scroll tabla-fija">
+        <table>
+          <thead><tr><th>Combo</th><th>Componentes</th><th>Precio</th><th class="num">Máximo por venta</th><th>Vigencia</th><th>Listas</th><th></th></tr></thead>
+          <tbody id="combos-tabla-body"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -1104,6 +1122,63 @@
 </div>
 
 <!-- MODAL: producto -->
+<!-- MODAL: combo/paquete de productos (Ronda 55) -->
+<div class="modal-fondo" id="modal-combo">
+  <div class="modal" style="max-width:720px;">
+    <h2 id="combo-titulo">Nuevo combo</h2>
+    <div class="campo"><label>Nombre del combo</label><input type="text" id="combo-nombre" placeholder="Ej. Paquete de fiesta"></div>
+    <div class="grid-2">
+      <div class="campo"><label>Línea de artículo</label><select id="combo-linea"></select></div>
+      <div class="campo"><label>Unidad de medida</label><select id="combo-unidad"></select></div>
+    </div>
+    <p class="nota">El código de barras, la imagen y los impuestos del combo se agregan después, desde su ficha en el Catálogo — aquí se guardan solo dando de alta el nombre, la receta y las reglas propias del combo.</p>
+
+    <h3 style="margin-bottom:6px;">Receta (componentes)</h3>
+    <div class="campo">
+      <label>Buscar producto para agregar</label>
+      <input type="text" id="combo-buscar-producto" autocomplete="off" placeholder="Escribe el nombre o escanea el código…">
+      <div id="combo-resultados-busqueda" class="resultados"></div>
+    </div>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Cantidad</th><th></th></tr></thead>
+        <tbody id="combo-componentes-tabla-body"></tbody>
+      </table>
+    </div>
+    <p class="nota" id="combo-sin-componentes">Todavía no agregas ningún componente.</p>
+
+    <h3 style="margin-bottom:6px;">Precio</h3>
+    <div class="fila" style="gap:16px;">
+      <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="combo-modo-precio" id="combo-modo-manual" value="manual" checked style="width:auto;"> Precio manual (lo capturo yo)</label>
+      <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="combo-modo-precio" id="combo-modo-calculado" value="calculado" style="width:auto;"> Calculado (suma de componentes menos %)</label>
+    </div>
+    <div class="campo" id="combo-descuento-campo" style="display:none;">
+      <label>% de descuento sobre la suma de componentes</label>
+      <input type="number" step="0.01" min="0" max="100" id="combo-descuento-pct" value="0">
+    </div>
+
+    <h3 style="margin-bottom:6px;">Listas de precio donde se puede vender</h3>
+    <div id="combo-listas-checks" class="fila" style="flex-wrap:wrap;gap:14px;"></div>
+    <div id="combo-precios-manual" style="margin-top:10px;"></div>
+    <p class="nota" id="combo-precio-calculado-preview" style="display:none;"></p>
+
+    <div class="grid-2" style="margin-top:10px;">
+      <div class="campo"><label>Máximo por venta (opcional)</label><input type="number" step="1" min="1" id="combo-maximo" placeholder="Sin límite"></div>
+    </div>
+    <div class="grid-2">
+      <div class="campo"><label>Vigente desde (opcional)</label><input type="date" id="combo-vigente-desde"></div>
+      <div class="campo"><label>Vigente hasta (opcional)</label><input type="date" id="combo-vigente-hasta"></div>
+    </div>
+    <p class="nota">Si dejas la vigencia en blanco, el combo se vende siempre mientras esté Activo. Si la capturas, fuera de esas fechas deja de aparecer en el buscador del POS automáticamente.</p>
+
+    <div id="combo-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="combo-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="combo-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-producto">
   <div class="modal ancho" id="card-producto">
     <div id="prod-header-sticky" style="position:sticky;top:-22px;background:#fff;z-index:5;margin:-22px -22px 10px;padding:22px 22px 10px;border-bottom:1px solid var(--borde);">
@@ -1416,7 +1491,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.25.001';
+const APP_VERSION = '1.26.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1621,6 +1696,8 @@ const state = {
   xmlPendientes: [], xmlPendientesTotalLote: 0, xmlPendienteActivo: false, xmlProveedorId: null,
   xmlCfdiUuid: null,
   permisosMenu: {}, // Ronda 35: { 'catalogos_base.roles': 'edicion' | 'consulta', ... } — sin llave = sin acceso
+  // Ronda 55: Combos/paquetes de productos.
+  combos: [], comboEditandoVarianteId: null, comboComponentes: [], comboListasSeleccionadas: [],
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -1984,6 +2061,7 @@ function tieneEdicionMenu(clave){ return Object.keys(state.permisosMenu).length 
 // más granular (compra / ajuste de salida / traspasos), y no se tocan con este árbol nuevo.
 const MAPA_TAB_PRINCIPAL_A_CLAVE = {
   'tab-catalogo': 'catalogo',
+  'tab-combos': 'catalogo', // Ronda 55: los combos comparten el permiso de Catálogo — no tienen clave propia todavía
   'tab-listas': 'listas_precio',
   'tab-actualizar-precios': 'actualizar_precios',
   'tab-reporte': 'reporte_precios',
@@ -2033,6 +2111,7 @@ function ajustarVisibilidadMenus(){
   // abrirLista/abrirCliente), porque ahí sí importa distinguir alta vs edición de un registro ya
   // abierto.
   $('btn-nuevo-producto').style.display = tieneEdicionMenu('catalogo') ? '' : 'none';
+  $('btn-nuevo-combo').style.display = tieneEdicionMenu('catalogo') ? '' : 'none';
   $('btn-nueva-lista').style.display = tieneEdicionMenu('listas_precio') ? '' : 'none';
   $('btn-actualizar-precios').style.display = tieneEdicionMenu('actualizar_precios') ? '' : 'none';
   $('btn-nuevo-cliente').style.display = tieneEdicionMenu('clientes') ? '' : 'none';
@@ -2055,6 +2134,7 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     // hasta recargar el navegador. Ahora se refresca cada vez que se entra a la pestaña.
     if(btn.dataset.tab === 'tab-clientes') refrescarPantallaClientes();
     if(btn.dataset.tab === 'tab-catalogos-base') entrarATabCatalogosBase();
+    if(btn.dataset.tab === 'tab-combos') cargarCombos();
   });
 });
 
@@ -2106,6 +2186,13 @@ async function cargarCatalogosBase(){
   $('prod-categoria').dispatchEvent(new Event('change'));
   llenarSelect('prod-unidad', state.unidades, u=>u.id, u=>`${u.descripcion} (${u.clave})`);
   habilitarComboBuscable('prod-unidad');
+
+  // Ronda 55: selects de línea/unidad del modal de Combos — sin filtro por categoría (el combo no
+  // tiene categoría propia porque abarca productos de varias), a diferencia de "prod-linea".
+  llenarSelect('combo-linea', state.lineas, l=>l.id, l=>l.nombre);
+  habilitarComboBuscable('combo-linea');
+  llenarSelect('combo-unidad', state.unidades, u=>u.id, u=>`${u.descripcion} (${u.clave})`);
+  habilitarComboBuscable('combo-unidad');
 
   llenarSelectConTodas('cat-filtro-categoria', state.categorias, c=>c.id, c=>c.nombre);
   llenarSelectConTodas('cat-filtro-linea', state.lineas, l=>l.id, l=>l.nombre);
@@ -2299,6 +2386,288 @@ async function cargarProductos(){
   renderReporte();
 }
 $('cat-buscar').addEventListener('input', ()=>{ state.catalogoPagina = 1; renderCatalogo(); });
+
+// ---------- COMBOS / PAQUETES DE PRODUCTOS (Ronda 55) ----------
+async function cargarCombos(){
+  const [{ data: combos, error: e1 }, { data: componentes, error: e2 }, { data: listas, error: e3 }] = await Promise.all([
+    sb.from('combos').select('variante_id, modo_precio, descuento_pct, maximo_por_venta, vigente_desde, vigente_hasta'),
+    sb.from('combo_componentes').select('combo_variante_id, componente_variante_id, cantidad'),
+    sb.from('combo_listas').select('combo_variante_id, lista_precio_id'),
+  ]);
+  if(e1 || e2 || e3){ console.error(e1||e2||e3); return; }
+  state.combos = (combos||[]).map(c=>({
+    varianteId: c.variante_id, modoPrecio: c.modo_precio, descuentoPct: c.descuento_pct,
+    maximoPorVenta: c.maximo_por_venta, vigenteDesde: c.vigente_desde, vigenteHasta: c.vigente_hasta,
+    componentes: (componentes||[]).filter(cc=>cc.combo_variante_id===c.variante_id)
+      .map(cc=>({ varianteId: cc.componente_variante_id, cantidad: Number(cc.cantidad) })),
+    listaIds: (listas||[]).filter(l=>l.combo_variante_id===c.variante_id).map(l=>l.lista_precio_id),
+  }));
+  renderCombosTabla();
+}
+
+function renderCombosTabla(){
+  const tbody = $('combos-tabla-body');
+  tbody.innerHTML = state.combos.map(c=>{
+    const prod = state.productos.find(p=>p.varianteId===c.varianteId);
+    const nombre = prod?.nombre || '(producto no encontrado)';
+    const nombresComponentes = c.componentes.map(comp=>{
+      const p = state.productos.find(pp=>pp.varianteId===comp.varianteId);
+      return `${comp.cantidad} × ${p?.nombre || '?'}`;
+    }).join(', ');
+    const precioTexto = c.modoPrecio==='manual' ? 'Manual' : `Calculado (−${c.descuentoPct||0}%)`;
+    const vigenciaTexto = (c.vigenteDesde || c.vigenteHasta)
+      ? `${c.vigenteDesde || '…'} a ${c.vigenteHasta || '…'}` : 'Sin límite';
+    const listasTexto = c.listaIds.map(id => state.listasPrecio.find(l=>l.id===id)?.nombre || '?').join(', ') || '(ninguna)';
+    return `<tr>
+      <td>${nombre}</td>
+      <td>${nombresComponentes || '—'}</td>
+      <td>${precioTexto}</td>
+      <td class="num">${c.maximoPorVenta ?? 'Sin límite'}</td>
+      <td>${vigenciaTexto}</td>
+      <td>${listasTexto}</td>
+      <td><button type="button" class="btn-gris btn-combo-editar" data-variante="${c.varianteId}">Editar</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="nota">Todavía no tienes ningún combo dado de alta.</td></tr>';
+  tbody.querySelectorAll('.btn-combo-editar').forEach(btn=>{
+    btn.addEventListener('click', ()=> abrirCombo(btn.dataset.variante));
+  });
+}
+
+function renderComboComponentes(){
+  const tbody = $('combo-componentes-tabla-body');
+  tbody.innerHTML = state.comboComponentes.map((comp,i)=>{
+    const p = state.productos.find(pp=>pp.varianteId===comp.varianteId);
+    return `<tr>
+      <td>${p?.nombre || '(producto no encontrado)'}${p?.marca ? ' — '+p.marca : ''}</td>
+      <td class="num"><input type="number" step="0.001" min="0.001" value="${comp.cantidad}" data-idx="${i}" class="combo-comp-cantidad" style="width:90px;"></td>
+      <td><button type="button" class="btn-gris combo-comp-quitar" data-idx="${i}">Quitar</button></td>
+    </tr>`;
+  }).join('');
+  $('combo-sin-componentes').style.display = state.comboComponentes.length ? 'none' : 'block';
+  tbody.querySelectorAll('.combo-comp-cantidad').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const i = Number(inp.dataset.idx);
+      state.comboComponentes[i].cantidad = Number(inp.value) || 1;
+      actualizarComboPrecioCalculadoPreview();
+    });
+  });
+  tbody.querySelectorAll('.combo-comp-quitar').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.comboComponentes.splice(Number(btn.dataset.idx), 1);
+      renderComboComponentes();
+      actualizarComboPrecioCalculadoPreview();
+    });
+  });
+}
+
+function agregarComponenteCombo(producto){
+  if(state.comboEditandoVarianteId && producto.varianteId === state.comboEditandoVarianteId){
+    $('combo-error').innerHTML = '<div class="msg-error">Un combo no puede tenerse a sí mismo como componente.</div>';
+    return;
+  }
+  if(state.combos.some(c=>c.varianteId===producto.varianteId)){
+    $('combo-error').innerHTML = '<div class="msg-error">Ese producto ya es otro combo — no se pueden anidar combos dentro de combos.</div>';
+    return;
+  }
+  $('combo-error').innerHTML = '';
+  const existente = state.comboComponentes.find(c=>c.varianteId===producto.varianteId);
+  if(existente){ existente.cantidad += 1; }
+  else { state.comboComponentes.push({ varianteId: producto.varianteId, cantidad: 1 }); }
+  renderComboComponentes();
+  actualizarComboPrecioCalculadoPreview();
+}
+
+function renderComboListasChecks(){
+  $('combo-listas-checks').innerHTML = state.listasPrecio.map(l=>`
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" class="chk-combo-lista" value="${l.id}" style="width:auto;"
+        ${state.comboListasSeleccionadas.includes(l.id) ? 'checked' : ''}> ${l.nombre}
+    </label>`).join('');
+  document.querySelectorAll('.chk-combo-lista').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      state.comboListasSeleccionadas = Array.from(document.querySelectorAll('.chk-combo-lista:checked')).map(c=>c.value);
+      renderComboPreciosManual();
+      actualizarComboPrecioCalculadoPreview();
+    });
+  });
+}
+
+function renderComboPreciosManual(){
+  const cont = $('combo-precios-manual');
+  if($('combo-modo-manual').checked && state.comboListasSeleccionadas.length){
+    cont.innerHTML = '<label>Precio por lista</label>' + state.comboListasSeleccionadas.map(listaId=>{
+      const lista = state.listasPrecio.find(l=>l.id===listaId);
+      const precioActual = state.comboEditandoVarianteId
+        ? (state.productos.find(p=>p.varianteId===state.comboEditandoVarianteId)?.precios||[]).find(p=>p.listaPrecioId===listaId)?.precio
+        : null;
+      return `<div class="fila" style="align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="min-width:160px;">${lista?.nombre || '?'}</span>
+        <input type="text" inputmode="decimal" class="precio-combo-manual" data-lista="${listaId}" value="${precioActual!=null ? money(precioActual) : ''}" placeholder="$0.00" style="width:140px;">
+      </div>`;
+    }).join('');
+  } else {
+    cont.innerHTML = '';
+  }
+}
+
+// Vista previa del precio "calculado" — se recalcula en el navegador con los precios YA guardados
+// de los componentes en cada lista, para que Adrián vea de inmediato qué precio va a quedar antes
+// de guardar (el precio real se recalcula y se guarda en el servidor al dar Guardar).
+function actualizarComboPrecioCalculadoPreview(){
+  const prev = $('combo-precio-calculado-preview');
+  if(!$('combo-modo-calculado').checked || !state.comboListasSeleccionadas.length || !state.comboComponentes.length){
+    prev.style.display = 'none'; prev.innerHTML = ''; return;
+  }
+  const descuento = Number($('combo-descuento-pct').value) || 0;
+  const lineas = state.comboListasSeleccionadas.map(listaId=>{
+    const lista = state.listasPrecio.find(l=>l.id===listaId);
+    let suma = 0, incompleto = false;
+    for(const comp of state.comboComponentes){
+      const p = state.productos.find(pp=>pp.varianteId===comp.varianteId);
+      const precio = p?.precios.find(pr=>pr.listaPrecioId===listaId)?.precio;
+      if(precio==null){ incompleto = true; break; }
+      suma += precio * comp.cantidad;
+    }
+    if(incompleto) return `${lista?.nombre||'?'}: falta capturar el precio de algún componente en esta lista`;
+    return `${lista?.nombre||'?'}: ${money(redondear2(suma * (1 - descuento/100)))}`;
+  });
+  prev.style.display = 'block';
+  prev.innerHTML = 'Precio calculado con los precios actuales — ' + lineas.join(' · ');
+}
+
+document.querySelectorAll('input[name="combo-modo-precio"]').forEach(radio=>{
+  radio.addEventListener('change', ()=>{
+    $('combo-descuento-campo').style.display = $('combo-modo-calculado').checked ? 'block' : 'none';
+    renderComboPreciosManual();
+    actualizarComboPrecioCalculadoPreview();
+  });
+});
+$('combo-descuento-pct').addEventListener('input', actualizarComboPrecioCalculadoPreview);
+
+function limpiarFormularioCombo(){
+  state.comboEditandoVarianteId = null;
+  state.comboComponentes = [];
+  state.comboListasSeleccionadas = [];
+  $('combo-titulo').textContent = 'Nuevo combo';
+  $('combo-nombre').value = '';
+  $('combo-linea').value = '';
+  refrescarComboBuscable('combo-linea');
+  $('combo-unidad').value = '';
+  refrescarComboBuscable('combo-unidad');
+  $('combo-modo-manual').checked = true;
+  $('combo-descuento-campo').style.display = 'none';
+  $('combo-descuento-pct').value = 0;
+  $('combo-maximo').value = '';
+  $('combo-vigente-desde').value = '';
+  $('combo-vigente-hasta').value = '';
+  $('combo-error').innerHTML = '';
+  renderComboComponentes();
+  renderComboListasChecks();
+  renderComboPreciosManual();
+  actualizarComboPrecioCalculadoPreview();
+}
+
+function nuevoCombo(){
+  limpiarFormularioCombo();
+  $('modal-combo').classList.add('activo');
+}
+
+function abrirCombo(varianteId){
+  const c = state.combos.find(cc=>cc.varianteId===varianteId);
+  const prod = state.productos.find(p=>p.varianteId===varianteId);
+  if(!c || !prod) return;
+  limpiarFormularioCombo();
+  state.comboEditandoVarianteId = varianteId;
+  state.comboComponentes = c.componentes.map(cc=>({ ...cc }));
+  state.comboListasSeleccionadas = [...c.listaIds];
+  $('combo-titulo').textContent = 'Editar combo';
+  $('combo-nombre').value = prod.nombre;
+  $('combo-linea').value = prod.lineaArticuloId || '';
+  refrescarComboBuscable('combo-linea');
+  $('combo-unidad').value = prod.unidadMedidaId || '';
+  refrescarComboBuscable('combo-unidad');
+  if(c.modoPrecio === 'calculado'){
+    $('combo-modo-calculado').checked = true;
+    $('combo-descuento-campo').style.display = 'block';
+    $('combo-descuento-pct').value = c.descuentoPct || 0;
+  } else {
+    $('combo-modo-manual').checked = true;
+  }
+  $('combo-maximo').value = c.maximoPorVenta ?? '';
+  $('combo-vigente-desde').value = c.vigenteDesde || '';
+  $('combo-vigente-hasta').value = c.vigenteHasta || '';
+  renderComboComponentes();
+  renderComboListasChecks();
+  renderComboPreciosManual();
+  actualizarComboPrecioCalculadoPreview();
+  $('modal-combo').classList.add('activo');
+}
+
+$('btn-nuevo-combo').addEventListener('click', nuevoCombo);
+$('combo-cancelar').addEventListener('click', ()=> $('modal-combo').classList.remove('activo'));
+
+$('combo-guardar').addEventListener('click', async ()=>{
+  $('combo-error').innerHTML = '';
+  const nombre = $('combo-nombre').value.trim();
+  if(!nombre){ $('combo-error').innerHTML = '<div class="msg-error">El nombre del combo es obligatorio.</div>'; return; }
+  if(!$('combo-linea').value || !$('combo-unidad').value){
+    $('combo-error').innerHTML = '<div class="msg-error">Elige línea de artículo y unidad de medida.</div>';
+    return;
+  }
+  if(!state.comboComponentes.length){
+    $('combo-error').innerHTML = '<div class="msg-error">Agrega al menos un producto componente.</div>';
+    return;
+  }
+  if(!state.comboListasSeleccionadas.length){
+    $('combo-error').innerHTML = '<div class="msg-error">Marca al menos una lista de precios donde se pueda vender este combo.</div>';
+    return;
+  }
+  const modoPrecio = $('combo-modo-calculado').checked ? 'calculado' : 'manual';
+  let preciosDirectos = [];
+  if(modoPrecio === 'manual'){
+    preciosDirectos = Array.from(document.querySelectorAll('.precio-combo-manual')).map(inp=>({
+      lista_precio_id: inp.dataset.lista, precio: parseMoney ? parseMoney(inp.value)||0 : Number(inp.value)||0,
+    }));
+    if(preciosDirectos.some(p=>!p.precio)){
+      $('combo-error').innerHTML = '<div class="msg-error">Captura el precio del combo en cada lista marcada (no puede quedar en $0).</div>';
+      return;
+    }
+  }
+
+  const prodExistente = state.comboEditandoVarianteId ? state.productos.find(p=>p.varianteId===state.comboEditandoVarianteId) : null;
+  const payloadProducto = {
+    producto_id: prodExistente?.productoId || null, variante_id: state.comboEditandoVarianteId || null,
+    empresa_id: state.empresaId, nombre, marca: '',
+    linea_articulo_id: $('combo-linea').value, unidad_medida_id: $('combo-unidad').value,
+    inventariable: false, clave_prod_serv_sat: prodExistente?.claveSat || '',
+    activo: true, activo_reparto: false,
+    imagen_url: prodExistente?.imagenUrl || null,
+    nombre_variante: 'Único', impuesto_ids: (prodExistente?.impuestos||[]).map(i=>i.impuestoId),
+    precios_directos: preciosDirectos,
+    codigos_barra: (prodExistente?.codigos||[]).map(c=>({ codigo: c.codigo, tipo: c.tipo, factor_unidades_base: c.factor })),
+  };
+
+  const { data: varianteId, error: errProducto } = await sb.rpc('guardar_producto', { p: payloadProducto });
+  if(errProducto){ $('combo-error').innerHTML = `<div class="msg-error">${errProducto.message}</div>`; return; }
+
+  const payloadCombo = {
+    variante_id: varianteId, modo_precio: modoPrecio,
+    descuento_pct: modoPrecio==='calculado' ? (Number($('combo-descuento-pct').value)||0) : null,
+    maximo_por_venta: $('combo-maximo').value || null,
+    vigente_desde: $('combo-vigente-desde').value || null,
+    vigente_hasta: $('combo-vigente-hasta').value || null,
+    componentes: state.comboComponentes.map(c=>({ variante_id: c.varianteId, cantidad: c.cantidad })),
+    lista_precio_ids: state.comboListasSeleccionadas,
+  };
+  const { error: errCombo } = await sb.rpc('guardar_combo', { p: payloadCombo });
+  if(errCombo){ $('combo-error').innerHTML = `<div class="msg-error">${errCombo.message}</div>`; return; }
+
+  $('modal-combo').classList.remove('activo');
+  await cargarProductos();
+  await cargarCombos();
+});
+
+buscadorProducto('combo-buscar-producto', 'combo-resultados-busqueda', agregarComponenteCombo);
 
 // Lista de precio "Público general" — se usa en el Catálogo, en ambos reportes nuevos (existencias
 // y resurtido) y en la exportación del Reporte de precios legado, siempre con la misma detección.
