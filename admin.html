@@ -1497,7 +1497,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.26.002';
+const APP_VERSION = '1.26.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2501,20 +2501,30 @@ function actualizarComboResumenComponentes(){
   if(!state.comboComponentes.length){ resumen.style.display = 'none'; resumen.innerHTML = ''; return; }
   const listaPublica = obtenerListaPublica();
   let sumaPrecio = 0, sumaCosto = 0, faltaPrecio = false, faltaCosto = false;
+  const conImp = $('combo-con-impuestos').checked;
   state.comboComponentes.forEach(comp=>{
     const p = state.productos.find(pp=>pp.varianteId===comp.varianteId);
     if(!p){ faltaPrecio = true; faltaCosto = true; return; }
     const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio : null;
-    if(precioPub == null) faltaPrecio = true; else sumaPrecio += Number(precioPub) * comp.cantidad;
+    // El precio público sigue el mismo checkbox que el costo — igual que en Catálogo/Compras, el
+    // precio guardado en variante_precios es siempre SIN impuestos y el checkbox solo cambia cómo
+    // se muestra (multiplicando por la tasa del producto).
+    if(precioPub == null) faltaPrecio = true;
+    else sumaPrecio += (conImp ? redondear2(Number(precioPub) * (1 + tasaTotalProducto(p))) : Number(precioPub)) * comp.cantidad;
     const costo = costoComboConImpuestos(p);
     if(costo == null) faltaCosto = true; else sumaCosto += costo * comp.cantidad;
   });
-  const conImp = $('combo-con-impuestos').checked;
   resumen.style.display = 'block';
-  resumen.innerHTML = `Suma de componentes — Precio público: ${faltaPrecio ? 'incompleto (falta precio de algún componente)' : money(redondear2(sumaPrecio))} ·
-    Costo (${conImp?'con':'sin'} impuestos): ${faltaCosto ? 'incompleto' : money(redondear2(sumaCosto))}`;
+  resumen.innerHTML = `Suma de componentes (${conImp?'con':'sin'} impuestos) — Precio público: ${faltaPrecio ? 'incompleto (falta precio de algún componente)' : money(redondear2(sumaPrecio))} ·
+    Costo: ${faltaCosto ? 'incompleto' : money(redondear2(sumaCosto))}`;
 }
-$('combo-con-impuestos').addEventListener('change', actualizarComboResumenComponentes);
+$('combo-con-impuestos').addEventListener('change', ()=>{
+  actualizarComboResumenComponentes();
+  // El buscador de componentes solo se re-dibuja cuando se vuelve a teclear (evento "input") — si el
+  // checkbox se marca/desmarca con resultados ya en pantalla, se fuerza ese mismo evento para que el
+  // "Último costo" mostrado se actualice de inmediato, sin tener que borrar y volver a escribir.
+  $('combo-buscar-producto').dispatchEvent(new Event('input'));
+});
 
 function renderComboListasChecks(){
   $('combo-listas-checks').innerHTML = state.listasPrecio.map(l=>`
