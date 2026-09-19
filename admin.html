@@ -1133,7 +1133,13 @@
     </div>
     <p class="nota">El código de barras, la imagen y los impuestos del combo se agregan después, desde su ficha en el Catálogo — aquí se guardan solo dando de alta el nombre, la receta y las reglas propias del combo.</p>
 
-    <h3 style="margin-bottom:6px;">Receta (componentes)</h3>
+    <div class="fila" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <h3 style="margin-bottom:6px;">Receta (componentes)</h3>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+        <input type="checkbox" id="combo-con-impuestos" style="width:auto;"> Ver costos con impuestos
+      </label>
+    </div>
+    <p class="nota" id="combo-resumen-componentes" style="display:none;"></p>
     <div class="campo">
       <label>Buscar producto para agregar</label>
       <input type="text" id="combo-buscar-producto" autocomplete="off" placeholder="Escribe el nombre o escanea el código…">
@@ -1491,7 +1497,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.26.001';
+const APP_VERSION = '1.26.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2449,6 +2455,7 @@ function renderComboComponentes(){
       const i = Number(inp.dataset.idx);
       state.comboComponentes[i].cantidad = Number(inp.value) || 1;
       actualizarComboPrecioCalculadoPreview();
+      actualizarComboResumenComponentes();
     });
   });
   tbody.querySelectorAll('.combo-comp-quitar').forEach(btn=>{
@@ -2456,8 +2463,10 @@ function renderComboComponentes(){
       state.comboComponentes.splice(Number(btn.dataset.idx), 1);
       renderComboComponentes();
       actualizarComboPrecioCalculadoPreview();
+      actualizarComboResumenComponentes();
     });
   });
+  actualizarComboResumenComponentes();
 }
 
 function agregarComponenteCombo(producto){
@@ -2476,6 +2485,36 @@ function agregarComponenteCombo(producto){
   renderComboComponentes();
   actualizarComboPrecioCalculadoPreview();
 }
+
+// Costo de un producto respetando el checkbox "Ver costos con impuestos" del modal de combo — mismo
+// criterio que Compras/Catálogo: costo_ultima_compra siempre se guarda sin impuestos, el checkbox
+// solo cambia cómo se muestra.
+function costoComboConImpuestos(p){
+  if(p.costo == null) return null;
+  return $('combo-con-impuestos').checked ? redondear2(Number(p.costo) * (1 + tasaTotalProducto(p))) : Number(p.costo);
+}
+// Suma, arriba de la receta, el precio público normal y el costo de los componentes YA agregados
+// (cantidad incluida) — para que Adrián vea de un vistazo si el precio del combo deja margen, sin
+// tener que sumarlo a mano. Usa la lista "Público" y respeta el mismo checkbox de impuestos.
+function actualizarComboResumenComponentes(){
+  const resumen = $('combo-resumen-componentes');
+  if(!state.comboComponentes.length){ resumen.style.display = 'none'; resumen.innerHTML = ''; return; }
+  const listaPublica = obtenerListaPublica();
+  let sumaPrecio = 0, sumaCosto = 0, faltaPrecio = false, faltaCosto = false;
+  state.comboComponentes.forEach(comp=>{
+    const p = state.productos.find(pp=>pp.varianteId===comp.varianteId);
+    if(!p){ faltaPrecio = true; faltaCosto = true; return; }
+    const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id)?.precio : null;
+    if(precioPub == null) faltaPrecio = true; else sumaPrecio += Number(precioPub) * comp.cantidad;
+    const costo = costoComboConImpuestos(p);
+    if(costo == null) faltaCosto = true; else sumaCosto += costo * comp.cantidad;
+  });
+  const conImp = $('combo-con-impuestos').checked;
+  resumen.style.display = 'block';
+  resumen.innerHTML = `Suma de componentes — Precio público: ${faltaPrecio ? 'incompleto (falta precio de algún componente)' : money(redondear2(sumaPrecio))} ·
+    Costo (${conImp?'con':'sin'} impuestos): ${faltaCosto ? 'incompleto' : money(redondear2(sumaCosto))}`;
+}
+$('combo-con-impuestos').addEventListener('change', actualizarComboResumenComponentes);
 
 function renderComboListasChecks(){
   $('combo-listas-checks').innerHTML = state.listasPrecio.map(l=>`
@@ -2560,6 +2599,7 @@ function limpiarFormularioCombo(){
   $('combo-maximo').value = '';
   $('combo-vigente-desde').value = '';
   $('combo-vigente-hasta').value = '';
+  $('combo-con-impuestos').checked = false;
   $('combo-error').innerHTML = '';
   renderComboComponentes();
   renderComboListasChecks();
@@ -2667,7 +2707,7 @@ $('combo-guardar').addEventListener('click', async ()=>{
   await cargarCombos();
 });
 
-buscadorProducto('combo-buscar-producto', 'combo-resultados-busqueda', agregarComponenteCombo);
+buscadorProducto('combo-buscar-producto', 'combo-resultados-busqueda', agregarComponenteCombo, null, costoComboConImpuestos);
 
 // Lista de precio "Público general" — se usa en el Catálogo, en ambos reportes nuevos (existencias
 // y resurtido) y en la exportación del Reporte de precios legado, siempre con la misma detección.
