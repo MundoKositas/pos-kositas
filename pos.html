@@ -175,7 +175,7 @@
         <p class="nota" id="nota-impuestos"></p>
         <div class="tabla-scroll">
           <table>
-            <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio normal</th><th class="num">Descuento</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
             <tbody id="carrito-body"></tbody>
           </table>
         </div>
@@ -606,7 +606,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.014';
+const APP_VERSION = '1.7.015';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -728,6 +728,48 @@ function precioMostrar(item){
   const base = precioBaseEfectivo(item);
   if(state.desglosarImpuestos) return base;
   return base * (1 + tasaTotal(item));
+}
+
+// Ronda 55b: Adrián pidió que TODO el carrito y el ticket dejen ver el precio normal (antes de
+// cualquier descuento) y el descuento aplicado, no solo el total ya rebajado — para que el cliente
+// perciba el descuento, no solo en combos. "Precio normal" de una línea es:
+//  - Para un combo: la suma de los precios de catálogo de sus componentes (sin el descuento del
+//    combo) en la lista de precios que aplica a esta línea — así se ve cuánto costaría comprar los
+//    mismos artículos por separado.
+//  - Para un producto normal: su precio de catálogo antes de aplicar descuento de línea/ticket (el
+//    precio manual sustituye al precio de catálogo — ahí no hay "normal" que comparar).
+// Regresa null si no se puede calcular (falta precio de algún componente en esa lista).
+function precioNormalLinea(l){
+  const producto = state.catalogo.find(p=>p.varianteId===l.varianteId);
+  if(producto && producto.esCombo && producto.componentes && producto.componentes.length){
+    const listaUsar = l.listaPrecioId || state.listaPrecioId;
+    let suma = 0;
+    for(const c of producto.componentes){
+      const comp = state.catalogo.find(p=>p.varianteId===c.varianteId);
+      const precio = comp ? comp.preciosPorLista[listaUsar] : undefined;
+      if(precio == null) return null;
+      suma += Number(precio) * c.cantidad;
+    }
+    return redondear2(suma);
+  }
+  return precioParaLinea(l);
+}
+// Mismo criterio de impuestos que precioMostrar, para que "precio normal" y "precio con descuento"
+// se comparen en el mismo formato (ambos con o ambos sin impuestos, según la configuración de la
+// empresa) y la resta entre ambos dé el descuento real que ve el cliente en el ticket.
+function precioNormalMostrar(l){
+  const normal = precioNormalLinea(l);
+  if(normal == null) return null;
+  if(state.desglosarImpuestos) return normal;
+  return redondear2(normal * (1 + tasaTotal(l)));
+}
+// Descuento por unidad de una línea — diferencia entre su precio normal y el precio que realmente se
+// está cobrando (ya sea por descuento de línea/ticket, precio manual, o el descuento propio de un
+// combo calculado). 0 si no hay precio normal que comparar o si no hay descuento real.
+function descuentoMostrarLinea(l){
+  const normal = precioNormalMostrar(l);
+  if(normal == null) return 0;
+  return Math.max(0, redondear2(normal - precioMostrar(l)));
 }
 
 function mostrarPantalla(id){
@@ -1426,7 +1468,7 @@ $('mi-pin-guardar').addEventListener('click', async ()=>{
 });
 
 async function cargarCatalogo(){
-  const [{ data, error }, { data: combosData, error: errorCombos }] = await Promise.all([
+  const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
     sb.from('variantes').select(`
       id, nombre_variante, activo,
       producto:productos(id, nombre, marca, activo, empresa_id, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
@@ -1438,16 +1480,36 @@ async function cargarCatalogo(){
     // su propio nombre/precio/código de barras), pero NO tiene existencia propia: su "stock" se calcula
     // a partir de sus componentes (recalcularStockCombos, más abajo) y su venta se filtra por vigencia
     // y por lista de precios habilitada (combo_listas) — ver comboVigente/comboHabilitadoParaLista.
-    sb.from('combos').select(`
-      variante_id, maximo_por_venta, vigente_desde, vigente_hasta,
-      componentes:combo_componentes(componente_variante_id, cantidad),
-      listas:combo_listas(lista_precio_id)
-    `),
+    // combo_componentes/combo_listas no tienen llave foránea directa hacia "combos" (ambas apuntan a
+    // "variantes"), así que PostgREST no puede anidarlas en un solo select — se consultan aparte y se
+    // unen aquí mismo, igual que ya lo hace admin.html (cargarCombos).
+    sb.from('combos').select('variante_id, maximo_por_venta, vigente_desde, vigente_hasta'),
+    sb.from('combo_componentes').select('combo_variante_id, componente_variante_id, cantidad'),
+    sb.from('combo_listas').select('combo_variante_id, lista_precio_id'),
   ]);
-  if(error){ console.error(error); return; }
-  if(errorCombos){ console.error(errorCombos); }
+  // Si la sesión ya caducó, estas consultas fallan con un error de permisos de Postgres que no le
+  // dice nada a quien está en caja — mensajeErrorAmigable() lo traduce a algo accionable ("tu sesión
+  // pudo haber expirado, vuelve a entrar"), y se muestra justo en el buscador para que se note de
+  // inmediato al intentar agregar un artículo (antes esto solo se veía en la consola, invisible).
+  if(error){
+    console.error(error);
+    $('resultados-busqueda').innerHTML = `<div class="resultado-item">No se pudo actualizar el catálogo — ${mensajeErrorAmigable(error)}</div>`;
+    return;
+  }
+  if(errorCombos || errorComponentes || errorListas){
+    const err = errorCombos || errorComponentes || errorListas;
+    console.error(err);
+    $('resultados-busqueda').innerHTML = `<div class="resultado-item">No se pudieron cargar los combos — ${mensajeErrorAmigable(err)} (el resto del catálogo sí se cargó).</div>`;
+  }
   const combosPorVarianteId = {};
-  (combosData||[]).forEach(c=>{ combosPorVarianteId[c.variante_id] = c; });
+  (combosData||[]).forEach(c=>{
+    combosPorVarianteId[c.variante_id] = {
+      variante_id: c.variante_id, maximo_por_venta: c.maximo_por_venta,
+      vigente_desde: c.vigente_desde, vigente_hasta: c.vigente_hasta,
+      componentes: (componentesData||[]).filter(cc=>cc.combo_variante_id===c.variante_id),
+      listas: (listasData||[]).filter(l=>l.combo_variante_id===c.variante_id),
+    };
+  });
   state.catalogo = (data||[])
     .filter(v => v.activo && v.producto && v.producto.activo && v.producto.empresa_id === state.empresaId)
     .map(v=>{
@@ -1760,10 +1822,14 @@ function renderCarrito(){
     const linkEditarProducto = tienePermiso('pos.ver_editar_producto')
       ? ` <a href="#" class="editar-producto-link" data-variante="${l.varianteId}" title="Abrir este producto en Admin">Editar producto</a>`
       : '';
+    const descUnitario = sinPrecio ? 0 : descuentoMostrarLinea(l);
+    const normalUnitario = sinPrecio ? null : precioNormalMostrar(l);
     return `
     <tr>
       <td>${l.nombre}${linkEditarProducto}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}${notaLineaEditada(l)}</td>
       <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num">${sinPrecio || normalUnitario===null ? '—' : money(normalUnitario)}</td>
+      <td class="num">${descUnitario>0 ? money(descUnitario) : '—'}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(precioMostrar(l)*l.cantidad)}</td>
       <td style="white-space:nowrap;"><button class="btn-gris editar-linea" data-idx="${i}" title="Cambiar lista de precio, descuento o precio manual">✎</button> <button class="quitar" data-idx="${i}">Quitar</button></td>
@@ -2480,9 +2546,22 @@ $('btn-credito-cliente').addEventListener('click', async ()=>{
 function mostrarTicket(ventaId, venta, desglose){
   const cliente = state.clientes.find(c=>c.id===state.clienteId);
   const fecha = new Date().toLocaleString('es-MX');
-  const filasItems = state.carrito.map(l=>`
+  // Ronda 55b: el cliente debe poder ver el precio normal y el descuento aplicado en el ticket
+  // impreso, no solo el total ya rebajado — aplica a cualquier línea con descuento, no solo combos.
+  let descuentoTotalTicket = 0;
+  const filasItems = state.carrito.map(l=>{
+    const descUnit = descuentoMostrarLinea(l);
+    const normalUnit = precioNormalMostrar(l);
+    const descLinea = redondear2(descUnit * l.cantidad);
+    if(descLinea > 0) descuentoTotalTicket += descLinea;
+    const filaDescuento = (descLinea > 0 && normalUnit !== null) ? `
+    <tr><td colspan="2" class="nota" style="padding-top:0;">Precio normal: ${money(redondear2(normalUnit*l.cantidad))} · Descuento: −${money(descLinea)}</td></tr>
+    ` : '';
+    return `
     <tr><td>${l.nombre} x${l.cantidad}</td><td class="num">${money(precioMostrar(l)*l.cantidad)}</td></tr>
-  `).join('');
+    ${filaDescuento}`;
+  }).join('');
+  descuentoTotalTicket = redondear2(descuentoTotalTicket);
   const cambioTotal = state.pagos.reduce((s,p)=>s+(p.cambio||0),0);
   const filasPagos = state.pagos.map(p=>{
     const forma = state.formasPago.find(f=>f.id===p.formaPagoId);
@@ -2503,6 +2582,7 @@ function mostrarTicket(ventaId, venta, desglose){
       <div class="linea"><span>Subtotal</span><span>${money(venta.subtotal)}</span></div>
       ${Object.values(desglose||{}).map(d=>`<div class="linea"><span>${d.nombre}</span><span>${money(d.monto)}</span></div>`).join('')}
       ` : ''}
+      ${descuentoTotalTicket > 0 ? `<div class="linea"><span>Descuento aplicado</span><span>−${money(descuentoTotalTicket)}</span></div>` : ''}
       <div class="linea total-final"><span>Total${state.desglosarImpuestos ? '' : ' (impuestos incluidos)'}</span><span>${money(venta.total)}</span></div>
     </div>
     ${venta.tipo_venta === 'credito' ? `
