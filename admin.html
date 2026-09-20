@@ -1027,6 +1027,13 @@
   <div class="modal" style="max-width:640px;">
     <h2 id="ec-titulo">Estado de cuenta</h2>
     <p class="nota" id="ec-resumen"></p>
+    <div class="fila" style="justify-content:flex-end;gap:8px;margin-bottom:8px;">
+      <select id="ec-formato-exportar" style="width:auto;">
+        <option value="excel">Excel</option>
+        <option value="pdf">PDF</option>
+      </select>
+      <button type="button" class="btn-secundario" id="ec-exportar">Exportar</button>
+    </div>
     <div class="tabla-scroll tabla-fija">
       <table>
         <thead><tr><th>Fecha</th><th>Movimiento</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
@@ -1292,6 +1299,7 @@
     </div>
 
     <div style="display:flex;gap:8px;margin-top:14px;position:sticky;bottom:-22px;background:#fff;padding:10px 0 10px;margin:14px -22px -22px;padding-left:22px;padding-right:22px;border-top:1px solid var(--borde);">
+      <button class="btn-gris" style="flex:none;color:var(--rojo);border-color:var(--rojo);" id="prod-eliminar" title="Solo se puede borrar un producto que nunca se haya vendido, comprado o movido en inventario">Eliminar</button>
       <button class="btn-gris" style="flex:1;" id="prod-cancelar">Cancelar <span class="tecla">F9</span></button>
       <button class="btn-primario" style="flex:1;" id="prod-guardar">Guardar <span class="tecla">F10</span></button>
     </div>
@@ -1497,7 +1505,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.26.003';
+const APP_VERSION = '1.26.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3171,6 +3179,10 @@ function abrirProducto(varianteId){
   state.imagenUrlActual = p?.imagenUrl || null;
   state.imagenUrlNueva = null;
   $('prod-error').innerHTML = '';
+  // Ronda 56: "Eliminar producto" solo tiene sentido editando uno que ya existe (nunca en "Nuevo
+  // producto") — el propio RPC decide si de verdad se puede borrar (nunca vendido/comprado/movido) o
+  // si hay que avisar que solo se puede desactivar.
+  $('prod-eliminar').style.display = p ? '' : 'none';
   $('prod-nombre').value = p?.nombre || '';
   actualizarTituloProducto();
   llenarSelectMarcas(p?.marca || '');
@@ -3446,6 +3458,25 @@ $('prod-cancelar').addEventListener('click', ()=>{
   manejarSalidaConCambios(()=>{
     $('modal-producto').classList.remove('activo');
   });
+});
+// Ronda 56: borrado real (no solo desactivar) — Adrián pidió que solo se permita si el producto
+// nunca se ha vendido, comprado ni movido en inventario; el RPC eliminar_producto_real() es quien
+// decide de verdad (con RLS + los checks de uso) y regresa un mensaje claro si no se puede.
+$('prod-eliminar').addEventListener('click', async ()=>{
+  if(!state.varianteEditId) return;
+  const p = state.productos.find(x=>x.varianteId===state.varianteEditId);
+  const nombre = p?.nombre || 'este producto';
+  if(!confirm(`¿Eliminar definitivamente "${nombre}"? Esto no se puede deshacer. Si ya tiene ventas, compras o movimientos registrados, no se podrá borrar — en ese caso solo desactívalo.`)) return;
+  $('prod-eliminar').disabled = true;
+  const { error } = await sb.rpc('eliminar_producto_real', { p_variante_id: state.varianteEditId });
+  $('prod-eliminar').disabled = false;
+  if(error){
+    $('prod-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
+    return;
+  }
+  $('modal-producto').classList.remove('activo');
+  await cargarProductos();
+  renderCatalogo();
 });
 $('prod-guardar').addEventListener('click', async ()=>{
   if($('prod-guardar').disabled) return;
@@ -5497,6 +5528,8 @@ const nombreMovimientoCliente = (m) => {
 async function abrirEstadoCuenta(id){
   const c = state.clientes.find(x=>x.id===id);
   if(!c) return;
+  state.ecClienteActual = c;
+  state.ecMovimientos = [];
   $('ec-titulo').textContent = `Estado de cuenta — ${c.nombre}`;
   $('ec-resumen').textContent = c.es_publico_general
     ? 'Cliente genérico — no aplica límite de crédito ni saldo.'
@@ -5505,6 +5538,7 @@ async function abrirEstadoCuenta(id){
   $('modal-estado-cuenta').classList.add('activo');
   const { data: movs, error } = await sb.from('cliente_movimientos').select('*').eq('cliente_id', id).order('fecha_hora', {ascending:false});
   if(error){ $('ec-tabla-body').innerHTML = `<tr><td colspan="4" class="msg-error">${error.message}</td></tr>`; return; }
+  state.ecMovimientos = movs || [];
   $('ec-vacio').style.display = (movs && movs.length) ? 'none' : 'block';
   $('ec-tabla-body').innerHTML = (movs||[]).map(m=>{
     // Efecto real sobre el saldo: un cargo lo aumenta, un abono lo reduce — pero un cargo puede
@@ -5521,6 +5555,24 @@ async function abrirEstadoCuenta(id){
   }).join('');
 }
 $('ec-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta').classList.remove('activo'); });
+// Ronda 56: Adrián pidió poder exportar el estado de cuenta de un CLIENTE a PDF/Excel — ya existía
+// para proveedores (Ronda 47), aquí se replica el mismo patrón con exportarExcelAgrupado/exportarPDFAgrupado.
+$('ec-exportar').addEventListener('click', async ()=>{
+  const c = state.ecClienteActual;
+  if(!c) return;
+  const encabezados = ['Fecha','Movimiento','Referencia','Monto'];
+  const filas = state.ecMovimientos.map(m=>{
+    const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
+    return [new Date(m.fecha_hora).toLocaleString('es-MX'), nombreMovimientoCliente(m), m.referencia || '—', redondear2(efecto)];
+  });
+  const tipos = filas.map(()=>'producto');
+  const nombreArchivoBase = `estado_cuenta_${c.nombre.replace(/[^a-z0-9]+/gi,'_')}_${fechaLocalISO()}`;
+  if($('ec-formato-exportar').value === 'excel'){
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'Estado de cuenta', encabezados, filas, tipos, [3]);
+  } else {
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, `Estado de cuenta — ${c.nombre}`, state.empresaNombre, encabezados, filas, tipos, [3], [3]);
+  }
+});
 
 // ---- Cuentas por cobrar (clientes con saldo pendiente) — Ronda 23: filtro por nombre + 3 modos de
 // agrupación (sin agrupar / por condición de pago / por fecha de vencimiento). El modo "vencimiento"

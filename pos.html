@@ -346,10 +346,37 @@
 </div>
 
 <!-- MODAL: cancelar ticket (Bloque B) -->
+<!-- MODAL: precio de emergencia (Ronda 56) — se abre cuando un artículo no tiene precio ni en la
+     lista de la venta ni en "Público general"; el cajero captura el precio solo para este ticket,
+     con un mínimo de costo/0.90 (10% de utilidad), y queda registrado como incidente para el
+     reporte de cierre de caja. -->
+<div class="modal-fondo" id="modal-precio-emergencia">
+  <div class="modal">
+    <h2>Precio no encontrado</h2>
+    <p class="nota" id="pe-producto-nombre"></p>
+    <p class="nota">Este artículo no tiene precio capturado en ninguna lista de precios. Captura el precio solo para esta venta — quedará anotado en el cierre de caja para actualizarlo en el catálogo.</p>
+    <p class="nota" id="pe-costo-info" style="display:none;"></p>
+    <div class="campo"><label>Precio de venta (solo esta venta)</label><input type="number" id="pe-precio" step="0.01" min="0" placeholder="0.00"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="pe-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="pe-confirmar">Agregar al carrito</button>
+    </div>
+    <div id="pe-error"></div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-cancelar-venta">
   <div class="modal">
     <h2 id="cv-titulo">Cancelar ticket</h2>
     <p class="nota">Esto anula el ticket por completo: regresa todo el inventario y, si se pagó en efectivo, lo regresa a la caja actual. Los pagos con tarjeta o crédito no se revierten solos — hay que reconciliarlos aparte.</p>
+    <!-- Ronda 56: no hay integración real con la terminal de tarjetas, así que el "reembolso
+         automático" que pidió Adrián es este paso obligatorio en pantalla — el cajero tiene que
+         hacer la devolución del cargo en la app de la terminal ANTES de poder cerrar la cancelación
+         aquí, y esa confirmación queda anotada en el motivo para la auditoría. -->
+    <div id="cv-aviso-tarjeta" style="display:none;background:#fdecea;border:1px solid var(--rojo);border-radius:6px;padding:10px;margin:10px 0;">
+      <p style="margin:0 0 8px;font-weight:600;">Este ticket se pagó con tarjeta — antes de cancelarlo, ve a la app de la terminal de tarjetas y devuelve el cargo correspondiente.</p>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:normal;"><input type="checkbox" id="cv-confirmo-reembolso-tarjeta" style="width:auto;"> Ya devolví el cargo en la app de la terminal de tarjetas</label>
+    </div>
     <div class="campo"><label>Motivo</label><input type="text" id="cv-motivo" placeholder="Ej. se registró por error"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="cv-cancelar">Cerrar</button>
@@ -606,7 +633,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.015';
+const APP_VERSION = '1.7.016';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1178,6 +1205,10 @@ async function cargarListasPrecio(){
   state.listasPrecio = data || [];
   llenarSelect('sel-lista-precio', state.listasPrecio, l=>l.id, l=>l.nombre);
   $('sel-lista-precio').value = state.listaPrecioId;
+  // Ronda 56: precio de respaldo — si un producto no tiene precio en la lista activa de la venta, se
+  // usa el de "Público general" en su lugar (confirmado por Adrián); se identifica una sola vez aquí
+  // por nombre, igual que ya lo hace admin.html (obtenerListaPublica).
+  state.listaPublicaId = (state.listasPrecio.find(l=>/p[uú]blico/i.test(l.nombre)) || {}).id || null;
 }
 
 // ---------- PERMISOS DEL MÓDULO POS Y AUTORIZACIÓN DE SUPERVISOR CON PIN ----------
@@ -1471,7 +1502,7 @@ async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
     sb.from('variantes').select(`
       id, nombre_variante, activo,
-      producto:productos(id, nombre, marca, activo, empresa_id, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
@@ -1524,6 +1555,9 @@ async function cargarCatalogo(){
         nombre: v.producto.nombre + (v.nombre_variante && v.nombre_variante !== 'Único' ? ' - ' + v.nombre_variante : ''),
         preciosPorLista,
         precio: preciosPorLista[state.listaPrecioId] ?? null,
+        // Costo de referencia (siempre sin impuestos, igual que en admin.html) — se usa para el
+        // mínimo permitido al capturar un precio de emergencia (Ronda 56): costo entre 0.90.
+        costo: v.producto.costo_ultima_compra != null ? Number(v.producto.costo_ultima_compra) : null,
         // Para un combo este valor se sobreescribe enseguida en recalcularStockCombos(); mientras
         // tanto queda en 0 porque un combo no tiene fila propia en "existencias".
         stock: stockRow ? Number(stockRow.cantidad) : 0,
@@ -1698,17 +1732,27 @@ $('rep-filtro-categoria').addEventListener('change', ()=>{
 
 // ---------- BÚSQUEDA / CARRITO ----------
 const buscarInput = $('buscar-input');
-buscarInput.addEventListener('input', ()=>renderResultados(buscarInput.value.trim()));
+// Ronda 56: si el texto actual coincide EXACTO con un código de barras, se agrega de una vez — se usa
+// tanto en cada tecleo (para que un lector físico que no manda Enter también funcione solo, sin que
+// el cajero tenga que hacer nada más) como en Enter (compatibilidad con lectores que sí lo mandan, o
+// captura manual del código completo). Regresa true si se agregó.
+function intentarAgregarPorCodigoExacto(q){
+  const porCodigo = state.catalogo.find(p=>p.codigos.some(c=>c.codigo===q) && comboDisponibleEnPos(p));
+  if(!porCodigo) return false;
+  const codigoInfo = porCodigo.codigos.find(c=>c.codigo===q);
+  if(agregarAlCarrito(porCodigo, q, codigoInfo.factor)){ buscarInput.value=''; renderResultados(''); return true; }
+  return false;
+}
+buscarInput.addEventListener('input', ()=>{
+  const q = buscarInput.value.trim();
+  if(q && intentarAgregarPorCodigoExacto(q)) return;
+  renderResultados(q);
+});
 buscarInput.addEventListener('keydown', e=>{
   if(e.key !== 'Enter') return;
   const q = buscarInput.value.trim();
   if(!q) return;
-  const porCodigo = state.catalogo.find(p=>p.codigos.some(c=>c.codigo===q) && comboDisponibleEnPos(p));
-  if(porCodigo){
-    const codigoInfo = porCodigo.codigos.find(c=>c.codigo===q);
-    if(agregarAlCarrito(porCodigo, q, codigoInfo.factor)){ buscarInput.value=''; renderResultados(''); }
-    return;
-  }
+  if(intentarAgregarPorCodigoExacto(q)) return;
   const coincidencias = state.catalogo.filter(p=>p.nombre.toLowerCase().includes(q.toLowerCase()) && comboDisponibleEnPos(p));
   if(coincidencias.length === 1){
     if(agregarAlCarrito(coincidencias[0])){ buscarInput.value=''; renderResultados(''); }
@@ -1740,11 +1784,24 @@ function renderResultados(q){
 // cantidadAgregar: piezas a agregar por este escaneo/selección — 1 en el caso normal (búsqueda por
 // nombre, o código "individual"), o factor_unidades_base cuando se escaneó un código tipo "empaque"
 // (ej. una caja de 12 piezas agrega 12, no 1).
-// Regresa true si se agregó, false si se rechazó (el producto no tiene precio en la lista activa).
-function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
-  if(producto.precio === null){
-    $('resultados-busqueda').innerHTML = `<div class="resultado-item">${producto.nombre} no tiene precio capturado en la lista "${nombreLista(state.listaPrecioId)}" — cambia de lista de precios o revísalo en el Catálogo.</div>`;
-    return false;
+// precioEmergencia: solo lo manda de vuelta el modal de "precio de emergencia" (ver más abajo), ya
+// validado y registrado como incidente — nunca lo llama nada más directamente.
+// Regresa true si se agregó, false si se rechazó o si se abrió el modal de precio de emergencia
+// (agregarAlCarrito se vuelve a llamar sola cuando ese modal se confirma).
+function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar, precioEmergencia){
+  // Ronda 56 — precio de respaldo: si el producto no tiene precio en la lista de esta venta, se usa
+  // el de "Público general" (confirmado por Adrián); si tampoco existe ahí, se le pide al cajero que
+  // capture uno para ESTA venta únicamente, con un mínimo de costo/0.90, y queda como incidente en
+  // el cierre de caja para que se actualice el precio real en el Catálogo después.
+  let usarListaPublicaEnEstaLinea = false;
+  if(producto.precio === null && precioEmergencia == null){
+    const precioPublico = state.listaPublicaId ? producto.preciosPorLista[state.listaPublicaId] : undefined;
+    if(precioPublico != null){
+      usarListaPublicaEnEstaLinea = true;
+    } else {
+      abrirCapturaPrecioEmergencia(producto, codigoEscaneado, cantidadAgregar);
+      return false;
+    }
   }
   // Ronda 55: un combo puede tener no vigente/lista no habilitada — esto es un respaldo por si se
   // llegó aquí sin pasar por el filtro de búsqueda (ej. escaneo directo de código de barras).
@@ -1768,10 +1825,12 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
   if(existente){ existente.cantidad += cantidad; }
   else {
     state.carrito.push({
-      varianteId: producto.varianteId, nombre: producto.nombre, precio: producto.precio,
+      varianteId: producto.varianteId, nombre: producto.nombre,
+      precio: precioEmergencia != null ? Number(precioEmergencia) : producto.precio,
       // preciosPorLista + listaPrecioId (null = "sigue la lista del ticket") permiten cambiar la
       // lista de precios de ESTA línea sola, distinta a la del resto del ticket — ver renderCarrito.
-      preciosPorLista: producto.preciosPorLista, listaPrecioId: null,
+      // usarListaPublicaEnEstaLinea fija esta línea a "Público general" (precio de respaldo, Ronda 56).
+      preciosPorLista: producto.preciosPorLista, listaPrecioId: usarListaPublicaEnEstaLinea ? state.listaPublicaId : null,
       cantidad, impuestos: producto.impuestos,
       stock: producto.stock, codigo: codigoEscaneado || null,
       // Descuento/precio manual de esta línea (null = no aplica) y quién autorizó cada uno de los 3
@@ -1780,13 +1839,60 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar){
       // descuento de esta línea viene de "toda la venta" o se puso solo para este artículo — un
       // descuento por ticket y uno por artículo son mutuamente excluyentes, ver desc-ticket-aplicar/
       // abrirEditarLinea más abajo (a petición de Adrián, para no mezclar los dos tipos sin querer).
-      descuentoTipo: null, descuentoValor: 0, descuentoOrigen: null, precioManual: null,
+      // precioManual también se fija cuando es un precio de emergencia, así sigue aplicando aunque
+      // luego cambie la lista de precios del ticket (ver precioBaseEfectivo).
+      descuentoTipo: null, descuentoValor: 0, descuentoOrigen: null,
+      precioManual: precioEmergencia != null ? Number(precioEmergencia) : null,
+      esPrecioEmergencia: precioEmergencia != null,
       autorizaciones: { listaPrecio: null, descuento: null, precioManual: null },
     });
   }
   renderCarrito();
   return true;
 }
+
+// ---- Precio de emergencia (Ronda 56) ----
+// Se abre cuando agregarAlCarrito() detecta que el producto no tiene precio en ninguna lista
+// (ni la del ticket ni "Público general"). El cajero captura un precio válido SOLO para esta
+// venta; registrar_precio_emergencia valida en el servidor que no sea menor a costo/0.90 (10% de
+// utilidad mínima) y deja el incidente anotado para el reporte de cierre de caja.
+let peProducto = null, peCodigoEscaneado = null, peCantidadAgregar = null;
+function abrirCapturaPrecioEmergencia(producto, codigoEscaneado, cantidadAgregar){
+  peProducto = producto; peCodigoEscaneado = codigoEscaneado; peCantidadAgregar = cantidadAgregar;
+  $('pe-producto-nombre').textContent = producto.nombre;
+  $('pe-precio').value = '';
+  $('pe-error').innerHTML = '';
+  if(producto.costo != null && producto.costo > 0){
+    const minimo = Math.round((producto.costo / 0.90) * 100) / 100;
+    $('pe-costo-info').textContent = `Último costo: ${money(producto.costo)} · precio mínimo permitido: ${money(minimo)} (10% de utilidad)`;
+    $('pe-costo-info').style.display = '';
+  } else {
+    $('pe-costo-info').style.display = 'none';
+  }
+  $('modal-precio-emergencia').classList.add('activo');
+  $('pe-precio').focus();
+}
+$('pe-cancelar').addEventListener('click', ()=>{
+  $('modal-precio-emergencia').classList.remove('activo');
+  peProducto = null; peCodigoEscaneado = null; peCantidadAgregar = null;
+});
+$('pe-confirmar').addEventListener('click', async ()=>{
+  $('pe-error').innerHTML = '';
+  const precio = Number($('pe-precio').value);
+  if(!$('pe-precio').value || isNaN(precio) || precio <= 0){
+    $('pe-error').innerHTML = '<div class="msg-error">Captura un precio válido.</div>';
+    return;
+  }
+  $('pe-confirmar').disabled = true;
+  const { error } = await sb.rpc('registrar_precio_emergencia', {
+    p_variante_id: peProducto.varianteId, p_sesion_caja_id: state.sesionCaja.id, p_precio: precio,
+  });
+  $('pe-confirmar').disabled = false;
+  if(error){ $('pe-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
+  $('modal-precio-emergencia').classList.remove('activo');
+  agregarAlCarrito(peProducto, peCodigoEscaneado, peCantidadAgregar, precio);
+  peProducto = null; peCodigoEscaneado = null; peCantidadAgregar = null;
+});
 
 // Precio real de una línea del carrito, según su propia lista (si se le fijó una distinta a la del
 // ticket) o la del ticket en curso — null si esa combinación producto/lista no tiene precio capturado.
@@ -1795,8 +1901,16 @@ function precioParaLinea(l){
   const p = l.preciosPorLista ? l.preciosPorLista[listaUsar] : undefined;
   return (p === undefined || p === null) ? null : Number(p);
 }
+// Como precioParaLinea() ignora el precio manual a propósito (lo sigue usando precioNormalLinea/
+// descuentoMostrarLinea como referencia del precio de catálogo "antes" del manual), una línea con
+// precio manual — o el "precio de emergencia" de la Ronda 56, que es un precio manual sin precio de
+// catálogo detrás — necesita su propio checkeo de "sí se puede cobrar", que es este:
+function lineaTienePrecioParaCobrar(l){
+  if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') return true;
+  return precioParaLinea(l) !== null;
+}
 function hayLineaSinPrecio(){
-  return state.carrito.some(l=>precioParaLinea(l) === null);
+  return state.carrito.some(l=>!lineaTienePrecioParaCobrar(l));
 }
 
 // Texto corto que resume si una línea trae descuento o precio manual (se muestra debajo del nombre
@@ -1808,7 +1922,8 @@ function notaLineaEditada(l){
   const sufijoDesc = l.descuentoOrigen === 'ticket' ? ' (toda la venta)' : '';
   if(l.descuentoTipo === 'porcentaje') partes.push(`desc. ${Number(l.descuentoValor)||0}%${sufijoDesc}`);
   else if(l.descuentoTipo === 'fijo') partes.push(`desc. ${money(l.descuentoValor)}${sufijoDesc}`);
-  if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') partes.push('precio manual');
+  if(l.esPrecioEmergencia) partes.push('precio de emergencia (capturado en caja)');
+  else if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') partes.push('precio manual');
   return partes.length ? `<div class="nota" style="margin:2px 0 0;">${partes.join(' · ')}</div>` : '';
 }
 function renderCarrito(){
@@ -1818,7 +1933,7 @@ function renderCarrito(){
     // Se recalcula siempre al pintar, por si cambió la lista del ticket (y esta línea la sigue) o
     // por si a esta línea ya se le fijó su propia lista de precios.
     l.precio = precioParaLinea(l);
-    const sinPrecio = l.precio === null;
+    const sinPrecio = !lineaTienePrecioParaCobrar(l);
     const linkEditarProducto = tienePermiso('pos.ver_editar_producto')
       ? ` <a href="#" class="editar-producto-link" data-variante="${l.varianteId}" title="Abrir este producto en Admin">Editar producto</a>`
       : '';
@@ -3166,7 +3281,7 @@ $('mv-guardar').addEventListener('click', async ()=>{
 });
 
 // ---- Cancelar ticket ----
-let cvVentaId = null, cvAutorizadoPor = null;
+let cvVentaId = null, cvAutorizadoPor = null, cvRequiereConfirmarTarjeta = false;
 async function abrirCancelarVenta(ventaId){
   $('vd-error').innerHTML = '';
   if(!tienePermiso('pos.cancelar_venta')){
@@ -3179,17 +3294,34 @@ async function abrirCancelarVenta(ventaId){
   cvVentaId = ventaId;
   $('cv-motivo').value = '';
   $('cv-error').innerHTML = '';
+  $('cv-confirmo-reembolso-tarjeta').checked = false;
+  $('cv-aviso-tarjeta').style.display = 'none';
+  cvRequiereConfirmarTarjeta = false;
   $('modal-cancelar-venta').classList.add('activo');
   $('cv-motivo').focus();
+  // No hay integración real con ninguna terminal de tarjetas — esto solo detecta, por el nombre de
+  // la forma de pago, si el ticket se pagó (total o parcialmente) con tarjeta, para pedirle al
+  // cajero que confirme que ya hizo la devolución del cargo en la app de la terminal.
+  const { data: pagos } = await sb.from('venta_pagos').select('monto, forma_pago:formas_pago(nombre)').eq('venta_id', ventaId);
+  const tienePagoTarjeta = (pagos||[]).some(p=>/tarjeta/i.test(p.forma_pago?.nombre||'') && Number(p.monto) > 0);
+  if(tienePagoTarjeta){
+    cvRequiereConfirmarTarjeta = true;
+    $('cv-aviso-tarjeta').style.display = 'block';
+  }
 }
 $('cv-cancelar').addEventListener('click', ()=>{ $('modal-cancelar-venta').classList.remove('activo'); });
 $('cv-confirmar').addEventListener('click', async ()=>{
   $('cv-error').innerHTML = '';
   const motivo = $('cv-motivo').value.trim();
   if(!motivo){ $('cv-error').innerHTML = '<div class="msg-error">Captura el motivo de la cancelación.</div>'; return; }
+  if(cvRequiereConfirmarTarjeta && !$('cv-confirmo-reembolso-tarjeta').checked){
+    $('cv-error').innerHTML = '<div class="msg-error">Confirma que ya devolviste el cargo en la app de la terminal de tarjetas antes de cancelar este ticket.</div>';
+    return;
+  }
+  const motivoFinal = cvRequiereConfirmarTarjeta ? `${motivo} [Reembolso de tarjeta confirmado por el cajero en la terminal]` : motivo;
   $('cv-confirmar').disabled = true;
   const { error } = await sb.rpc('cancelar_venta', {
-    p_venta_id: cvVentaId, p_motivo: motivo, p_sesion_caja_actual_id: state.sesionCaja.id, p_autorizado_por: cvAutorizadoPor,
+    p_venta_id: cvVentaId, p_motivo: motivoFinal, p_sesion_caja_actual_id: state.sesionCaja.id, p_autorizado_por: cvAutorizadoPor,
   });
   $('cv-confirmar').disabled = false;
   if(error){ $('cv-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
@@ -3578,7 +3710,17 @@ async function calcularResumenCierre(){
     const resp = await sb.rpc('reporte_ventas', { p_sesion_caja_id: sesion.id });
     if(!resp.error) reporteSesion = resp.data;
   } catch(err){ /* se ignora, ver comentario arriba */ }
-  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose, movimientos: movs||[], reporteSesion };
+  // Ronda 56: precios de emergencia capturados en esta sesión — artículos que se vendieron sin
+  // precio en catálogo y que hay que actualizar. Si falla la consulta, no se interrumpe el cierre.
+  let incidentesPrecio = [];
+  try{
+    const { data: inc } = await sb.from('incidentes_precio')
+      .select('precio_capturado, costo_en_momento, fecha_hora, variante:variantes(id, producto:productos(nombre))')
+      .eq('sesion_caja_id', sesion.id)
+      .order('fecha_hora', { ascending: true });
+    incidentesPrecio = inc || [];
+  } catch(err){ /* se ignora, ver comentario arriba */ }
+  return { fondoInicial, ventasEfectivo, entradas, salidas, esperado, ventasCredito, desglose, movimientos: movs||[], reporteSesion, incidentesPrecio };
 }
 
 // Bloque en pantalla "Movimientos de caja" (Ronda 19): cantidad+importe de ventas completadas y
@@ -3604,6 +3746,20 @@ function notaComprobante(nombre){
   return '';
 }
 
+// Ronda 56: bloque "Artículos a actualizar precios" — se muestra solo si hubo precios de
+// emergencia capturados en esta sesión de caja.
+function htmlIncidentesPrecioResumen(incidentes){
+  if(!incidentes || !incidentes.length) return '';
+  const filas = incidentes.map(i=>{
+    const nombre = i.variante?.producto?.nombre || '(producto no encontrado)';
+    return `<div class="linea"><span>${nombre} <span class="nota">(${new Date(i.fecha_hora).toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})})</span></span><span>${money(i.precio_capturado)}</span></div>`;
+  }).join('');
+  return `
+    <p class="nota" style="margin-top:12px;margin-bottom:2px;color:var(--rojo);"><strong>⚠ Artículos a actualizar precios (${incidentes.length})</strong></p>
+    <p class="nota" style="margin:0 0 4px;">Se vendieron sin precio en catálogo — el cajero capturó un precio solo para esa venta. Hay que darles precio en el Catálogo.</p>
+    ${filas}
+  `;
+}
 function renderResumenCierre(r){
   const otrasFormas = Object.entries(r.desglose).filter(([nombre])=>nombre!=='Efectivo');
   const filasOtras = otrasFormas.map(([nombre,total])=>{
@@ -3622,6 +3778,7 @@ function renderResumenCierre(r){
     ${htmlGrupoConSubtotal('Entradas de efectivo', clasificarMovimientos(r.movimientos).entradas.filas, clasificarMovimientos(r.movimientos).entradas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
     ${htmlGrupoConSubtotal('Salidas de efectivo', clasificarMovimientos(r.movimientos).salidas.filas, clasificarMovimientos(r.movimientos).salidas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
     ${htmlMovimientosCajaResumen(r.reporteSesion)}
+    ${htmlIncidentesPrecioResumen(r.incidentesPrecio)}
   `;
 }
 
@@ -3753,6 +3910,14 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     const resp = await sb.rpc('reporte_ventas', { p_sesion_caja_id: state.sesionCaja.id });
     if(!resp.error) reporteSesion = resp.data;
   } catch(err){ /* se ignora: el cierre ya se registró, solo se omite el detalle adicional */ }
+  let incidentesPrecio = [];
+  try{
+    const { data: inc } = await sb.from('incidentes_precio')
+      .select('precio_capturado, costo_en_momento, fecha_hora, variante:variantes(id, producto:productos(nombre))')
+      .eq('sesion_caja_id', state.sesionCaja.id)
+      .order('fecha_hora', { ascending: true });
+    incidentesPrecio = inc || [];
+  } catch(err){ /* se ignora: el cierre ya se registró, solo se omite este detalle adicional */ }
   generarReportePDFCierre(r, reporteSesion); // descarga automática del PDF del cierre — no bloquea el resto del flujo si falla
   const otrasFormas = (r.desglose_pagos||[]).filter(d=>d.forma_pago!=='Efectivo');
   const filasOtras = otrasFormas.map(d=>{
@@ -3775,6 +3940,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
     ${htmlGrupoConSubtotal('Entradas de efectivo', movsSesion.entradas.filas, movsSesion.entradas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
     ${htmlGrupoConSubtotal('Salidas de efectivo', movsSesion.salidas.filas, movsSesion.salidas.subtotal, m=>`<div class="linea"><span>${m.motivo||'(sin concepto)'}</span><span>${money(m.monto)}</span></div>`)}
     ${htmlMovimientosCajaResumen(reporteSesion)}
+    ${htmlIncidentesPrecioResumen(incidentesPrecio)}
   `;
   $('modal-resultado-cierre').classList.add('activo');
   $('resultado-cierre-ok').focus();
