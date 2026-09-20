@@ -1024,7 +1024,7 @@
 
 <!-- MODAL: estado de cuenta de un cliente (solo lectura — los abonos se registran desde el POS) -->
 <div class="modal-fondo" id="modal-estado-cuenta">
-  <div class="modal" style="max-width:640px;">
+  <div class="modal" style="max-width:820px;">
     <h2 id="ec-titulo">Estado de cuenta</h2>
     <p class="nota" id="ec-resumen"></p>
     <div class="fila" style="justify-content:flex-end;gap:8px;margin-bottom:8px;">
@@ -1036,7 +1036,10 @@
     </div>
     <div class="tabla-scroll tabla-fija">
       <table>
-        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
+        <!-- Ronda 56 (ajuste): Monto se movió justo después de Movimiento — con Referencia al final
+             (que puede ser texto largo, ej. el folio de una venta), el importe ya no quedaba visible
+             sin desplazar la tabla. Mismo criterio que ya usa el estado de cuenta de proveedor. -->
+        <thead><tr><th>Fecha</th><th>Movimiento</th><th class="num">Monto</th><th>Referencia</th></tr></thead>
         <tbody id="ec-tabla-body"></tbody>
       </table>
     </div>
@@ -1505,7 +1508,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.26.004';
+const APP_VERSION = '1.26.005';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5549,8 +5552,8 @@ async function abrirEstadoCuenta(id){
     return `<tr>
       <td>${new Date(m.fecha_hora).toLocaleString('es-MX')}</td>
       <td>${nombreMovimientoCliente(m)}</td>
-      <td>${m.referencia || '—'}</td>
       <td class="num">${signo}${money(Math.abs(efecto))}</td>
+      <td>${m.referencia || '—'}</td>
     </tr>`;
   }).join('');
 }
@@ -5560,17 +5563,22 @@ $('ec-cerrar').addEventListener('click', ()=>{ $('modal-estado-cuenta').classLis
 $('ec-exportar').addEventListener('click', async ()=>{
   const c = state.ecClienteActual;
   if(!c) return;
-  const encabezados = ['Fecha','Movimiento','Referencia','Monto'];
+  const encabezados = ['Fecha','Movimiento','Monto','Referencia'];
   const filas = state.ecMovimientos.map(m=>{
     const efecto = m.tipo === 'cargo' ? Number(m.monto) : -Number(m.monto);
-    return [new Date(m.fecha_hora).toLocaleString('es-MX'), nombreMovimientoCliente(m), m.referencia || '—', redondear2(efecto)];
+    return [new Date(m.fecha_hora).toLocaleString('es-MX'), nombreMovimientoCliente(m), redondear2(efecto), m.referencia || '—'];
   });
   const tipos = filas.map(()=>'producto');
   const nombreArchivoBase = `estado_cuenta_${c.nombre.replace(/[^a-z0-9]+/gi,'_')}_${fechaLocalISO()}`;
+  // Ronda 56 (ajuste): el PDF no mostraba el saldo del cliente — se agrega al subtítulo, junto con el
+  // límite de crédito y el disponible, igual que ya se ve en pantalla (ver ec-resumen).
+  const subtituloSaldo = c.es_publico_general
+    ? state.empresaNombre
+    : `${state.empresaNombre} · Límite de crédito: ${money(c.limite_credito)} · Saldo actual: ${money(c.saldo_actual)} · Disponible: ${money(Math.max(0, c.limite_credito - c.saldo_actual))}`;
   if($('ec-formato-exportar').value === 'excel'){
-    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'Estado de cuenta', encabezados, filas, tipos, [3]);
+    exportarExcelAgrupado(`${nombreArchivoBase}.xlsx`, 'Estado de cuenta', encabezados, filas, tipos, [2]);
   } else {
-    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, `Estado de cuenta — ${c.nombre}`, state.empresaNombre, encabezados, filas, tipos, [3], [3]);
+    await exportarPDFAgrupado(`${nombreArchivoBase}.pdf`, `Estado de cuenta — ${c.nombre}`, subtituloSaldo, encabezados, filas, tipos, [2], [2]);
   }
 });
 

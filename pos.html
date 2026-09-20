@@ -356,7 +356,7 @@
     <p class="nota" id="pe-producto-nombre"></p>
     <p class="nota">Este artículo no tiene precio capturado en ninguna lista de precios. Captura el precio solo para esta venta — quedará anotado en el cierre de caja para actualizarlo en el catálogo.</p>
     <p class="nota" id="pe-costo-info" style="display:none;"></p>
-    <div class="campo"><label>Precio de venta (solo esta venta)</label><input type="number" id="pe-precio" step="0.01" min="0" placeholder="0.00"></div>
+    <div class="campo"><label>Precio de venta (solo esta venta)</label><input type="number" id="pe-precio" step="0.01" min="0.01" placeholder="0.00"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="pe-cancelar">Cancelar</button>
       <button class="btn-primario" style="flex:1;" id="pe-confirmar">Agregar al carrito</button>
@@ -633,7 +633,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.016';
+const APP_VERSION = '1.7.017';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1582,10 +1582,12 @@ async function cargarCatalogo(){
         listaIds: combo ? combo.listas.map(l=>l.lista_precio_id) : null,
       };
     })
-    // Se excluye solo si no tiene precio capturado en NINGUNA lista (nunca sería vendible); si tiene
-    // precio en alguna lista pero no en la actualmente activa, se deja en el catálogo (recalcularPreciosCatalogo
-    // lo vuelve a evaluar al cambiar de lista) y se marca en pantalla como "Sin precio en esta lista".
-    .filter(p=>Object.keys(p.preciosPorLista).length > 0);
+    ;
+  // Ronda 56 (ajuste): antes se excluía del catálogo un producto que no tuviera precio capturado en
+  // NINGUNA lista ("nunca sería vendible") — pero desde que existe el precio de emergencia, sí es
+  // vendible (el cajero lo captura al momento). Con el filtro, un producto recién dado de alta sin
+  // precio simplemente no aparecía en el POS hasta que se le asignara un precio en el Catálogo — el
+  // filtro se quitó para que aparezca de inmediato y dispare la captura de precio de emergencia.
   recalcularStockCombos();
 }
 // Ronda 55: el stock "vendible" de un combo no es una existencia propia — es lo máximo que se puede
@@ -1793,10 +1795,14 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar, precioEmer
   // el de "Público general" (confirmado por Adrián); si tampoco existe ahí, se le pide al cajero que
   // capture uno para ESTA venta únicamente, con un mínimo de costo/0.90, y queda como incidente en
   // el cierre de caja para que se actualice el precio real en el Catálogo después.
+  // Ronda 56 (ajuste): un precio capturado en $0.00 se trata igual que "sin precio" — Adrián reportó
+  // que un artículo con un precio de $0.00 (dato mal capturado) se vendió solo, en $0.00, sin pedir
+  // nada al cajero. Una venta en $0.00 siempre se bloquea; si de verdad es una promoción, el precio
+  // mínimo capturable es $0.01 (ver abrirCapturaPrecioEmergencia / registrar_precio_emergencia).
   let usarListaPublicaEnEstaLinea = false;
-  if(producto.precio === null && precioEmergencia == null){
+  if((producto.precio === null || producto.precio === 0) && precioEmergencia == null){
     const precioPublico = state.listaPublicaId ? producto.preciosPorLista[state.listaPublicaId] : undefined;
-    if(precioPublico != null){
+    if(precioPublico != null && precioPublico > 0){
       usarListaPublicaEnEstaLinea = true;
     } else {
       abrirCapturaPrecioEmergencia(producto, codigoEscaneado, cantidadAgregar);
@@ -1906,8 +1912,12 @@ function precioParaLinea(l){
 // precio manual — o el "precio de emergencia" de la Ronda 56, que es un precio manual sin precio de
 // catálogo detrás — necesita su propio checkeo de "sí se puede cobrar", que es este:
 function lineaTienePrecioParaCobrar(l){
-  if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') return true;
-  return precioParaLinea(l) !== null;
+  // Ronda 56 (ajuste): un precio de $0.00 (de catálogo o manual) nunca es cobrable — se trata igual
+  // que "sin precio" (ver agregarAlCarrito). Esto es un respaldo por si una línea llega a $0 por otra
+  // vía, ej. cambiarle a esta línea sola una lista de precios que resulte en $0.
+  if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') return Number(l.precioManual) > 0;
+  const p = precioParaLinea(l);
+  return p !== null && p > 0;
 }
 function hayLineaSinPrecio(){
   return state.carrito.some(l=>!lineaTienePrecioParaCobrar(l));
