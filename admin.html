@@ -1244,7 +1244,10 @@
     <h3 style="margin-bottom:6px;">Artículos asociados</h3>
     <div class="campo">
       <label>Buscar artículo para agregar</label>
-      <input type="text" id="temporada-buscar-producto" autocomplete="off" placeholder="Escribe el nombre o escanea el código…">
+      <div class="fila" style="gap:6px;">
+        <input type="text" id="temporada-buscar-producto" autocomplete="off" placeholder="Escribe el nombre o escanea el código…" style="flex:1;">
+        <button type="button" class="btn-secundario" id="temporada-agregar-todos" style="flex:none;">Agregar todos los que coincidan</button>
+      </div>
       <div id="temporada-resultados-busqueda" class="resultados"></div>
     </div>
     <div class="tabla-scroll">
@@ -1576,7 +1579,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.27.001';
+const APP_VERSION = '1.27.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2100,6 +2103,7 @@ async function iniciarSesionApp(){
 
   await cargarCatalogosBase();
   await cargarProductos();
+  suscribirStockEnVivo();
   renderListasPrecio();
   renderReporteChecks();
   renderActualizarPreciosChecks();
@@ -2475,6 +2479,35 @@ async function cargarProductos(){
   renderReporte();
 }
 $('cat-buscar').addEventListener('input', ()=>{ state.catalogoPagina = 1; renderCatalogo(); });
+
+// Ronda 57 (ajuste): el Catálogo se cargaba una sola vez al iniciar sesión — si se vendía algo desde
+// el POS (u otra sesión de admin.html) mientras esta pantalla seguía abierta, el stock se veía viejo
+// hasta recargar el navegador, y con eso el Reporte de resurtido (que se calcula con lo que ya está
+// en memoria) tampoco detectaba el faltante. Mismo mecanismo que ya usa pos.html desde la Ronda 27:
+// Supabase Realtime sobre "existencias", filtrado al almacén de esta empresa, actualiza en memoria
+// el stock/mínimo/máximo del producto que cambió sin volver a consultar todo el catálogo.
+let canalStockEnVivoAdmin = null;
+function suscribirStockEnVivo(){
+  if(canalStockEnVivoAdmin){ sb.removeChannel(canalStockEnVivoAdmin); canalStockEnVivoAdmin = null; }
+  canalStockEnVivoAdmin = sb.channel('existencias-almacen-admin-' + state.almacenId)
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'existencias', filter: `almacen_id=eq.${state.almacenId}`,
+    }, (payload) => {
+      const fila = (payload.new && Object.keys(payload.new).length) ? payload.new : payload.old;
+      if(!fila || !fila.variante_id) return;
+      const p = state.productos.find(pp=>pp.varianteId === fila.variante_id);
+      if(!p) return; // producto que aún no estaba cargado (recién dado de alta) — se verá al re-entrar
+      if(payload.eventType === 'DELETE'){
+        p.stock = 0; p.minimo = 0; p.maximo = 0;
+      } else {
+        p.stock = Number(payload.new.cantidad) || 0;
+        p.minimo = Number(payload.new.minimo) || 0;
+        p.maximo = Number(payload.new.maximo) || 0;
+      }
+      renderCatalogo();
+    })
+    .subscribe();
+}
 
 // ---------- COMBOS / PAQUETES DE PRODUCTOS (Ronda 55) ----------
 async function cargarCombos(){
@@ -2949,6 +2982,25 @@ $('temporada-guardar').addEventListener('click', async ()=>{
   await cargarTemporadas();
 });
 buscadorProducto('temporada-buscar-producto', 'temporada-resultados-busqueda', agregarArticuloTemporada, null, null);
+// Ronda 57 (ajuste): Adrián pidió poder agregar de un solo clic TODOS los artículos que coincidan con
+// la búsqueda (ej. filtrar por "masking tape" y agregar las 5 medidas de un jalón), en vez de tener
+// que darle clic uno por uno — buscadorProducto() limita sus resultados a 15 para no saturar la
+// pantalla, así que aquí se repite el mismo criterio de filtrado pero SIN ese límite.
+$('temporada-agregar-todos').addEventListener('click', ()=>{
+  const q = $('temporada-buscar-producto').value.trim().toLowerCase();
+  if(!q){ $('temporada-error').innerHTML = '<div class="msg-error">Escribe algo en el buscador para filtrar qué artículos agregar.</div>'; return; }
+  const coincidencias = state.productos.filter(p=>p.activo &&
+    (p.nombre.toLowerCase().includes(q) || p.marca.toLowerCase().includes(q) || p.codigos.some(c=>c.codigo===q))
+  );
+  if(!coincidencias.length){ $('temporada-error').innerHTML = '<div class="msg-error">No hay artículos activos que coincidan con esa búsqueda.</div>'; return; }
+  $('temporada-error').innerHTML = '';
+  coincidencias.forEach(p=>{
+    if(!state.temporadaArticulos.includes(p.varianteId)) state.temporadaArticulos.push(p.varianteId);
+  });
+  renderTemporadaArticulos();
+  $('temporada-buscar-producto').value = '';
+  $('temporada-resultados-busqueda').innerHTML = '';
+});
 
 // Lista de precio "Público general" — se usa en el Catálogo, en ambos reportes nuevos (existencias
 // y resurtido) y en la exportación del Reporte de precios legado, siempre con la misma detección.
