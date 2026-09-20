@@ -1626,7 +1626,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.28.001';
+const APP_VERSION = '1.28.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3114,10 +3114,17 @@ function abrirImportarArticulos(){
 $('btn-importar-articulos').addEventListener('click', abrirImportarArticulos);
 $('imp-cancelar').addEventListener('click', ()=> $('modal-importar-articulos').classList.remove('activo'));
 
-function validarFilaImportacion(fila, idx, codigosVistos){
+function validarFilaImportacion(fila, idx, codigosVistos, nombresVistos){
   const errores = [];
   const nombre = String(fila['Nombre']||'').trim();
   if(!nombre) errores.push('Falta el nombre.');
+  else {
+    const nombreNorm = normalizarTexto(nombre);
+    if(nombresVistos.has(nombreNorm)) errores.push(`El nombre "${nombre}" está repetido en el archivo.`);
+    nombresVistos.add(nombreNorm);
+    const existente = state.productos.some(p=>normalizarTexto(p.nombre)===nombreNorm);
+    if(existente) errores.push(`Ya existe un producto o combo con el nombre "${nombre}" — cámbiale el nombre o edítalo desde el Catálogo.`);
+  }
   const marca = String(fila['Marca']||'').trim();
   const catTexto = String(fila['Categoría']||'').trim();
   const lineaTexto = String(fila['Línea de artículo']||'').trim();
@@ -3209,7 +3216,8 @@ $('imp-archivo').addEventListener('change', async (e)=>{
       return;
     }
     const codigosVistos = new Set();
-    state.impFilas = filasCrudas.map((fila, idx)=> validarFilaImportacion(fila, idx, codigosVistos));
+    const nombresVistos = new Set();
+    state.impFilas = filasCrudas.map((fila, idx)=> validarFilaImportacion(fila, idx, codigosVistos, nombresVistos));
     renderTablaImportacion();
   }catch(err){
     $('imp-error').innerHTML = `<div class="msg-error">No se pudo leer el archivo: ${err.message}</div>`;
@@ -3229,74 +3237,46 @@ $('imp-confirmar').addEventListener('click', async ()=>{
     $('imp-confirmar').disabled = false; $('imp-cancelar').disabled = false;
     return;
   }
-  const lineasCompra = [];
-  let creados = 0;
-  for(const f of state.impFilas){
-    f.estado = 'Creando…';
-    renderTablaImportacion();
-    // Si ya existe un producto con este mismo código de barras (por ejemplo, se está reintentando
-    // un archivo que se importó a medias), no se vuelve a crear — se reutiliza su variante para que
-    // un reintento no duplique el catálogo.
-    let varianteId = null;
-    if(f.codigo){
-      const existente = state.productos.find(p=>p.codigos.some(c=>c.codigo===f.codigo));
-      if(existente) varianteId = existente.varianteId;
-    }
-    if(!varianteId){
-      const payload = {
-        producto_id: null, variante_id: null,
-        empresa_id: state.empresaId, nombre: f.nombre, marca: f.marca,
-        linea_articulo_id: f.lineaId, unidad_medida_id: f.unidadId,
-        inventariable: true, clave_prod_serv_sat: '',
-        activo: f.activo, activo_reparto: true, imagen_url: null,
-        nombre_variante: 'Único', impuesto_ids: f.impuestoIds,
-        precios_directos: [{ lista_precio_id: listaPublica.id, precio: f.precio }],
-        almacen_id: state.almacenId, minimo: f.minimo, maximo: f.maximo,
-        cantidad_inicial: 0, // el stock real se registra abajo como compra, con Kardex
-        codigos_barra: f.codigo ? [{ codigo: f.codigo, tipo: 'individual', factor_unidades_base: 1 }] : [],
-      };
-      const { data, error } = await sb.rpc('guardar_producto', { p: payload });
-      if(error){
-        f.estado = `<span style="color:#b91c1c;">Error: ${error.message}</span>`;
-        renderTablaImportacion();
-        $('imp-error').innerHTML = `<div class="msg-error">Se detuvo la importación en el renglón ${f.idx+1} (${f.nombre}): ${error.message}. Los renglones anteriores ya quedaron dados de alta — corrige este renglón y los que falten, quita del archivo los que ya se importaron, y vuelve a subirlo.</div>`;
-        $('imp-cancelar').disabled = false;
-        await cargarProductos();
-        return;
-      }
-      varianteId = data;
-      creados++;
+  $('imp-resumen').innerHTML = `<p class="nota">Importando ${state.impFilas.length} artículo(s)…</p>`;
+  const almacen = state.almacenes.find(a=>a.id===state.almacenId);
+  const payload = {
+    empresa_id: state.empresaId, almacen_id: state.almacenId, sucursal_id: almacen?.sucursal_id || null,
+    usuario_id: state.usuario.id, fecha_compra: fechaCompra,
+    folio_documento: `INVENTARIO INICIAL ${fechaCompra}`, lista_publico_id: listaPublica.id,
+    articulos: state.impFilas.map(f=>({
+      nombre: f.nombre, marca: f.marca, linea_articulo_id: f.lineaId, unidad_medida_id: f.unidadId,
+      impuesto_ids: f.impuestoIds, precio_publico: f.precio, cantidad_inicial: f.cantidadInicial,
+      costo_inicial: f.costoInicial, minimo: f.minimo, maximo: f.maximo, activo: f.activo,
+      codigo_barra: f.codigo || null,
+    })),
+  };
+  // Un solo llamado a importar_catalogo_masivo: TODO el archivo se procesa como una sola transacción
+  // en el servidor — si cualquier renglón falla (nombre repetido, código ya existente, etc.), Postgres
+  // deshace automáticamente todo lo que ya se había dado de alta en este mismo intento. No puede
+  // quedar una carga a medias, ni siquiera si el error ocurre a la mitad del archivo.
+  const { data, error } = await sb.rpc('importar_catalogo_masivo', { p: payload });
+  if(error){
+    // Además del mensaje general, se busca a cuál renglón se refiere el error (el mensaje del
+    // servidor siempre incluye el nombre o el código de barras exacto entre comillas/en texto) y se
+    // marca ESE renglón en la tabla — así no hay que adivinar cuál de todos es el problemático.
+    const nombreEnError = state.impFilas.find(f=> f.nombre && error.message.includes(`"${f.nombre}"`));
+    const codigoEnError = !nombreEnError ? state.impFilas.find(f=> f.codigo && error.message.includes(f.codigo)) : null;
+    const filaSenalada = nombreEnError || codigoEnError;
+    if(filaSenalada){
+      filaSenalada.errores.push(error.message);
+      $('imp-error').innerHTML = `<div class="msg-error">No se importó nada — se deshizo todo el intento (así ningún artículo queda a medias). El problema está señalado en rojo en el renglón #${filaSenalada.idx+1} de la tabla de abajo — corrígelo y vuelve a subir el archivo.</div>`;
     } else {
-      f.estado = '<span style="color:#15803d;">Ya existía (por código de barras) — reutilizado</span>';
+      $('imp-error').innerHTML = `<div class="msg-error">No se importó nada — se detectó un problema y se deshizo todo el intento (así ningún artículo queda a medias): ${error.message}</div>`;
     }
-    if(!f.estado || f.estado==='Creando…') f.estado = '<span style="color:#15803d;">OK</span>';
     renderTablaImportacion();
-    if(f.cantidadInicial > 0){
-      lineasCompra.push({ variante_id: varianteId, cantidad: f.cantidadInicial, costo_unitario: f.costoInicial });
-    }
+    $('imp-resumen').innerHTML = '';
+    $('imp-confirmar').disabled = false;
+    $('imp-cancelar').disabled = false;
+    return;
   }
-
-  if(lineasCompra.length){
-    const almacen = state.almacenes.find(a=>a.id===state.almacenId);
-    const payloadCompra = {
-      empresa_id: state.empresaId, sucursal_id: almacen?.sucursal_id || null, almacen_id: state.almacenId,
-      proveedor_id: null, folio_documento: `INVENTARIO INICIAL ${fechaCompra}`,
-      fecha_compra: fechaCompra, usuario_id: state.usuario.id, origen: 'manual',
-      lista_publico_id: null, cfdi_uuid: null, tipo_compra: 'contado',
-      condicion_pago_id: null, anticipo_id: null, lineas: lineasCompra,
-    };
-    const { error: errCompra } = await sb.rpc('registrar_compra', { p: payloadCompra });
-    if(errCompra){
-      $('imp-error').innerHTML = `<div class="msg-error">Los ${creados} artículos ya se dieron de alta, pero falló el registro de la compra de inventario inicial: ${errCompra.message}. Puedes registrar esa compra manualmente desde Compras.</div>`;
-      $('imp-cancelar').disabled = false;
-      await cargarProductos();
-      return;
-    }
-  }
-
   await cargarProductos();
   renderCatalogo();
-  $('imp-resumen').innerHTML = `<p class="nota" style="color:#15803d;"><strong>Listo: ${creados} artículo(s) nuevo(s) dado(s) de alta${lineasCompra.length ? ` y se registró la compra de inventario inicial con ${lineasCompra.length} renglón(es).` : '.'}</strong></p>`;
+  $('imp-resumen').innerHTML = `<p class="nota" style="color:#15803d;"><strong>Listo: ${data.creados} artículo(s) nuevo(s) dado(s) de alta${data.compra_id ? ' y se registró la compra de inventario inicial.' : '.'}</strong></p>`;
   $('imp-cancelar').disabled = false;
   $('imp-confirmar').disabled = true;
 });
