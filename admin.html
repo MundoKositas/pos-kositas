@@ -152,6 +152,7 @@
   <div class="tabs" id="tabs-principal">
     <button class="tab-btn activo" data-tab="tab-catalogo">Catálogo</button>
     <button class="tab-btn" data-tab="tab-combos">Combos</button>
+    <button class="tab-btn" data-tab="tab-temporadas">Temporadas</button>
     <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
@@ -235,6 +236,24 @@
           <tbody id="combos-tabla-body"></tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- TAB TEMPORADAS (Ronda 56) -->
+  <div class="tab-panel" id="tab-temporadas" style="display:none;">
+    <div class="card">
+      <div class="fila" style="justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;">Temporadas</h2>
+        <button class="btn-primario" id="btn-nueva-temporada">+ Nueva temporada</button>
+      </div>
+      <p class="nota">Da de alta las fechas de compra de cada temporada (ej. Navidad, 14 de febrero, Día de las Madres, regreso a clases) y asocia los artículos que solo se surten en esa época. El rango de fechas se repite cada año (no importa el año, solo el mes y el día) — un artículo asociado a una o más temporadas solo aparecerá en el <strong>Reporte de resurtido</strong> mientras hoy caiga dentro del rango de alguna de sus temporadas. Un artículo sin ninguna temporada asociada se sigue comportando como siempre (sin restricción de fechas).</p>
+      <div class="tabla-scroll">
+        <table>
+          <thead><tr><th>Temporada</th><th>Rango de fechas (se repite cada año)</th><th class="num">Artículos asociados</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="temporadas-tabla-body"></tbody>
+        </table>
+      </div>
+      <p class="nota" id="temporadas-vacio" style="display:none;">Todavía no tienes ninguna temporada dada de alta.</p>
     </div>
   </div>
 
@@ -1195,6 +1214,55 @@
   </div>
 </div>
 
+<!-- MODAL: temporadas (Ronda 56) — catálogo de temporadas + asociar artículos, tal como lo eligió
+     Adrián sobre la alternativa de capturar fecha inicial/final en cada artículo por separado. -->
+<div class="modal-fondo" id="modal-temporada">
+  <div class="modal" style="max-width:680px;">
+    <h2 id="temporada-titulo">Nueva temporada</h2>
+    <div class="campo"><label>Nombre de la temporada</label><input type="text" id="temporada-nombre" placeholder="Ej. Navidad"></div>
+    <div class="grid-2">
+      <div class="campo">
+        <label>Inicio de compras</label>
+        <div class="fila" style="gap:6px;">
+          <select id="temporada-dia-inicio" style="width:90px;"></select>
+          <select id="temporada-mes-inicio" style="flex:1;"></select>
+        </div>
+      </div>
+      <div class="campo">
+        <label>Fin de compras</label>
+        <div class="fila" style="gap:6px;">
+          <select id="temporada-dia-fin" style="width:90px;"></select>
+          <select id="temporada-mes-fin" style="flex:1;"></select>
+        </div>
+      </div>
+    </div>
+    <p class="nota">Si el fin de compras cae en un mes anterior al de inicio (ej. inicia en noviembre y termina en enero), se entiende que el rango cruza el fin de año — funciona igual, no hace falta nada especial.</p>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:8px 0;">
+      <input type="checkbox" id="temporada-activo" checked style="width:auto;"> Temporada activa
+    </label>
+
+    <h3 style="margin-bottom:6px;">Artículos asociados</h3>
+    <div class="campo">
+      <label>Buscar artículo para agregar</label>
+      <input type="text" id="temporada-buscar-producto" autocomplete="off" placeholder="Escribe el nombre o escanea el código…">
+      <div id="temporada-resultados-busqueda" class="resultados"></div>
+    </div>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>Artículo</th><th></th></tr></thead>
+        <tbody id="temporada-articulos-tabla-body"></tbody>
+      </table>
+    </div>
+    <p class="nota" id="temporada-sin-articulos">Todavía no agregas ningún artículo.</p>
+
+    <div id="temporada-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="temporada-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="temporada-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-producto">
   <div class="modal ancho" id="card-producto">
     <div id="prod-header-sticky" style="position:sticky;top:-22px;background:#fff;z-index:5;margin:-22px -22px 10px;padding:22px 22px 10px;border-bottom:1px solid var(--borde);">
@@ -1508,7 +1576,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.26.005';
+const APP_VERSION = '1.27.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1715,6 +1783,7 @@ const state = {
   permisosMenu: {}, // Ronda 35: { 'catalogos_base.roles': 'edicion' | 'consulta', ... } — sin llave = sin acceso
   // Ronda 55: Combos/paquetes de productos.
   combos: [], comboEditandoVarianteId: null, comboComponentes: [], comboListasSeleccionadas: [],
+  temporadas: [], varianteTemporadas: [], temporadaEditandoId: null, temporadaArticulos: [],
 };
 // Ruta fija del logotipo dentro del bucket público "empresa" — se sube siempre con el mismo nombre
 // (logo.png, convertido en el navegador si el archivo original es de otro formato), así la URL nunca
@@ -2079,6 +2148,7 @@ function tieneEdicionMenu(clave){ return Object.keys(state.permisosMenu).length 
 const MAPA_TAB_PRINCIPAL_A_CLAVE = {
   'tab-catalogo': 'catalogo',
   'tab-combos': 'catalogo', // Ronda 55: los combos comparten el permiso de Catálogo — no tienen clave propia todavía
+  'tab-temporadas': 'catalogo', // Ronda 56: mismo criterio — temporadas comparte el permiso de Catálogo
   'tab-listas': 'listas_precio',
   'tab-actualizar-precios': 'actualizar_precios',
   'tab-reporte': 'reporte_precios',
@@ -2129,6 +2199,7 @@ function ajustarVisibilidadMenus(){
   // abierto.
   $('btn-nuevo-producto').style.display = tieneEdicionMenu('catalogo') ? '' : 'none';
   $('btn-nuevo-combo').style.display = tieneEdicionMenu('catalogo') ? '' : 'none';
+  $('btn-nueva-temporada').style.display = tieneEdicionMenu('catalogo') ? '' : 'none';
   $('btn-nueva-lista').style.display = tieneEdicionMenu('listas_precio') ? '' : 'none';
   $('btn-actualizar-precios').style.display = tieneEdicionMenu('actualizar_precios') ? '' : 'none';
   $('btn-nuevo-cliente').style.display = tieneEdicionMenu('clientes') ? '' : 'none';
@@ -2152,6 +2223,7 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     if(btn.dataset.tab === 'tab-clientes') refrescarPantallaClientes();
     if(btn.dataset.tab === 'tab-catalogos-base') entrarATabCatalogosBase();
     if(btn.dataset.tab === 'tab-combos') cargarCombos();
+    if(btn.dataset.tab === 'tab-temporadas') cargarTemporadas();
   });
 });
 
@@ -2730,6 +2802,154 @@ $('combo-guardar').addEventListener('click', async ()=>{
 
 buscadorProducto('combo-buscar-producto', 'combo-resultados-busqueda', agregarComponenteCombo, null, costoComboConImpuestos);
 
+// ---------- TEMPORADAS (Ronda 56) ----------
+// Catálogo de temporadas + asociar artículos — diseño elegido por Adrián sobre la alternativa de
+// capturar fecha inicial/final en cada artículo por separado. El rango de fechas se guarda como
+// mes/día (sin año) y se REPITE cada año — así Adrián no tiene que volver a dar de alta "Día de las
+// Madres" cada temporada. Solo afecta el Reporte de resurtido (ver datosReporteResurtido): un
+// artículo sin ninguna temporada asociada se comporta igual que siempre.
+const NOMBRES_MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function poblarSelectsFechaTemporada(){
+  const opcionesDia = Array.from({length:31}, (_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
+  const opcionesMes = NOMBRES_MESES.map((n,i)=>`<option value="${i+1}">${n}</option>`).join('');
+  ['temporada-dia-inicio','temporada-dia-fin'].forEach(id=>{ $(id).innerHTML = opcionesDia; });
+  ['temporada-mes-inicio','temporada-mes-fin'].forEach(id=>{ $(id).innerHTML = opcionesMes; });
+}
+poblarSelectsFechaTemporada();
+
+// Compara la fecha de hoy contra un rango mes/día que se repite cada año — si mes/día de inicio es
+// posterior al de fin, se entiende que el rango cruza el fin de año (ej. 15 nov a 5 ene).
+function temporadaVigenteHoy(t){
+  const hoy = new Date();
+  const hoyMmdd = (hoy.getMonth()+1) * 100 + hoy.getDate();
+  const inicioMmdd = t.mesInicio * 100 + t.diaInicio;
+  const finMmdd = t.mesFin * 100 + t.diaFin;
+  if(inicioMmdd <= finMmdd) return hoyMmdd >= inicioMmdd && hoyMmdd <= finMmdd;
+  return hoyMmdd >= inicioMmdd || hoyMmdd <= finMmdd;
+}
+function textoRangoTemporada(t){
+  return `${t.diaInicio} de ${NOMBRES_MESES[t.mesInicio-1]} — ${t.diaFin} de ${NOMBRES_MESES[t.mesFin-1]}`;
+}
+// Temporada(s) asociadas a una variante — usado tanto para pintar la tabla de Temporadas como para
+// el filtro/columna del Reporte de resurtido.
+function temporadasDeVariante(varianteId){
+  return state.varianteTemporadas.filter(vt=>vt.varianteId===varianteId)
+    .map(vt=>state.temporadas.find(t=>t.id===vt.temporadaId)).filter(Boolean);
+}
+
+async function cargarTemporadas(){
+  const [{ data: temporadas, error: e1 }, { data: asociaciones, error: e2 }] = await Promise.all([
+    sb.from('temporadas').select('id, nombre, mes_inicio, dia_inicio, mes_fin, dia_fin, activo').order('nombre'),
+    sb.from('variante_temporadas').select('variante_id, temporada_id'),
+  ]);
+  if(e1 || e2){ console.error(e1||e2); return; }
+  state.temporadas = (temporadas||[]).map(t=>({
+    id: t.id, nombre: t.nombre, mesInicio: t.mes_inicio, diaInicio: t.dia_inicio,
+    mesFin: t.mes_fin, diaFin: t.dia_fin, activo: t.activo,
+  }));
+  state.varianteTemporadas = (asociaciones||[]).map(a=>({ varianteId: a.variante_id, temporadaId: a.temporada_id }));
+  renderTemporadasTabla();
+}
+
+function renderTemporadasTabla(){
+  const tbody = $('temporadas-tabla-body');
+  tbody.innerHTML = state.temporadas.map(t=>{
+    const nArticulos = state.varianteTemporadas.filter(vt=>vt.temporadaId===t.id).length;
+    return `<tr>
+      <td>${t.nombre}</td>
+      <td>${textoRangoTemporada(t)}</td>
+      <td class="num">${nArticulos}</td>
+      <td>${t.activo ? 'Activa' : 'Inactiva'}</td>
+      <td><button type="button" class="btn-gris btn-temporada-editar" data-id="${t.id}">Editar</button></td>
+    </tr>`;
+  }).join('');
+  $('temporadas-vacio').style.display = state.temporadas.length ? 'none' : 'block';
+  tbody.querySelectorAll('.btn-temporada-editar').forEach(btn=>{
+    btn.addEventListener('click', ()=> abrirTemporada(btn.dataset.id));
+  });
+}
+
+function renderTemporadaArticulos(){
+  const tbody = $('temporada-articulos-tabla-body');
+  tbody.innerHTML = state.temporadaArticulos.map((varianteId,i)=>{
+    const p = state.productos.find(pp=>pp.varianteId===varianteId);
+    return `<tr>
+      <td>${p?.nombre || '(producto no encontrado)'}${p?.marca ? ' — '+p.marca : ''}</td>
+      <td><button type="button" class="btn-gris temporada-art-quitar" data-idx="${i}">Quitar</button></td>
+    </tr>`;
+  }).join('');
+  $('temporada-sin-articulos').style.display = state.temporadaArticulos.length ? 'none' : 'block';
+  tbody.querySelectorAll('.temporada-art-quitar').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.temporadaArticulos.splice(Number(btn.dataset.idx), 1);
+      renderTemporadaArticulos();
+    });
+  });
+}
+function agregarArticuloTemporada(producto){
+  $('temporada-error').innerHTML = '';
+  if(!state.temporadaArticulos.includes(producto.varianteId)){
+    state.temporadaArticulos.push(producto.varianteId);
+  }
+  renderTemporadaArticulos();
+}
+
+function limpiarFormularioTemporada(){
+  state.temporadaEditandoId = null;
+  state.temporadaArticulos = [];
+  $('temporada-titulo').textContent = 'Nueva temporada';
+  $('temporada-nombre').value = '';
+  $('temporada-dia-inicio').value = '1';
+  $('temporada-mes-inicio').value = '1';
+  $('temporada-dia-fin').value = '1';
+  $('temporada-mes-fin').value = '1';
+  $('temporada-activo').checked = true;
+  $('temporada-error').innerHTML = '';
+  renderTemporadaArticulos();
+}
+function nuevaTemporada(){
+  limpiarFormularioTemporada();
+  $('modal-temporada').classList.add('activo');
+}
+function abrirTemporada(id){
+  const t = state.temporadas.find(x=>x.id===id);
+  if(!t) return;
+  limpiarFormularioTemporada();
+  state.temporadaEditandoId = id;
+  state.temporadaArticulos = state.varianteTemporadas.filter(vt=>vt.temporadaId===id).map(vt=>vt.varianteId);
+  $('temporada-titulo').textContent = 'Editar temporada';
+  $('temporada-nombre').value = t.nombre;
+  $('temporada-dia-inicio').value = String(t.diaInicio);
+  $('temporada-mes-inicio').value = String(t.mesInicio);
+  $('temporada-dia-fin').value = String(t.diaFin);
+  $('temporada-mes-fin').value = String(t.mesFin);
+  $('temporada-activo').checked = t.activo;
+  renderTemporadaArticulos();
+  $('modal-temporada').classList.add('activo');
+}
+$('btn-nueva-temporada').addEventListener('click', nuevaTemporada);
+$('temporada-cancelar').addEventListener('click', ()=> $('modal-temporada').classList.remove('activo'));
+$('temporada-guardar').addEventListener('click', async ()=>{
+  $('temporada-error').innerHTML = '';
+  const nombre = $('temporada-nombre').value.trim();
+  if(!nombre){ $('temporada-error').innerHTML = '<div class="msg-error">El nombre de la temporada es obligatorio.</div>'; return; }
+  const payload = {
+    id: state.temporadaEditandoId || undefined,
+    empresa_id: state.empresaId, nombre,
+    dia_inicio: Number($('temporada-dia-inicio').value), mes_inicio: Number($('temporada-mes-inicio').value),
+    dia_fin: Number($('temporada-dia-fin').value), mes_fin: Number($('temporada-mes-fin').value),
+    activo: $('temporada-activo').checked,
+    variante_ids: state.temporadaArticulos,
+  };
+  $('temporada-guardar').disabled = true;
+  const { error } = await sb.rpc('guardar_temporada', { p: payload });
+  $('temporada-guardar').disabled = false;
+  if(error){ $('temporada-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  $('modal-temporada').classList.remove('activo');
+  await cargarTemporadas();
+});
+buscadorProducto('temporada-buscar-producto', 'temporada-resultados-busqueda', agregarArticuloTemporada, null, null);
+
 // Lista de precio "Público general" — se usa en el Catálogo, en ambos reportes nuevos (existencias
 // y resurtido) y en la exportación del Reporte de precios legado, siempre con la misma detección.
 function obtenerListaPublica(){
@@ -3034,7 +3254,16 @@ $('cat-exportar-existencias').addEventListener('click', async ()=>{
 // columna de total ($), ambas usando el mismo costo unitario.
 function datosReporteResurtido(){
   const conImpuestos = $('cat-con-impuestos').checked;
-  const items = itemsFiltradosCatalogo().filter(p=>p.activo && p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo));
+  // Ronda 56 — temporadas: un artículo SIN ninguna temporada asociada se comporta igual que siempre.
+  // Un artículo CON una o más temporadas asociadas solo se sugiere resurtir mientras hoy caiga dentro
+  // del rango de fechas de AL MENOS UNA de ellas (puede tener varias, ej. San Valentín y Día de las
+  // Madres) — fuera de esas fechas, aunque esté bajo su punto de reorden, no aparece aquí.
+  const items = itemsFiltradosCatalogo().filter(p=>{
+    if(!(p.activo && p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo))) return false;
+    const temporadas = temporadasDeVariante(p.varianteId);
+    if(!temporadas.length) return true;
+    return temporadas.some(t=>t.activo && temporadaVigenteHoy(t));
+  });
   const filas = items.map(p=>{
     const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
     const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
@@ -3044,26 +3273,28 @@ function datosReporteResurtido(){
     const totalReorden = redondear2(cantidadReorden * costo);
     const cantidadMaximo = Math.max(0, Number(p.maximo) - Number(p.stock));
     const totalMaximo = redondear2(cantidadMaximo * costo);
+    const nombresTemporadas = temporadasDeVariante(p.varianteId).map(t=>t.nombre).join(', ');
     return {
       lineaNombre: linea?.nombre, categoriaNombre: categoria?.nombre,
       producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, marca: p.marca || '—',
       stock: Number(p.stock), puntoReorden: Number(p.minimo), costo,
       cantidadReorden, totalReorden, cantidadMaximo, totalMaximo,
+      temporada: nombresTemporadas || '—',
     };
   });
   const grupos = agruparPorCategoriaLinea(filas);
   const encabezados = [
     'Producto', 'Marca', 'Stock', 'Punto de reorden', `Costo (${conImpuestos?'con':'sin'} imp.)`,
     'Cantidad a punto de reorden', 'Total resurtido (punto de reorden)',
-    'Cantidad a stock máximo', 'Total resurtido (stock máximo)',
+    'Cantidad a stock máximo', 'Total resurtido (stock máximo)', 'Temporada',
   ];
   // columnasSuma: Stock (2), Punto de reorden (3) y las 4 columnas de cantidad/total (5-8) se suman
-  // en subtotales — Costo (4) es unitario, no se suma.
+  // en subtotales — Costo (4) es unitario, no se suma; Temporada (9) es texto.
   const { filas: filasTabla, tipos } = filasAgrupadasConSubtotales(
     grupos,
-    f=>[f.producto, f.marca, f.stock, f.puntoReorden, f.costo, f.cantidadReorden, f.totalReorden, f.cantidadMaximo, f.totalMaximo],
+    f=>[f.producto, f.marca, f.stock, f.puntoReorden, f.costo, f.cantidadReorden, f.totalReorden, f.cantidadMaximo, f.totalMaximo, f.temporada],
     [2, 3, 5, 6, 7, 8],
-    9
+    10
   );
   return { encabezados, filas: filasTabla, tipos, conImpuestos };
 }
