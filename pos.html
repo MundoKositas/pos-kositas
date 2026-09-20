@@ -356,7 +356,11 @@
     <p class="nota" id="pe-producto-nombre"></p>
     <p class="nota">Este artículo no tiene precio capturado en ninguna lista de precios. Captura el precio solo para esta venta — quedará anotado en el cierre de caja para actualizarlo en el catálogo.</p>
     <p class="nota" id="pe-costo-info" style="display:none;"></p>
-    <div class="campo"><label>Precio de venta (solo esta venta)</label><input type="number" id="pe-precio" step="0.01" min="0.01" placeholder="0.00"></div>
+    <!-- Ronda 56b: 2 campos que se autocompletan entre sí (con la tasa de impuestos del propio
+         artículo) en vez de un solo campo ambiguo — Adrián reportó que un precio de emergencia se
+         estaba cobrando con impuestos de más porque no quedaba claro si lo tecleado ya los incluía. -->
+    <div class="campo"><label>Precio SIN impuestos</label><input type="number" id="pe-precio-sin" step="0.01" min="0.01" placeholder="0.00"></div>
+    <div class="campo"><label>Precio CON impuestos</label><input type="number" id="pe-precio-con" step="0.01" min="0.01" placeholder="0.00"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-gris" style="flex:1;" id="pe-cancelar">Cancelar</button>
       <button class="btn-primario" style="flex:1;" id="pe-confirmar">Agregar al carrito</button>
@@ -633,7 +637,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.017';
+const APP_VERSION = '1.7.018';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1862,41 +1866,66 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar, precioEmer
 // (ni la del ticket ni "Público general"). El cajero captura un precio válido SOLO para esta
 // venta; registrar_precio_emergencia valida en el servidor que no sea menor a costo/0.90 (10% de
 // utilidad mínima) y deja el incidente anotado para el reporte de cierre de caja.
-let peProducto = null, peCodigoEscaneado = null, peCantidadAgregar = null;
+let peProducto = null, peCodigoEscaneado = null, peCantidadAgregar = null, peSincronizando = false;
 function abrirCapturaPrecioEmergencia(producto, codigoEscaneado, cantidadAgregar){
   peProducto = producto; peCodigoEscaneado = codigoEscaneado; peCantidadAgregar = cantidadAgregar;
   $('pe-producto-nombre').textContent = producto.nombre;
-  $('pe-precio').value = '';
+  $('pe-precio-sin').value = '';
+  $('pe-precio-con').value = '';
   $('pe-error').innerHTML = '';
   if(producto.costo != null && producto.costo > 0){
-    const minimo = Math.round((producto.costo / 0.90) * 100) / 100;
-    $('pe-costo-info').textContent = `Último costo: ${money(producto.costo)} · precio mínimo permitido: ${money(minimo)} (10% de utilidad)`;
+    const minimoSin = Math.round((producto.costo / 0.90) * 100) / 100;
+    const minimoCon = redondear2(minimoSin * (1 + tasaTotal(producto)));
+    $('pe-costo-info').textContent = `Último costo: ${money(producto.costo)} · precio mínimo permitido: ${money(minimoSin)} sin impuestos (${money(minimoCon)} con impuestos) — 10% de utilidad`;
     $('pe-costo-info').style.display = '';
   } else {
     $('pe-costo-info').style.display = 'none';
   }
   $('modal-precio-emergencia').classList.add('activo');
-  $('pe-precio').focus();
+  // El campo a enfocar depende de cómo esté configurado el resto del POS (empresas.desglosar_impuestos_ticket):
+  // si el ticket ya desglosa impuestos aparte, el cajero está acostumbrado a teclear precios SIN
+  // impuestos; si no, está acostumbrado a ver/teclear el precio final CON impuestos incluidos.
+  $(state.desglosarImpuestos ? 'pe-precio-sin' : 'pe-precio-con').focus();
 }
+// Ronda 56b: los 2 campos (con/sin impuestos) se autocompletan entre sí con la tasa de impuestos
+// propia del artículo — así no importa cuál de los dos le resulte más natural al cajero, y ya no hay
+// ambigüedad de si lo tecleado incluye o no el impuesto (causa del cobro de más que reportó Adrián).
+$('pe-precio-sin').addEventListener('input', ()=>{
+  if(peSincronizando || !peProducto) return;
+  const v = Number($('pe-precio-sin').value);
+  peSincronizando = true;
+  $('pe-precio-con').value = (isFinite(v) && v > 0) ? redondear2(v * (1 + tasaTotal(peProducto))) : '';
+  peSincronizando = false;
+});
+$('pe-precio-con').addEventListener('input', ()=>{
+  if(peSincronizando || !peProducto) return;
+  const v = Number($('pe-precio-con').value);
+  peSincronizando = true;
+  $('pe-precio-sin').value = (isFinite(v) && v > 0) ? redondear2(v / (1 + tasaTotal(peProducto))) : '';
+  peSincronizando = false;
+});
 $('pe-cancelar').addEventListener('click', ()=>{
   $('modal-precio-emergencia').classList.remove('activo');
   peProducto = null; peCodigoEscaneado = null; peCantidadAgregar = null;
 });
 $('pe-confirmar').addEventListener('click', async ()=>{
   $('pe-error').innerHTML = '';
-  const precio = Number($('pe-precio').value);
-  if(!$('pe-precio').value || isNaN(precio) || precio <= 0){
+  // El precio BASE (sin impuestos) es el que se guarda internamente — misma convención que
+  // l.precioManual en todo el carrito (ver abrirEditarLinea) — y el que se compara contra costo/0.90
+  // en el servidor (costo_ultima_compra tampoco lleva impuestos).
+  const precioBase = Number($('pe-precio-sin').value);
+  if(!$('pe-precio-sin').value || isNaN(precioBase) || precioBase <= 0){
     $('pe-error').innerHTML = '<div class="msg-error">Captura un precio válido.</div>';
     return;
   }
   $('pe-confirmar').disabled = true;
   const { error } = await sb.rpc('registrar_precio_emergencia', {
-    p_variante_id: peProducto.varianteId, p_sesion_caja_id: state.sesionCaja.id, p_precio: precio,
+    p_variante_id: peProducto.varianteId, p_sesion_caja_id: state.sesionCaja.id, p_precio: precioBase,
   });
   $('pe-confirmar').disabled = false;
   if(error){ $('pe-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
   $('modal-precio-emergencia').classList.remove('activo');
-  agregarAlCarrito(peProducto, peCodigoEscaneado, peCantidadAgregar, precio);
+  agregarAlCarrito(peProducto, peCodigoEscaneado, peCantidadAgregar, precioBase);
   peProducto = null; peCodigoEscaneado = null; peCantidadAgregar = null;
 });
 
