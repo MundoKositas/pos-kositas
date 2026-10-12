@@ -709,6 +709,7 @@
   <div class="tab-panel" id="tab-catalogos-base" style="display:none;">
     <div class="tabs" id="cfg-tabs" style="margin-bottom:14px;">
       <button type="button" class="tab-btn activo" data-cfgtab="marcas">Marcas</button>
+      <button type="button" class="tab-btn" data-cfgtab="colores">Colores</button>
       <button type="button" class="tab-btn" data-cfgtab="categorias">Categorías</button>
       <button type="button" class="tab-btn" data-cfgtab="lineas">Líneas de artículo</button>
       <button type="button" class="tab-btn" data-cfgtab="unidades">Unidades de medida</button>
@@ -1361,8 +1362,9 @@
         </div>
       </div>
       <div class="campo" id="prod-color-campo">
-        <label>Color o variante <span class="nota" style="font-weight:400;">(opcional — déjalo vacío si el artículo no tiene colores)</span></label>
-        <input type="text" id="prod-nombre-variante" placeholder="Ej. Rojo">
+        <label>Color <span class="nota" style="font-weight:400;">(opcional — «Sin color» si el artículo no tiene colores)</span></label>
+        <select id="prod-nombre-variante"></select>
+        <p class="nota" style="margin:4px 0 0;">Los colores salen del catálogo (Catálogos base → Colores). Un color que ya tiene este artículo no vuelve a aparecer en la lista.</p>
         <label id="prod-precio-propio-wrap" style="display:none;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="prod-precio-propio" style="width:auto;"> Este color tiene precio propio (no se actualiza cuando cambia el precio de los demás colores)</label>
         <div id="prod-colores-seccion" style="display:none;margin-top:10px;">
           <p class="nota" style="margin:0 0 6px;">Colores de este artículo — cada uno lleva su propia existencia, movimientos y código de barras. El precio se captura una sola vez y aplica a todos (salvo los que tengan precio propio).</p>
@@ -1636,7 +1638,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.29.001';
+const APP_VERSION = '1.29.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -1828,7 +1830,7 @@ const state = {
   listaEditId: null,
   costoActual: null, imagenUrlActual: null, imagenUrlNueva: null,
   catalogoOrden: [], indiceCatalogo: -1,
-  formSnapshot: '', marcas: [],
+  formSnapshot: '', marcas: [], colores: [],
   catalogoPagina: 1, catalogoPorPagina: 50,
   logoUrl: '', desglosarImpuestos: true, textoPagare: '',
   regimenesFiscales: [], // catálogo SAT (c_RegimenFiscal), global, para el select de "Datos generales"
@@ -2218,7 +2220,7 @@ const MAPA_TAB_PRINCIPAL_A_CLAVE = {
 };
 const MAPA_CLITAB_A_CLAVE = { 'cli-panel-cxc': 'clientes.cxc' };
 const MAPA_CFGTAB_A_CLAVE = {
-  marcas: 'catalogos_base.marcas', categorias: 'catalogos_base.categorias', lineas: 'catalogos_base.lineas',
+  marcas: 'catalogos_base.marcas', colores: 'catalogos_base.marcas', categorias: 'catalogos_base.categorias', lineas: 'catalogos_base.lineas',
   unidades: 'catalogos_base.unidades', impuestos: 'catalogos_base.impuestos', formas_pago: 'catalogos_base.formas_pago',
   condiciones_pago: 'catalogos_base.condiciones_pago', proveedores: 'catalogos_base.proveedores',
   sucursales: 'catalogos_base.sucursales', cajas: 'catalogos_base.cajas', periodos: 'catalogos_base.periodos',
@@ -2304,7 +2306,7 @@ document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
 
 // ---------- CATÁLOGOS BASE ----------
 async function cargarCatalogosBase(){
-  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}, {data: formasPago}, {data: formasPagoSat}] = await Promise.all([
+  const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}, {data: formasPago}, {data: formasPagoSat}, {data: colores}] = await Promise.all([
     sb.from('impuestos').select('*').order('nombre'),
     sb.from('categorias').select('*').order('nombre'),
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
@@ -2315,6 +2317,7 @@ async function cargarCatalogosBase(){
     sb.from('condiciones_pago').select('*').eq('activo', true).order('dias'), // Ronda 23
     sb.from('formas_pago').select('*').eq('activo', true).order('nombre'), // Ronda 45 — pago a proveedores (CxP)
     sb.from('formas_pago_sat').select('*').order('orden'), // Ronda 46 — catálogo SAT c_FormaPago para clave_sat
+    sb.from('colores').select('*').eq('activo', true).order('nombre'), // Ronda 60 — catálogo de colores
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
@@ -2323,6 +2326,7 @@ async function cargarCatalogosBase(){
   state.listasPrecio = listas || [];
   state.margenesLinea = margenesLinea || [];
   state.marcas = marcas || [];
+  state.colores = colores || [];
   state.condicionesPago = condicionesPago || [];
   state.formasPago = formasPago || [];
   state.formasPagoSat = formasPagoSat || [];
@@ -2508,7 +2512,7 @@ function nombreConColor(nombreProducto, nombreVariante){
 }
 async function cargarProductos(){
   const { data, error } = await sb.from('variantes').select(`
-    id, nombre_variante, activo, precio_propio,
+    id, nombre_variante, activo, precio_propio, color_id,
     producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
       linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
@@ -2522,7 +2526,7 @@ async function cargarProductos(){
     const codigos = (v.codigos||[]).map(c=>({codigo: c.codigo, tipo: c.tipo, factor: c.factor_unidades_base}));
     return {
       varianteId: v.id, nombreVariante: v.nombre_variante, activoVariante: v.activo,
-      precioPropio: !!v.precio_propio,
+      precioPropio: !!v.precio_propio, colorId: v.color_id || null,
       // Colores: "nombre" es lo que se ve en listas/búsquedas (Producto — Color); "nombreBase" es el
       // nombre real del artículo, el que se edita en el formulario.
       productoId: v.producto.id, nombreBase: v.producto.nombre,
@@ -3742,13 +3746,13 @@ function irAPanelDatos(){
 // productos seguidos (por ejemplo desde el flujo de XML), nunca se pierde de vista cuál se está
 // capturando (pedido de Adrián).
 function actualizarTituloProducto(){
-  const nombre = nombreConColor($('prod-nombre').value.trim(), $('prod-nombre-variante') ? $('prod-nombre-variante').value : '');
+  const nombre = nombreConColor($('prod-nombre').value.trim(), nombreColorSeleccionado());
   const nuevoColor = !state.varianteEditId && state.productoEditId;
   const prefijo = nuevoColor ? 'Nuevo color' : (state.varianteEditId ? 'Editar producto' : 'Nuevo producto');
   $('producto-titulo').textContent = nombre ? `${prefijo} — ${nombre}` : prefijo;
 }
 $('prod-nombre').addEventListener('input', actualizarTituloProducto);
-$('prod-nombre-variante').addEventListener('input', actualizarTituloProducto);
+$('prod-nombre-variante').addEventListener('change', actualizarTituloProducto);
 
 function abrirProducto(varianteId){
   // Reset del flujo de "altas pendientes de XML" — solo se reactiva explícitamente desde
@@ -3768,7 +3772,7 @@ function abrirProducto(varianteId){
   // si hay que avisar que solo se puede desactivar.
   $('prod-eliminar').style.display = p ? '' : 'none';
   $('prod-nombre').value = p?.nombreBase ?? p?.nombre ?? '';
-  $('prod-nombre-variante').value = p && !esVarianteUnica(p.nombreVariante) ? p.nombreVariante : '';
+  llenarSelectColores(p ? p.colorId : null, p);
   $('prod-precio-propio').checked = !!p?.precioPropio;
   renderColoresProducto(p);
   actualizarTituloProducto();
@@ -3845,6 +3849,29 @@ function abrirProducto(varianteId){
 }
 
 // ---- Colores: lista de los colores hermanos del artículo que se está editando ----
+function nombreColorSeleccionado(){
+  const sel = $('prod-nombre-variante');
+  if(!sel || !sel.value) return '';
+  return sel.options[sel.selectedIndex]?.text || '';
+}
+// Llena el combo con el catálogo de colores, SIN los que ya tiene otro color del mismo artículo
+// (así no se repite uno por error). En un color nuevo (nuevoColor) no se ofrece «Sin color».
+function llenarSelectColores(colorActualId, base, nuevoColor){
+  const sel = $('prod-nombre-variante');
+  const hermanos = base ? state.productos.filter(x=>x.productoId === base.productoId) : [];
+  const propioId = nuevoColor ? null : (base ? base.varianteId : null);
+  const usados = new Set(hermanos.filter(h=>h.varianteId !== propioId && h.colorId).map(h=>h.colorId));
+  let opts = nuevoColor ? '<option value="">(elegir color…)</option>' : '<option value="">Sin color (artículo único)</option>';
+  opts += (state.colores || [])
+    .filter(c => !usados.has(c.id) || c.id === colorActualId)
+    .map(c=>`<option value="${c.id}" ${c.id===colorActualId?'selected':''}>${c.nombre}</option>`).join('');
+  // Si el color actual fue desactivado en el catálogo, se conserva visible para no perderlo al guardar
+  if(colorActualId && !(state.colores||[]).some(c=>c.id===colorActualId)){
+    const v = hermanos.find(h=>h.colorId===colorActualId);
+    opts += `<option value="${colorActualId}" selected>${v ? v.nombreVariante : 'Color'} (inactivo)</option>`;
+  }
+  sel.innerHTML = opts;
+}
 function renderColoresProducto(p){
   const sec = $('prod-colores-seccion'), lista = $('prod-colores-lista'), btn = $('btn-agregar-color');
   const nuevoColor = !p && !!state.productoEditId;
@@ -3873,7 +3900,7 @@ function abrirNuevoColor(){
     abrirProducto(base.varianteId);
     state.varianteEditId = null;            // variante nueva del MISMO artículo (state.productoEditId se conserva)
     state.productoEditId = base.productoId;
-    $('prod-nombre-variante').value = '';
+    llenarSelectColores(null, base, true);
     $('prod-precio-propio').checked = false;
     $('prod-precio-propio-wrap').style.display = 'flex';
     $('prod-colores-seccion').style.display = 'none';
@@ -3895,7 +3922,7 @@ function capturarEstadoFormulario(){
   return JSON.stringify({
     imagen: state.imagenUrlNueva || state.imagenUrlActual || null,
     nombre: $('prod-nombre').value.trim(),
-    nombreVariante: $('prod-nombre-variante').value.trim(), precioPropio: $('prod-precio-propio').checked,
+    colorId: $('prod-nombre-variante').value, precioPropio: $('prod-precio-propio').checked,
     marca: $('prod-marca').value.trim(),
     categoria: $('prod-categoria').value,
     linea: $('prod-linea').value,
@@ -4160,8 +4187,8 @@ async function guardarProducto(){
   }
 
   const nuevoColor = !state.varianteEditId && !!state.productoEditId;
-  if(nuevoColor && !$('prod-nombre-variante').value.trim()){
-    $('prod-error').innerHTML = '<div class="msg-error">Escribe el nombre del color (por ejemplo «Rojo»).</div>';
+  if(nuevoColor && !$('prod-nombre-variante').value){
+    $('prod-error').innerHTML = '<div class="msg-error">Elige el color de la lista (si falta, agrégalo en Catálogos base → Colores).</div>';
     return false;
   }
   const impuestoIds = Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(chk=>chk.value);
@@ -4179,7 +4206,7 @@ async function guardarProducto(){
     inventariable: $('prod-inventariable').checked, clave_prod_serv_sat: $('prod-clave-sat').value.trim(),
     activo: $('prod-activo').checked, activo_reparto: $('prod-activo-reparto').checked,
     imagen_url: state.imagenUrlNueva || state.imagenUrlActual || null,
-    nombre_variante: $('prod-nombre-variante').value.trim() || 'Único', precio_propio: $('prod-precio-propio').checked,
+    color_id: $('prod-nombre-variante').value || null, nombre_variante: 'Único', precio_propio: $('prod-precio-propio').checked,
     impuesto_ids: impuestoIds,
     precios_directos: preciosDirectos,
     almacen_id: state.almacenId, minimo: $('prod-minimo').value, maximo: $('prod-maximo').value,
@@ -6752,6 +6779,12 @@ $('cxp-exportar').addEventListener('click', async ()=>{
 // de roles los ve de solo lectura. Todas las escrituras van directo contra la tabla (sin RPC nueva)
 // porque la única regla de negocio real ya la aplica RLS — no hace falta validación de servidor.
 const CATALOGOS_SIMPLES = {
+  colores: {
+    tabla: 'colores', tituloPlural: 'Colores', tituloSingular: 'color',
+    campos: [{ id:'nombre', label:'Nombre del color', tipo:'texto', requerido:true }],
+    tieneActivo: true, orden: 'nombre',
+    columnas: [{ label:'Nombre', valor:r=>r.nombre }],
+  },
   marcas: {
     tabla: 'marcas', tituloPlural: 'Marcas', tituloSingular: 'marca',
     campos: [{ id:'nombre', label:'Nombre', tipo:'texto', requerido:true }],
@@ -6974,7 +7007,7 @@ function renderCatalogoSimple(key){
   $('cfg-titulo').textContent = cfg.tituloPlural;
   // Ronda 35: además de la regla previa (catálogos globales, solo Super Admin edita), si el rol
   // solo tiene "consulta" en este nodo del árbol de menú, tampoco puede crear/editar.
-  const soloLectura = (cfg.global && !state.roles.includes('Super Admin')) || !tieneEdicionMenu('catalogos_base.'+key);
+  const soloLectura = (cfg.global && !state.roles.includes('Super Admin')) || !tieneEdicionMenu(MAPA_CFGTAB_A_CLAVE[key] || ('catalogos_base.'+key));
   $('cfg-nuevo').style.display = soloLectura ? 'none' : '';
   // Ronda 37: atajo para no tener que capturar a mano el mes siguiente cada vez.
   $('cfg-generar-proximo-mes').style.display = (key === 'periodos' && !soloLectura) ? '' : 'none';
@@ -7136,7 +7169,9 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
     // traduce el error técnico de Postgres a algo entendible.
     const mensaje = (key === 'periodos' && /duplicate key|unique constraint/i.test(error.message))
       ? `Ya existe un período con la clave "${payload.clave}" — usa otra o edita el que ya existe.`
-      : error.message;
+      : (key === 'colores' && /duplicate key|unique constraint/i.test(error.message))
+        ? `Ya existe el color "${payload.nombre}" (se ignoran mayúsculas, acentos y espacios) — úsalo tal como está.`
+        : error.message;
     $('cfg-modal-error').innerHTML = `<div class="msg-error">${mensaje}</div>`;
     return;
   }
@@ -7145,6 +7180,10 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
   // Si se editó un catálogo del que dependen selects en otras pantallas (Categorías → Líneas y
   // filtros de Catálogo; Proveedores/Sucursales → el select de "Nueva compra" y el resto de
   // Inventario), se refresca también esa copia para que se vea al toque sin salir y volver a entrar.
+  if(key === 'colores'){
+    const { data: colores } = await sb.from('colores').select('*').eq('activo', true).order('nombre');
+    state.colores = colores || [];
+  }
   if(key === 'categorias'){
     const { data: categorias } = await sb.from('categorias').select('*').order('nombre');
     state.categorias = categorias || [];
