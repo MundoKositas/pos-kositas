@@ -1360,6 +1360,16 @@
           <div id="prod-marca-nueva-error"></div>
         </div>
       </div>
+      <div class="campo" id="prod-color-campo">
+        <label>Color o variante <span class="nota" style="font-weight:400;">(opcional — déjalo vacío si el artículo no tiene colores)</span></label>
+        <input type="text" id="prod-nombre-variante" placeholder="Ej. Rojo">
+        <label id="prod-precio-propio-wrap" style="display:none;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="prod-precio-propio" style="width:auto;"> Este color tiene precio propio (no se actualiza cuando cambia el precio de los demás colores)</label>
+        <div id="prod-colores-seccion" style="display:none;margin-top:10px;">
+          <p class="nota" style="margin:0 0 6px;">Colores de este artículo — cada uno lleva su propia existencia, movimientos y código de barras. El precio se captura una sola vez y aplica a todos (salvo los que tengan precio propio).</p>
+          <div id="prod-colores-lista"></div>
+        </div>
+        <button type="button" class="btn-secundario" id="btn-agregar-color" style="display:none;margin-top:8px;">+ Agregar color</button>
+      </div>
       <div class="grid-2">
         <div class="campo"><label>Categoría</label><select id="prod-categoria"></select></div>
         <div class="campo"><label>Línea de artículo</label><select id="prod-linea"></select></div>
@@ -1626,7 +1636,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.28.003';
+const APP_VERSION = '1.29.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2488,9 +2498,17 @@ $('cat-pagina-siguiente').addEventListener('click', ()=>{
 });
 
 // ---------- CATÁLOGO DE PRODUCTOS ----------
+// Una variante sin color real se llama «Único» — en ese caso el nombre se muestra tal cual.
+function esVarianteUnica(nombreVariante){
+  const n = String(nombreVariante || '').trim().toLowerCase();
+  return !n || n === 'único' || n === 'unico';
+}
+function nombreConColor(nombreProducto, nombreVariante){
+  return esVarianteUnica(nombreVariante) ? nombreProducto : `${nombreProducto} — ${String(nombreVariante).trim()}`;
+}
 async function cargarProductos(){
   const { data, error } = await sb.from('variantes').select(`
-    id, nombre_variante, activo,
+    id, nombre_variante, activo, precio_propio,
     producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
       linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
@@ -2504,7 +2522,11 @@ async function cargarProductos(){
     const codigos = (v.codigos||[]).map(c=>({codigo: c.codigo, tipo: c.tipo, factor: c.factor_unidades_base}));
     return {
       varianteId: v.id, nombreVariante: v.nombre_variante, activoVariante: v.activo,
-      productoId: v.producto.id, nombre: v.producto.nombre, marca: v.producto.marca || '',
+      precioPropio: !!v.precio_propio,
+      // Colores: "nombre" es lo que se ve en listas/búsquedas (Producto — Color); "nombreBase" es el
+      // nombre real del artículo, el que se edita en el formulario.
+      productoId: v.producto.id, nombreBase: v.producto.nombre,
+      nombre: nombreConColor(v.producto.nombre, v.nombre_variante), marca: v.producto.marca || '',
       activo: v.producto.activo, activoReparto: v.producto.activo_reparto,
       imagenUrl: v.producto.imagen_url || null,
       costo: v.producto.costo_ultima_compra,
@@ -3720,11 +3742,13 @@ function irAPanelDatos(){
 // productos seguidos (por ejemplo desde el flujo de XML), nunca se pierde de vista cuál se está
 // capturando (pedido de Adrián).
 function actualizarTituloProducto(){
-  const nombre = $('prod-nombre').value.trim();
-  const prefijo = state.varianteEditId ? 'Editar producto' : 'Nuevo producto';
+  const nombre = nombreConColor($('prod-nombre').value.trim(), $('prod-nombre-variante') ? $('prod-nombre-variante').value : '');
+  const nuevoColor = !state.varianteEditId && state.productoEditId;
+  const prefijo = nuevoColor ? 'Nuevo color' : (state.varianteEditId ? 'Editar producto' : 'Nuevo producto');
   $('producto-titulo').textContent = nombre ? `${prefijo} — ${nombre}` : prefijo;
 }
 $('prod-nombre').addEventListener('input', actualizarTituloProducto);
+$('prod-nombre-variante').addEventListener('input', actualizarTituloProducto);
 
 function abrirProducto(varianteId){
   // Reset del flujo de "altas pendientes de XML" — solo se reactiva explícitamente desde
@@ -3743,7 +3767,10 @@ function abrirProducto(varianteId){
   // producto") — el propio RPC decide si de verdad se puede borrar (nunca vendido/comprado/movido) o
   // si hay que avisar que solo se puede desactivar.
   $('prod-eliminar').style.display = p ? '' : 'none';
-  $('prod-nombre').value = p?.nombre || '';
+  $('prod-nombre').value = p?.nombreBase ?? p?.nombre ?? '';
+  $('prod-nombre-variante').value = p && !esVarianteUnica(p.nombreVariante) ? p.nombreVariante : '';
+  $('prod-precio-propio').checked = !!p?.precioPropio;
+  renderColoresProducto(p);
   actualizarTituloProducto();
   llenarSelectMarcas(p?.marca || '');
   $('prod-clave-sat').value = p?.claveSat || '';
@@ -3817,10 +3844,58 @@ function abrirProducto(varianteId){
   state.formSnapshot = capturarEstadoFormulario();
 }
 
+// ---- Colores: lista de los colores hermanos del artículo que se está editando ----
+function renderColoresProducto(p){
+  const sec = $('prod-colores-seccion'), lista = $('prod-colores-lista'), btn = $('btn-agregar-color');
+  const nuevoColor = !p && !!state.productoEditId;
+  const hermanos = p ? state.productos.filter(x=>x.productoId === p.productoId) : [];
+  // El botón solo aplica a un artículo ya guardado; el checkbox de precio propio, cuando hay más de un color
+  btn.style.display = (p && tieneEdicionMenu('catalogo')) ? '' : 'none';
+  $('prod-precio-propio-wrap').style.display = (hermanos.length > 1 || nuevoColor) ? 'flex' : 'none';
+  if(hermanos.length <= 1){ sec.style.display = 'none'; lista.innerHTML = ''; return; }
+  sec.style.display = 'block';
+  lista.innerHTML = `<table style="width:100%;font-size:.88rem;"><thead><tr><th style="text-align:left;">Color</th><th class="num">Existencia</th><th>Código</th><th></th></tr></thead><tbody>${
+    hermanos.sort((a,b)=>String(a.nombreVariante).localeCompare(String(b.nombreVariante))).map(h=>`
+      <tr ${h.varianteId===p.varianteId ? 'style="background:#eef6ff;"' : ''}>
+        <td>${esVarianteUnica(h.nombreVariante) ? '(sin color)' : h.nombreVariante}${h.precioPropio ? ' <span class="nota">· precio propio</span>' : ''}</td>
+        <td class="num">${h.stock}</td><td>${h.codigoPrincipal || '—'}</td>
+        <td>${h.varianteId===p.varianteId ? '<span class="nota">editando</span>' : `<button type="button" class="btn-secundario" data-color-var="${h.varianteId}" style="padding:2px 8px;">Abrir</button>`}</td>
+      </tr>`).join('')}</tbody></table>`;
+  lista.querySelectorAll('[data-color-var]').forEach(b=> b.addEventListener('click', ()=>{
+    manejarSalidaConCambios(()=> abrirProducto(b.dataset.colorVar));
+  }));
+}
+// Nuevo color: parte de los datos del artículo (nombre, línea, impuestos, precios) y crea una variante nueva.
+function abrirNuevoColor(){
+  const base = state.productos.find(x=>x.varianteId === state.varianteEditId);
+  if(!base) return;
+  manejarSalidaConCambios(()=>{
+    abrirProducto(base.varianteId);
+    state.varianteEditId = null;            // variante nueva del MISMO artículo (state.productoEditId se conserva)
+    state.productoEditId = base.productoId;
+    $('prod-nombre-variante').value = '';
+    $('prod-precio-propio').checked = false;
+    $('prod-precio-propio-wrap').style.display = 'flex';
+    $('prod-colores-seccion').style.display = 'none';
+    $('btn-agregar-color').style.display = 'none';
+    renderCodigosBarra([{codigo:'', tipo:'individual', factor:1}]);
+    $('prod-minimo').value = 0; $('prod-maximo').value = 0;
+    $('prod-cant-inicial-campo').style.display = 'none'; $('prod-cant-inicial').value = 0;
+    $('prod-eliminar').style.display = 'none';
+    $('prod-nav').style.display = 'none';
+    $('tab-kardex').disabled = true;
+    actualizarTituloProducto();
+    $('prod-nombre-variante').focus();
+    state.formSnapshot = capturarEstadoFormulario();
+  });
+}
+$('btn-agregar-color').addEventListener('click', abrirNuevoColor);
+
 function capturarEstadoFormulario(){
   return JSON.stringify({
     imagen: state.imagenUrlNueva || state.imagenUrlActual || null,
     nombre: $('prod-nombre').value.trim(),
+    nombreVariante: $('prod-nombre-variante').value.trim(), precioPropio: $('prod-precio-propio').checked,
     marca: $('prod-marca').value.trim(),
     categoria: $('prod-categoria').value,
     linea: $('prod-linea').value,
@@ -4084,6 +4159,11 @@ async function guardarProducto(){
     codigosVistos.add(c.codigo);
   }
 
+  const nuevoColor = !state.varianteEditId && !!state.productoEditId;
+  if(nuevoColor && !$('prod-nombre-variante').value.trim()){
+    $('prod-error').innerHTML = '<div class="msg-error">Escribe el nombre del color (por ejemplo «Rojo»).</div>';
+    return false;
+  }
   const impuestoIds = Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(chk=>chk.value);
   const preciosDirectos = Array.from(document.querySelectorAll('#prod-precios .precio-sin')).map(el=>({
     lista_precio_id: el.dataset.lista, precio: parseMoney(el.value)||0,
@@ -4099,14 +4179,15 @@ async function guardarProducto(){
     inventariable: $('prod-inventariable').checked, clave_prod_serv_sat: $('prod-clave-sat').value.trim(),
     activo: $('prod-activo').checked, activo_reparto: $('prod-activo-reparto').checked,
     imagen_url: state.imagenUrlNueva || state.imagenUrlActual || null,
-    nombre_variante: 'Único', impuesto_ids: impuestoIds,
+    nombre_variante: $('prod-nombre-variante').value.trim() || 'Único', precio_propio: $('prod-precio-propio').checked,
+    impuesto_ids: impuestoIds,
     precios_directos: preciosDirectos,
     almacen_id: state.almacenId, minimo: $('prod-minimo').value, maximo: $('prod-maximo').value,
     cantidad_inicial: $('prod-cant-inicial').value,
     codigos_barra: codigosBarraPayload.map(c=>({ codigo: c.codigo, tipo: c.tipo, factor_unidades_base: c.factor })),
   };
 
-  const { data, error } = await sb.rpc('guardar_producto', { p: payload });
+  const { data, error } = await sb.rpc('guardar_producto_color', { p: payload });
   if(error){
     $('prod-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
     return false;
