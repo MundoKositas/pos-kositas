@@ -92,6 +92,7 @@
     <div>
       <div class="marca" id="hdr-empresa">Mundo Kositas</div>
       <div class="info" id="hdr-info"></div>
+      <div id="hdr-conexion" style="display:none;margin-top:3px;padding:2px 9px;border-radius:10px;font-size:.75rem;font-weight:600;"></div>
     </div>
   </div>
   <div class="acciones">
@@ -637,7 +638,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.7.018';
+const APP_VERSION = '1.8.001';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -719,6 +720,8 @@ const state = {
   // quedan null hasta que un supervisor autorice ese cambio A NIVEL TICKET vía PIN (ver
   // pedirAutorizacionSupervisor); se resetean en cada venta nueva (reiniciarVenta).
   permisosPos: [],
+  // Ronda 59: modo sin conexión (ver bloque «MODO SIN CONEXIÓN»)
+  modoSinConexion: false, arranqueCarga: false, catalogoTs: null, periodoOperacion: null,
   listaPrecioAutorizadaPor: null,
   descuentoTicketAutorizadoPor: null,
 };
@@ -727,9 +730,308 @@ const state = {
 // sube siempre como logo.png, así la pantalla de login puede mostrarlo sin consultar la base de datos
 // (antes de iniciar sesión todavía no se sabe qué empresa es).
 const LOGO_URL_FIJA = `${SUPABASE_URL}/storage/v1/object/public/empresa/logo.png`;
+$('hdr-logo').addEventListener('error', ()=>{ $('hdr-logo-caja').style.display = 'none'; });
 $('login-logo').addEventListener('error', ()=>{ $('login-logo').style.display = 'none'; });
 $('login-logo').addEventListener('load', ()=>{ $('login-logo').style.display = 'block'; });
 $('login-logo').src = LOGO_URL_FIJA;
+
+// ---------- MODO SIN CONEXIÓN (Ronda 59, entrega 1) ----------
+// Adrián pidió que el POS siga funcionando cuando se cae el internet y se ponga al corriente cuando
+// regrese. Esta entrega cubre la parte de LECTURA: el POS abre sin internet (service worker, ver
+// sw.js), guarda en el equipo (IndexedDB) una copia del catálogo/precios/clientes/etc. cada vez que
+// los descarga con internet, y si arranca sin conexión trabaja con esa copia. Cobrar sin internet
+// llega en la siguiente entrega (cola de ventas pendientes) — mientras tanto, cobrar sin conexión se
+// bloquea con un mensaje claro en vez de fallar con un error técnico.
+// Reglas de diseño:
+//  - La copia local es SOLO para arrancar/trabajar sin conexión: con internet siempre se usa el
+//    servidor (y la copia se renueva).
+//  - "Sin conexión" no se decide solo con navigator.onLine (miente cuando hay router pero no hay
+//    internet): se verifica con una llamada real al servidor cada 20 s, y cualquier consulta que
+//    falle por red también lo marca.
+//  - Al regresar la conexión se vuelve a descargar todo (Realtime no repite avisos perdidos).
+//  - Salir (logout) borra la copia local; no se puede volver a entrar sin internet después de salir
+//    (la contraseña solo se valida en línea), por eso NO se debe usar "Salir" cuando se cae el internet.
+const IDB_NOMBRE = 'mk_pos_offline';
+const IDB_STORE = 'kv';
+const OFFLINE_VIGENCIA_DIAS = 30; // antigüedad máxima de la copia local para permitir arrancar sin internet
+let _idbPromesa = null;
+function idbAbrir(){
+  if(_idbPromesa) return _idbPromesa;
+  _idbPromesa = new Promise((resolve, reject)=>{
+    if(!window.indexedDB){ reject(new Error('IndexedDB no disponible')); return; }
+    const req = indexedDB.open(IDB_NOMBRE, 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore(IDB_STORE); };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+  return _idbPromesa;
+}
+async function idbGet(clave){
+  try{
+    const db = await idbAbrir();
+    return await new Promise((resolve, reject)=>{
+      const q = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(clave);
+      q.onsuccess = ()=> resolve(q.result);
+      q.onerror = ()=> reject(q.error);
+    });
+  }catch(e){ console.warn('IndexedDB (lectura):', e); return undefined; }
+}
+async function idbSet(clave, valor){
+  try{
+    const db = await idbAbrir();
+    return await new Promise((resolve, reject)=>{
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(valor, clave);
+      tx.oncomplete = ()=> resolve(true);
+      tx.onerror = ()=> reject(tx.error);
+      tx.onabort = ()=> reject(tx.error);
+    });
+  }catch(e){ console.warn('IndexedDB (escritura):', e); return false; }
+}
+async function idbBorrarPrefijo(prefijo){
+  try{
+    const db = await idbAbrir();
+    await new Promise((resolve, reject)=>{
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      const cur = store.openCursor();
+      cur.onsuccess = ()=>{
+        const c = cur.result;
+        if(c){ if(String(c.key).startsWith(prefijo)) c.delete(); c.continue(); }
+      };
+      tx.oncomplete = ()=> resolve(true);
+      tx.onerror = ()=> reject(tx.error);
+    });
+  }catch(e){ console.warn('IndexedDB (borrado):', e); }
+}
+
+function esErrorDeRed(err){
+  if(!err) return false;
+  const msg = String(err.message || err);
+  return err.name === 'AuthRetryableFetchError' || err.status === 0
+    || /failed to fetch|networkerror|network request failed|load failed|fetch failed|err_internet|err_network|err_name_not_resolved/i.test(msg);
+}
+
+// Si el equipo puede (o no) hablar con el servidor — llamada real, no navigator.onLine. Cualquier
+// respuesta HTTP (aunque sea 401) cuenta como "hay conexión"; solo un fallo de red cuenta como "no".
+async function probarConexion(){
+  const ctrl = new AbortController();
+  const t = setTimeout(()=> ctrl.abort(), 4000);
+  try{
+    await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: SUPABASE_ANON_KEY }, cache: 'no-store', signal: ctrl.signal });
+    return true;
+  }catch(e){ return false; }
+  finally{ clearTimeout(t); }
+}
+
+// Consulta a Supabase con copia local de respaldo. fn() debe regresar la promesa de la consulta
+// (sb.from(...).select(...) o sb.rpc(...)). Con internet: se ejecuta y, si salió bien, se guarda la
+// copia. Si falla por RED: se marca el modo sin conexión; durante el ARRANQUE (state.arranqueCarga)
+// se devuelve la copia local; ya en operación se devuelve el error de red para que quien llamó
+// conserve lo que ya tiene en memoria (no se pisa un catálogo más fresco con una copia más vieja).
+async function consultaConRespaldo(clave, fn){
+  const llave = `snap|${state.empresaId}|${clave}`;
+  if(!state.modoSinConexion){
+    try{
+      const r = await fn();
+      if(!r.error){
+        idbSet(llave, { data: r.data, ts: Date.now() });
+        if(clave === 'catalogo_variantes') state.catalogoTs = Date.now();
+        return r;
+      }
+      if(!esErrorDeRed(r.error)) return r;
+    }catch(e){
+      if(!esErrorDeRed(e)) throw e;
+    }
+    state.modoSinConexion = true;
+    actualizarIndicadorConexion();
+  }
+  if(state.arranqueCarga){
+    const snap = await idbGet(llave);
+    if(snap){
+      if(clave === 'catalogo_variantes') state.catalogoTs = snap.ts;
+      return { data: snap.data, error: null };
+    }
+    return { data: null, error: { message: `Sin conexión y sin copia local de «${clave}». Conéctate a internet una vez para descargarla.` } };
+  }
+  return { data: null, error: { message: 'Failed to fetch — sin conexión a internet' } };
+}
+
+function textoFechaHora(ts){
+  if(!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleString('es-MX', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function actualizarIndicadorConexion(){
+  const el = document.getElementById('hdr-conexion');
+  if(!el) return;
+  if(state.modoSinConexion){
+    el.style.display = 'inline-block';
+    el.style.background = '#fff3cd'; el.style.color = '#7a5b00';
+    el.textContent = `⚠ SIN CONEXIÓN — catálogo del ${textoFechaHora(state.catalogoTs)}`;
+  } else {
+    el.style.display = 'inline-block';
+    el.style.background = 'rgba(255,255,255,.18)'; el.style.color = '#fff';
+    el.textContent = `● En línea · catálogo ${textoFechaHora(state.catalogoTs)}`;
+  }
+}
+let _avisoTimer = null;
+function mostrarAvisoTemporal(msg){
+  let el = document.getElementById('aviso-temporal');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'aviso-temporal';
+    el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#333;color:#fff;padding:12px 18px;border-radius:8px;font-size:.9rem;z-index:99999;max-width:90%;box-shadow:0 4px 14px rgba(0,0,0,.3);';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(_avisoTimer);
+  _avisoTimer = setTimeout(()=>{ el.style.display = 'none'; }, 5000);
+}
+const MSG_REQUIERE_CONEXION = 'Sin conexión a internet: esta acción necesita conexión. Se habilitará sola en cuanto regrese el internet.';
+
+// Acciones que necesitan al servidor y no tienen sentido sin conexión: se bloquean con un aviso claro
+// (listener en fase de captura para que corra antes que el manejador original).
+['btn-movimiento-caja','btn-abono-cliente','btn-reportes','btn-ventas-dia','btn-tickets-espera','btn-cerrar-caja','btn-mi-pin','btn-poner-en-espera'].forEach(id=>{
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener('click', (e)=>{
+    if(!state.modoSinConexion) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    mostrarAvisoTemporal(MSG_REQUIERE_CONEXION);
+  }, true);
+});
+// Salir sin internet: la contraseña solo se valida en línea, así que no se podría volver a entrar.
+document.getElementById('btn-logout').addEventListener('click', (e)=>{
+  if(!state.modoSinConexion) return;
+  if(!window.confirm('No hay conexión a internet. Si sales ahora NO podrás volver a entrar hasta que regrese el internet (y se borrará la copia local de este equipo).\n\n¿Salir de todos modos?')){
+    e.stopImmediatePropagation(); e.preventDefault();
+  }
+}, true);
+
+// Cobrar sin conexión: en esta entrega todavía no se pueden registrar ventas sin internet.
+function cobroBloqueadoSinConexion(){
+  if(!state.modoSinConexion) return false;
+  $('cobro-error').innerHTML = '<div class="msg-error">Sin conexión a internet: por ahora no se pueden registrar ventas sin internet. Espera a que regrese la conexión (el indicador de arriba cambia solo a «En línea») y vuelve a cobrar. Tu carrito no se pierde.</div>';
+  return true;
+}
+
+// ---- Contexto de la sesión (quién es, sucursal, caja, turno abierto) para poder arrancar sin internet ----
+const CAMPOS_CONTEXTO = ['usuario','rol','roles','empresaId','empresaNombre','desglosarImpuestos','logoUrl','textoPagare',
+  'sucursalId','sucursalNombre','listaPrecioId','listaPrecioDefaultId','cajaId','cajaNombre','almacenId',
+  'periodoOperacionId','periodoOperacion','sesionCaja'];
+function authIdLocal(){
+  try{
+    const raw = localStorage.getItem('sb-mundokositas-pos-auth');
+    if(!raw) return null;
+    const j = JSON.parse(raw);
+    return (j && j.user && j.user.id) || (j && j.currentSession && j.currentSession.user && j.currentSession.user.id) || null;
+  }catch(e){ return null; }
+}
+async function guardarContextoLocal(){
+  if(!state.usuario || !state.sesionCaja) return;
+  const ctx = { authId: state.usuario.auth_id, ts: Date.now(), estado: {} };
+  CAMPOS_CONTEXTO.forEach(c=>{ ctx.estado[c] = state[c]; });
+  await idbSet('contexto', ctx);
+}
+async function borrarCopiaLocal(){
+  await idbBorrarPrefijo('snap|');
+  await idbBorrarPrefijo('contexto');
+}
+// Arranque sin internet: reconstruye el estado de la sesión desde la copia local y entra al POS.
+// Solo si (1) el navegador conserva la sesión de este usuario (no se hizo «Salir»), (2) la copia es de
+// ese mismo usuario, (3) no es demasiado vieja y (4) el periodo de operación guardado sigue vigente hoy.
+async function iniciarSesionSinConexion(){
+  const ctx = await idbGet('contexto');
+  if(!ctx || !ctx.estado) return { ok:false, motivo:'Este equipo todavía no tiene una copia local para trabajar sin internet. Conéctate una vez para descargarla.' };
+  const authId = authIdLocal();
+  if(!authId || authId !== ctx.authId) return { ok:false, motivo:'No hay una sesión guardada en este equipo para trabajar sin internet. Conéctate para iniciar sesión.' };
+  if(Date.now() - ctx.ts > OFFLINE_VIGENCIA_DIAS * 86400000) return { ok:false, motivo:`La copia local tiene más de ${OFFLINE_VIGENCIA_DIAS} días — conéctate a internet para actualizarla.` };
+  const hoy = fechaLocalISO();
+  const per = ctx.estado.periodoOperacion;
+  if(per && (hoy < per.fecha_inicial || hoy > per.fecha_final)) return { ok:false, motivo:'El periodo de operación guardado ya no corresponde a la fecha de hoy — conéctate a internet para actualizarlo.' };
+  Object.assign(state, ctx.estado);
+  state.modoSinConexion = true;
+  state.catalogoTs = ctx.ts;
+  await entrarAlPOS();
+  return { ok:true };
+}
+
+// ---- Vigilancia de la conexión y puesta al corriente al regresar ----
+let _vigilanciaActiva = false;
+let _reconectando = false;
+async function reconectar(){
+  if(_reconectando || !state.usuario || !state.empresaId) return;
+  _reconectando = true;
+  try{
+    await sb.auth.getSession(); // renueva el token si venció mientras no hubo internet
+    await refrescarTodoDesdeServidor();
+    suscribirStockEnVivo();
+    suscribirCambiosCatalogoEnVivo();
+  } finally { _reconectando = false; actualizarIndicadorConexion(); }
+}
+async function refrescarTodoDesdeServidor(){
+  await cargarCondicionesPago();
+  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
+  actualizarBloqueosPermisos();
+  recalcularPreciosCatalogo();
+  if(typeof renderResultados === 'function') renderResultados(buscarInput.value.trim());
+  if(typeof renderCarrito === 'function') renderCarrito();
+  guardarContextoLocal();
+}
+async function aplicarEstadoConexion(hayConexion){
+  if(!state.usuario) return;
+  if(hayConexion && state.modoSinConexion){
+    state.modoSinConexion = false;
+    actualizarIndicadorConexion();
+    await reconectar();
+    if(state.modoSinConexion === false) mostrarAvisoTemporal('Conexión restablecida — catálogo actualizado.');
+  } else if(!hayConexion && !state.modoSinConexion){
+    state.modoSinConexion = true;
+    actualizarIndicadorConexion();
+    mostrarAvisoTemporal('Se perdió la conexión a internet — se sigue trabajando con la copia local.');
+  }
+}
+function iniciarVigilanciaConexion(){
+  if(_vigilanciaActiva) return;
+  _vigilanciaActiva = true;
+  setInterval(async ()=>{ if(state.usuario) await aplicarEstadoConexion(await probarConexion()); }, 20000);
+  window.addEventListener('online', async ()=>{ if(state.usuario) await aplicarEstadoConexion(await probarConexion()); });
+  window.addEventListener('offline', ()=>{ if(state.usuario) aplicarEstadoConexion(false); });
+  // Red de seguridad: aunque Realtime avise de los cambios, cada 10 min se renueva todo (por si
+  // se perdió algún aviso sin que se notara).
+  setInterval(async ()=>{ if(state.usuario && !state.modoSinConexion && !_reconectando){ _reconectando = true; try{ await refrescarTodoDesdeServidor(); } finally { _reconectando = false; actualizarIndicadorConexion(); } } }, 10 * 60 * 1000);
+}
+
+// ---- Avisos en vivo de cambios hechos en admin.html (precios, artículos, clientes…) ----
+// Un cambio en cualquiera de estas tablas dispara una recarga (con una pausa de 3 s para juntar
+// ráfagas de cambios, por ejemplo al actualizar muchos precios de una vez). El stock ya tiene su
+// propio canal (suscribirStockEnVivo).
+let canalCatalogoEnVivo = null;
+let _tCat = null, _tCli = null, _tOtros = null;
+function suscribirCambiosCatalogoEnVivo(){
+  if(canalCatalogoEnVivo){ sb.removeChannel(canalCatalogoEnVivo); canalCatalogoEnVivo = null; }
+  const recargarCatalogo = ()=>{ clearTimeout(_tCat); _tCat = setTimeout(async ()=>{
+    if(state.modoSinConexion) return;
+    await cargarCatalogo(); renderResultados(buscarInput.value.trim()); renderCarrito(); guardarContextoLocal();
+  }, 3000); };
+  const recargarClientes = ()=>{ clearTimeout(_tCli); _tCli = setTimeout(async ()=>{ if(!state.modoSinConexion) await cargarClientes(); }, 3000); };
+  const recargarOtros = ()=>{ clearTimeout(_tOtros); _tOtros = setTimeout(async ()=>{
+    if(state.modoSinConexion) return;
+    await cargarCondicionesPago(); await Promise.all([cargarFormasPago(), cargarListasPrecio()]);
+  }, 3000); };
+  let canal = sb.channel('catalogo-pos-' + state.empresaId);
+  ['variante_precios','productos','variantes','codigos_barra','producto_impuestos','combos','combo_componentes','combo_listas'].forEach(t=>{
+    canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, recargarCatalogo);
+  });
+  canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarClientes);
+  ['formas_pago','listas_precio','condiciones_pago'].forEach(t=>{
+    canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, recargarOtros);
+  });
+  canalCatalogoEnVivo = canal.subscribe();
+}
+
 
 function tasaTotal(item){
   return (item.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0), 0);
@@ -980,6 +1282,7 @@ async function hacerLogin(){
 
 $('btn-logout').addEventListener('click', async ()=>{
   await registrarAccesoSistema('pos', 'salida');
+  await borrarCopiaLocal();
   await sb.auth.signOut();
   location.reload();
 });
@@ -997,8 +1300,22 @@ async function iniciarSesionApp(){
   mostrarPantalla('pantalla-cargando');
   $('header-app').style.display = 'none';
 
-  const { data: authData } = await sb.auth.getUser();
-  const authUser = authData?.user;
+  // Ronda 59: si no hay conexión, getUser() falla por red (no porque la sesión sea inválida) — en ese
+  // caso se intenta arrancar con la copia local en vez de mandar a login.
+  let authUser = null, sinRed = false;
+  try{
+    const r = await sb.auth.getUser();
+    authUser = r.data?.user || null;
+    if(!authUser && r.error && esErrorDeRed(r.error)) sinRed = true;
+  }catch(e){ sinRed = esErrorDeRed(e); }
+  if(!authUser && sinRed){
+    const r = await iniciarSesionSinConexion();
+    if(!r.ok){
+      mostrarPantalla('pantalla-login');
+      $('login-error').innerHTML = `<div class="msg-error">${r.motivo}</div>`;
+    }
+    return;
+  }
   if(!authUser){ mostrarPantalla('pantalla-login'); return; }
 
   const { data: usuarioRow, error: errUsuario } = await sb.from('usuarios').select('*').eq('auth_id', authUser.id).maybeSingle();
@@ -1122,6 +1439,7 @@ async function seleccionarSucursalCaja(sucursal, caja){
     .gte('fecha_final', fechaLocalISO()).maybeSingle();
   if(!periodo){ mostrarError('No hay un periodo de operación abierto para hoy. Contacta al administrador.'); return; }
   state.periodoOperacionId = periodo.id;
+  state.periodoOperacion = { id: periodo.id, fecha_inicial: periodo.fecha_inicial, fecha_final: periodo.fecha_final };
 
   const { data: sesionAbierta } = await sb.from('sesiones_caja')
     .select('*').eq('caja_id', caja.id).eq('estado','abierta').maybeSingle();
@@ -1167,15 +1485,27 @@ async function entrarAlPOS(){
 
   // cargarCondicionesPago() va antes y por separado: cargarClientes() ya llama actualizarNotaCreditoCliente(),
   // que necesita el catálogo de condiciones de pago cargado para saber si el cliente tiene crédito autorizado.
-  await cargarCondicionesPago();
-  await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
+  // Ronda 59: durante la carga inicial, si no hay conexión, cada consulta usa la copia local
+  // (consultaConRespaldo); pasada la carga inicial ya no se pisa lo que hay en memoria.
+  state.arranqueCarga = true;
+  try{
+    await cargarCondicionesPago();
+    await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
+  } finally { state.arranqueCarga = false; }
   actualizarBloqueosPermisos();
   reiniciarVenta();
   restaurarVentaPendienteSiExiste();
   mostrarPantalla('pantalla-pos');
   $('buscar-input').focus();
   suscribirStockEnVivo();
-  actualizarBadgeTicketsEspera();
+  suscribirCambiosCatalogoEnVivo();
+  if(!state.modoSinConexion){
+    guardarContextoLocal();
+    if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{}); // pide al navegador no borrar la copia local sola
+    actualizarBadgeTicketsEspera();
+  }
+  actualizarIndicadorConexion();
+  iniciarVigilanciaConexion();
 }
 
 // Ronda 27: Adrián pidió que el stock se vea actualizado en el POS en cuanto se registre una
@@ -1205,7 +1535,8 @@ function suscribirStockEnVivo(){
 }
 
 async function cargarListasPrecio(){
-  const { data } = await sb.from('listas_precio').select('id, nombre').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
+  const { data, error } = await consultaConRespaldo('listas_precio', () => sb.from('listas_precio').select('id, nombre').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre'));
+  if(error) return;
   state.listasPrecio = data || [];
   llenarSelect('sel-lista-precio', state.listasPrecio, l=>l.id, l=>l.nombre);
   $('sel-lista-precio').value = state.listaPrecioId;
@@ -1221,7 +1552,8 @@ async function cargarListasPrecio(){
 // bloqueados por default para quien no tenga el permiso correspondiente — Adrián decidió que, hoy,
 // solo Gerente/Admin de Empresa (y Super Admin) los tienen; ver migración 053.
 async function cargarPermisosPos(){
-  const { data, error } = await sb.rpc('mis_permisos_pos');
+  const { data, error } = await consultaConRespaldo('permisos_pos', () => sb.rpc('mis_permisos_pos'));
+  if(error && esErrorDeRed(error)) return; // sin conexión: se conservan los permisos ya cargados
   state.permisosPos = error ? [] : (data || []);
 }
 function tienePermiso(codigo){ return state.permisosPos.includes(codigo); }
@@ -1504,13 +1836,13 @@ $('mi-pin-guardar').addEventListener('click', async ()=>{
 
 async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
-    sb.from('variantes').select(`
+    consultaConRespaldo('catalogo_variantes', () => sb.from('variantes').select(`
       id, nombre_variante, activo,
       producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
-    `),
+    `)),
     // Ronda 55: combos/paquetes — un combo es una variante más (ya viene en la consulta de arriba con
     // su propio nombre/precio/código de barras), pero NO tiene existencia propia: su "stock" se calcula
     // a partir de sus componentes (recalcularStockCombos, más abajo) y su venta se filtra por vigencia
@@ -1518,9 +1850,9 @@ async function cargarCatalogo(){
     // combo_componentes/combo_listas no tienen llave foránea directa hacia "combos" (ambas apuntan a
     // "variantes"), así que PostgREST no puede anidarlas en un solo select — se consultan aparte y se
     // unen aquí mismo, igual que ya lo hace admin.html (cargarCombos).
-    sb.from('combos').select('variante_id, maximo_por_venta, vigente_desde, vigente_hasta'),
-    sb.from('combo_componentes').select('combo_variante_id, componente_variante_id, cantidad'),
-    sb.from('combo_listas').select('combo_variante_id, lista_precio_id'),
+    consultaConRespaldo('combos', () => sb.from('combos').select('variante_id, maximo_por_venta, vigente_desde, vigente_hasta')),
+    consultaConRespaldo('combo_componentes', () => sb.from('combo_componentes').select('combo_variante_id, componente_variante_id, cantidad')),
+    consultaConRespaldo('combo_listas', () => sb.from('combo_listas').select('combo_variante_id, lista_precio_id')),
   ]);
   // Si la sesión ya caducó, estas consultas fallan con un error de permisos de Postgres que no le
   // dice nada a quien está en caja — mensajeErrorAmigable() lo traduce a algo accionable ("tu sesión
@@ -1528,7 +1860,9 @@ async function cargarCatalogo(){
   // inmediato al intentar agregar un artículo (antes esto solo se veía en la consola, invisible).
   if(error){
     console.error(error);
-    $('resultados-busqueda').innerHTML = `<div class="resultado-item">No se pudo actualizar el catálogo — ${mensajeErrorAmigable(error)}</div>`;
+    $('resultados-busqueda').innerHTML = esErrorDeRed(error)
+      ? `<div class="resultado-item">Sin conexión — se sigue usando el catálogo guardado en este equipo (${textoFechaHora(state.catalogoTs)}).</div>`
+      : `<div class="resultado-item">No se pudo actualizar el catálogo — ${mensajeErrorAmigable(error)}</div>`;
     return;
   }
   if(errorCombos || errorComponentes || errorListas){
@@ -1643,7 +1977,8 @@ function creditoDisponibleCliente(cliente){ return Math.max(0, Number(cliente.li
 // tanto si no tiene condición configurada como si es "Contado" (dias=0) — en ambos casos no puede
 // comprar a crédito, igual que "Público en general".
 async function cargarCondicionesPago(){
-  const { data } = await sb.from('condiciones_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('dias');
+  const { data, error } = await consultaConRespaldo('condiciones_pago', () => sb.from('condiciones_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('dias'));
+  if(error) return;
   state.condicionesPago = data || [];
 }
 function condicionPagoCliente(cliente){ return state.condicionesPago.find(cp=>cp.id===cliente?.condicion_pago_id) || null; }
@@ -1697,7 +2032,8 @@ function aplicarClienteSeleccionado(){
   if(typeof recalcularTotales === 'function') recalcularTotales();
 }
 async function cargarClientes(){
-  const { data } = await sb.from('clientes').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('es_publico_general', {ascending:false});
+  const { data, error } = await consultaConRespaldo('clientes', () => sb.from('clientes').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('es_publico_general', {ascending:false}));
+  if(error) return; // sin conexión (o error): se conservan los clientes ya cargados
   state.clientes = data || [];
   llenarSelect('sel-cliente', state.clientes, c=>c.id, c=>c.nombre);
   // Si ya había un cliente elegido (ej. al refrescar saldos después de una venta a crédito), se
@@ -1713,7 +2049,8 @@ async function cargarClientes(){
 $('sel-cliente').addEventListener('change', aplicarClienteSeleccionado);
 
 async function cargarFormasPago(){
-  const { data } = await sb.from('formas_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true);
+  const { data, error } = await consultaConRespaldo('formas_pago', () => sb.from('formas_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true));
+  if(error) return;
   state.formasPago = data || [];
 }
 
@@ -1721,10 +2058,11 @@ function llenarSelectConTodas(id, items, valFn, textFn){
   $(id).innerHTML = '<option value="">Todas</option>' + items.map(i=>`<option value="${valFn(i)}">${textFn(i)}</option>`).join('');
 }
 async function cargarCategoriasLineas(){
-  const [{ data: categorias }, { data: lineas }] = await Promise.all([
-    sb.from('categorias').select('*').order('nombre'),
-    sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
+  const [{ data: categorias, error: errCat }, { data: lineas, error: errLin }] = await Promise.all([
+    consultaConRespaldo('categorias', () => sb.from('categorias').select('*').order('nombre')),
+    consultaConRespaldo('lineas_articulo', () => sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre')),
   ]);
+  if(errCat || errLin) return;
   state.categorias = categorias || [];
   state.lineas = lineas || [];
   llenarSelectConTodas('rep-filtro-categoria', state.categorias, c=>c.id, c=>c.nombre);
@@ -2026,6 +2364,11 @@ function redondear2(n){
 // sesión vencida. Sin esto, ese mensaje crudo no le dice nada a quien está usando el POS.
 function mensajeErrorAmigable(err){
   const msg = (err && err.message) || String(err);
+  if(esErrorDeRed(err)){
+    // OJO: si la conexión se cayó justo al enviar, no se sabe si el servidor alcanzó a registrar la
+    // operación — por eso se pide revisar antes de repetirla.
+    return 'No hay conexión a internet. La operación NO se pudo confirmar: cuando regrese el internet revisa (por ejemplo en «Ventas del día») si quedó registrada antes de repetirla.';
+  }
   if(/row-level security|row level security/i.test(msg)){
     // Esto pasa cuando el usuario que tiene la sesión abierta en este POS fue desactivado (o
     // perdió su asignación) mientras seguía usando la app: Supabase bloquea la escritura por
@@ -2634,6 +2977,7 @@ async function finalizarVentaRegistrada(ventaId, payloadVenta, desglose){
 
 $('btn-cobrar').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
+  if(cobroBloqueadoSinConexion()) return;
   $('btn-cobrar').disabled = true;
   const { desglose, payloadDetalle, payloadVenta } = construirDetalleYVentaBase('contado');
   const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
@@ -2660,6 +3004,7 @@ $('btn-cobrar').addEventListener('click', async ()=>{
 // opción, aunque el importe sí quepa en el crédito disponible.
 $('btn-credito-cliente').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
+  if(cobroBloqueadoSinConexion()) return;
   const cliente = clienteSeleccionado();
   if(!cliente || cliente.es_publico_general){
     $('cobro-error').innerHTML = '<div class="msg-error">Selecciona un cliente registrado (no "Público en general") para vender a crédito.</div>';
@@ -3986,6 +4331,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
 });
 $('resultado-cierre-ok').addEventListener('click', async ()=>{
   $('modal-resultado-cierre').classList.remove('activo');
+  await borrarCopiaLocal();
   await sb.auth.signOut();
   location.reload();
 });
@@ -4277,9 +4623,25 @@ $('rep-generar').addEventListener('click', async ()=>{
 // ---------- ARRANQUE ----------
 (async function arrancar(){
   const { data } = await sb.auth.getSession();
-  if(data?.session){ await iniciarSesionApp(); }
-  else { mostrarPantalla('pantalla-login'); $('login-email').focus(); }
+  if(data?.session){ await iniciarSesionApp(); return; }
+  // Ronda 59: sin sesión «viva» pero con una sesión guardada en el equipo y SIN conexión (el token
+  // venció mientras no había internet y no se pudo renovar) → se intenta arrancar con la copia local.
+  if(authIdLocal() && !(await probarConexion())){
+    mostrarPantalla('pantalla-cargando');
+    const r = await iniciarSesionSinConexion();
+    if(r.ok) return;
+    mostrarPantalla('pantalla-login');
+    $('login-error').innerHTML = `<div class="msg-error">${r.motivo}</div>`;
+    return;
+  }
+  mostrarPantalla('pantalla-login'); $('login-email').focus();
 })();
+
+// Ronda 59: service worker — permite abrir el POS aunque no haya internet (ver sw.js; debe estar en la
+// misma carpeta que pos.html). Si el navegador no lo soporta o sw.js no se subió, el POS funciona igual.
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(err=>console.warn('Service worker no registrado:', err)); });
+}
 </script>
 </body>
 </html>
