@@ -638,7 +638,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.8.001';
+const APP_VERSION = '1.8.002';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -721,7 +721,7 @@ const state = {
   // pedirAutorizacionSupervisor); se resetean en cada venta nueva (reiniciarVenta).
   permisosPos: [],
   // Ronda 59: modo sin conexión (ver bloque «MODO SIN CONEXIÓN»)
-  modoSinConexion: false, arranqueCarga: false, catalogoTs: null, periodoOperacion: null,
+  modoSinConexion: false, colaPendientes: 0, colaConError: 0, arranqueCarga: false, catalogoTs: null, periodoOperacion: null,
   listaPrecioAutorizadaPor: null,
   descuentoTicketAutorizadoPor: null,
 };
@@ -868,11 +868,12 @@ function actualizarIndicadorConexion(){
   if(state.modoSinConexion){
     el.style.display = 'inline-block';
     el.style.background = '#fff3cd'; el.style.color = '#7a5b00';
-    el.textContent = `⚠ SIN CONEXIÓN — catálogo del ${textoFechaHora(state.catalogoTs)}`;
+    el.textContent = `⚠ SIN CONEXIÓN — catálogo del ${textoFechaHora(state.catalogoTs)}` + (state.colaPendientes ? ` · ${state.colaPendientes} venta(s) por sincronizar` : '');
   } else {
     el.style.display = 'inline-block';
     el.style.background = 'rgba(255,255,255,.18)'; el.style.color = '#fff';
-    el.textContent = `● En línea · catálogo ${textoFechaHora(state.catalogoTs)}`;
+    el.textContent = `● En línea · catálogo ${textoFechaHora(state.catalogoTs)}` + (state.colaPendientes ? ` · ${state.colaPendientes} venta(s) por sincronizar${state.colaConError ? ' (' + state.colaConError + ' con error — toca aquí)' : ''}` : '');
+    if(state.colaConError){ el.style.background = '#fde2e2'; el.style.color = '#8a1c1c'; }
   }
 }
 let _avisoTimer = null;
@@ -910,12 +911,194 @@ document.getElementById('btn-logout').addEventListener('click', (e)=>{
   }
 }, true);
 
-// Cobrar sin conexión: en esta entrega todavía no se pueden registrar ventas sin internet.
+// Venta a CRÉDITO sin conexión: no se puede (hay que validar saldo/límite del cliente en el servidor).
+// Las ventas de CONTADO sí se cobran sin internet (ver cobrarSinConexion).
 function cobroBloqueadoSinConexion(){
   if(!state.modoSinConexion) return false;
-  $('cobro-error').innerHTML = '<div class="msg-error">Sin conexión a internet: por ahora no se pueden registrar ventas sin internet. Espera a que regrese la conexión (el indicador de arriba cambia solo a «En línea») y vuelve a cobrar. Tu carrito no se pierde.</div>';
+  $('cobro-error').innerHTML = '<div class="msg-error">Sin conexión a internet: las ventas a crédito necesitan conexión (se valida el saldo del cliente). Las ventas de contado sí se pueden cobrar sin internet con el botón Cobrar.</div>';
   return true;
 }
+
+// ---- Ronda 59 · entrega 2: VENTAS SIN CONEXIÓN (cola local + sincronización) ----
+// Una venta de contado cobrada sin internet se guarda en IndexedDB (clave 'cola', NO se borra con
+// «Salir»/cierre porque no empieza con 'snap|') y se manda al servidor con registrar_venta_offline en
+// cuanto regresa la conexión. Cada venta lleva un identificador único (uuid): si el envío se repite
+// (corte a la mitad, doble sincronización) el servidor la reconoce y NO la duplica.
+async function colaLeer(){ const c = await idbGet('cola'); return Array.isArray(c) ? c : []; }
+async function colaGuardar(arr){ return await idbSet('cola', arr); }
+async function actualizarContadorCola(){
+  const c = await colaLeer();
+  state.colaPendientes = c.length;
+  state.colaConError = c.filter(e=>e.estado === 'error').length;
+  actualizarIndicadorConexion();
+  return c;
+}
+async function siguienteFolioProvisional(){
+  const llave = `cons|${state.cajaId}`;
+  const n = (Number(await idbGet(llave)) || 0) + 1;
+  await idbSet(llave, n);
+  const sigla = String(state.cajaNombre || 'C').replace(/[^A-Za-z0-9]/g,'').slice(0,6).toUpperCase() || 'C';
+  return `OFF-${sigla}-${String(n).padStart(4,'0')}`;
+}
+function uuidNuevo(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{ const r = Math.random()*16|0; return (c==='x' ? r : (r&0x3|0x8)).toString(16); });
+}
+// Descuenta del stock en pantalla lo vendido sin conexión (para no ofrecer lo que ya se vendió).
+function descontarStockLocal(lineas){
+  lineas.forEach(l=>{
+    const prod = state.catalogo.find(p=>p.varianteId === l.variante_id);
+    if(!prod) return;
+    if(prod.esCombo && prod.componentes){
+      prod.componentes.forEach(c=>{
+        const comp = state.catalogo.find(p=>p.varianteId === c.varianteId);
+        if(comp) comp.stock = Number(comp.stock) - c.cantidad * l.cantidad;
+      });
+    } else {
+      prod.stock = Number(prod.stock) - l.cantidad;
+    }
+  });
+  recalcularStockCombos();
+}
+async function aplicarColaAStock(){
+  const cola = await colaLeer();
+  cola.forEach(e=>{ if(e.cajaId === state.cajaId) descontarStockLocal(e.detalle); });
+  recalcularStockCombos();
+}
+
+// Cobrar de contado sin conexión: se guarda en la cola local y se imprime/muestra el ticket con folio provisional.
+async function cobrarSinConexion(){
+  const { desglose, payloadDetalle, payloadVenta } = construirDetalleYVentaBase('contado');
+  const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
+  const folio = await siguienteFolioProvisional();
+  const entrada = {
+    uuid: uuidNuevo(), folio, ts: Date.now(), cajaId: state.cajaId, empresaId: state.empresaId,
+    venta: payloadVenta, detalle: payloadDetalle, pagos: payloadPagos, cambios: resumenCambiosVenta(),
+    total: payloadVenta.total, estado: 'pendiente', error: null,
+  };
+  const cola = await colaLeer();
+  cola.push(entrada);
+  const guardado = await colaGuardar(cola);
+  if(!guardado){
+    $('cobro-error').innerHTML = '<div class="msg-error">No se pudo guardar la venta en este equipo (el navegador no deja escribir su almacenamiento). NO entregues la mercancía como cobrada: revisa el espacio/permisos del navegador o espera a que regrese el internet.</div>';
+    $('btn-cobrar').disabled = false;
+    return;
+  }
+  descontarStockLocal(payloadDetalle);
+  await actualizarContadorCola();
+  mostrarTicket(null, payloadVenta, desglose, folio);
+}
+
+// Envía la cola al servidor. Devuelve { enviadas, errores, alertas }.
+let _sincronizando = false;
+async function sincronizarCola(){
+  if(_sincronizando || !state.usuario) return null;
+  let cola = await colaLeer();
+  if(!cola.length){ await actualizarContadorCola(); return { enviadas:0, errores:0, alertas:[] }; }
+  _sincronizando = true;
+  const res = { enviadas:0, errores:0, alertas:[] };
+  try{
+    for(const e of cola.filter(x=>x.estado !== 'error')){
+      let r;
+      try{
+        r = await sb.rpc('registrar_venta_offline', {
+          p_uuid: e.uuid, p_folio_provisional: e.folio, p_fecha_local: new Date(e.ts).toISOString(),
+          p_venta: e.venta, p_detalle: e.detalle, p_pagos: e.pagos, p_cambios: e.cambios || [],
+        });
+      }catch(err){ r = { error: err }; }
+      if(r.error){
+        const msg = String(r.error.message || r.error);
+        if(esErrorDeRed(r.error)){ state.modoSinConexion = true; actualizarIndicadorConexion(); break; }
+        if(/jwt|not authenticated|refresh token|PGRST301/i.test(msg) || r.error.status === 401){ break; } // sesión vencida: se queda pendiente
+        // error de negocio: la venta queda en la cola marcada con el motivo, para revisarla
+        const viva = (await colaLeer());
+        const idx = viva.findIndex(x=>x.uuid === e.uuid);
+        if(idx >= 0){ viva[idx].estado = 'error'; viva[idx].error = msg; await colaGuardar(viva); }
+        res.errores++;
+        continue;
+      }
+      const viva = (await colaLeer()).filter(x=>x.uuid !== e.uuid);
+      await colaGuardar(viva);
+      res.enviadas++;
+      const al = (r.data && r.data.alertas) || [];
+      al.forEach(a=> res.alertas.push(`${e.folio}: ${a}`));
+    }
+  } finally { _sincronizando = false; }
+  await actualizarContadorCola();
+  return res;
+}
+async function sincronizarYRefrescar(){
+  const antes = state.colaPendientes || 0;
+  if(!antes) return;
+  const res = await sincronizarCola();
+  if(!res) return;
+  if(res.enviadas){
+    await cargarCatalogo(); await cargarClientes();
+    renderResultados(buscarInput.value.trim()); renderCarrito();
+  }
+  if(res.errores || res.alertas.length) abrirPanelCola(res);
+  else if(res.enviadas) mostrarAvisoTemporal(`${res.enviadas} venta${res.enviadas===1?'':'s'} hecha${res.enviadas===1?'':'s'} sin conexión sincronizada${res.enviadas===1?'':'s'} correctamente.`);
+}
+
+// Panel con las ventas pendientes (se abre al tocar el indicador de arriba, o solo cuando hay algo que revisar).
+async function abrirPanelCola(resultado){
+  const cola = await colaLeer();
+  let ov = document.getElementById('panel-cola');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'panel-cola';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;';
+    document.body.appendChild(ov);
+  }
+  const filas = cola.map(e=>`
+    <tr><td style="padding:4px 6px;">${e.folio}</td><td style="padding:4px 6px;">${textoFechaHora(e.ts)}</td>
+    <td style="padding:4px 6px;text-align:right;">${money(e.total)}</td>
+    <td style="padding:4px 6px;${e.estado==='error' ? 'color:#b00020;' : ''}">${e.estado==='error' ? ('Con error: ' + e.error) : 'Pendiente de enviar'}</td>
+    ${e.estado==='error' ? `<td style="padding:4px 6px;"><button data-desc="${e.uuid}" style="font-size:.8rem;">Descartar</button></td>` : '<td></td>'}</tr>`).join('');
+  const alertas = (resultado && resultado.alertas && resultado.alertas.length)
+    ? `<div style="background:#fff3cd;color:#7a5b00;padding:8px 10px;border-radius:6px;margin:8px 0;"><strong>Revisar:</strong><br>${resultado.alertas.map(a=>'• '+a).join('<br>')}</div>` : '';
+  const hechas = (resultado && resultado.enviadas) ? `<p style="margin:6px 0;color:#1b6e2d;">Se sincronizaron ${resultado.enviadas} venta(s) correctamente.</p>` : '';
+  ov.innerHTML = `<div style="background:#fff;border-radius:10px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.35);">
+    <h3 style="margin:0 0 6px;">Ventas hechas sin conexión</h3>
+    ${hechas}${alertas}
+    ${cola.length ? `<table style="width:100%;border-collapse:collapse;font-size:.88rem;"><thead><tr style="text-align:left;border-bottom:1px solid #ccc;"><th>Folio</th><th>Fecha</th><th style="text-align:right;">Total</th><th>Estado</th><th></th></tr></thead><tbody>${filas}</tbody></table>
+      <p style="font-size:.85rem;color:#555;">No se puede cerrar la caja ni salir mientras haya ventas sin sincronizar. Se envían solas cuando hay internet.</p>`
+      : '<p>No hay ventas pendientes de sincronizar.</p>'}
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+      ${cola.length ? '<button id="cola-reintentar" class="btn-primario">Reintentar ahora</button>' : ''}
+      <button id="cola-cerrar">Cerrar</button></div></div>`;
+  ov.style.display = 'flex';
+  ov.querySelector('#cola-cerrar').onclick = ()=>{ ov.style.display = 'none'; };
+  const rb = ov.querySelector('#cola-reintentar');
+  if(rb) rb.onclick = async ()=>{
+    if(state.modoSinConexion){ mostrarAvisoTemporal('Sin conexión: se enviarán solas en cuanto regrese el internet.'); return; }
+    const cola2 = (await colaLeer()).map(x=>({ ...x, estado:'pendiente', error:null }));
+    await colaGuardar(cola2);
+    const r = await sincronizarCola();
+    if(r && r.enviadas){ await cargarCatalogo(); renderResultados(buscarInput.value.trim()); }
+    abrirPanelCola(r);
+  };
+  ov.querySelectorAll('[data-desc]').forEach(b=> b.onclick = async ()=>{
+    if(!window.confirm('Esta venta NO se registrará en el sistema (ni el cobro ni la salida de inventario). Descártala solo si ya la resolviste por otro medio.\n\n¿Descartar de todos modos?')) return;
+    const viva = (await colaLeer()).filter(x=>x.uuid !== b.dataset.desc);
+    await colaGuardar(viva); await actualizarContadorCola(); abrirPanelCola(resultado);
+  });
+}
+document.getElementById('hdr-conexion').style.cursor = 'pointer';
+document.getElementById('hdr-conexion').addEventListener('click', ()=>{ if(state.colaPendientes) abrirPanelCola(); });
+
+// Con ventas sin sincronizar no se puede cerrar la caja ni salir (se perdería su rastro).
+['btn-cerrar-caja','btn-logout'].forEach(id=>{
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener('click', (e)=>{
+    if(!state.colaPendientes) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    mostrarAvisoTemporal(`Hay ${state.colaPendientes} venta(s) hecha(s) sin conexión que aún no se sincronizan. Espera a que se envíen (toca el indicador de arriba para verlas).`);
+    if(!state.modoSinConexion) sincronizarYRefrescar();
+  }, true);
+});
+window.addEventListener('beforeunload', (e)=>{ if(state.colaPendientes){ e.preventDefault(); e.returnValue = ''; } });
 
 // ---- Contexto de la sesión (quién es, sucursal, caja, turno abierto) para poder arrancar sin internet ----
 const CAMPOS_CONTEXTO = ['usuario','rol','roles','empresaId','empresaNombre','desglosarImpuestos','logoUrl','textoPagare',
@@ -966,6 +1149,10 @@ async function reconectar(){
   _reconectando = true;
   try{
     await sb.auth.getSession(); // renueva el token si venció mientras no hubo internet
+    await actualizarContadorCola();
+    const rs = await sincronizarCola(); // primero se suben las ventas hechas sin conexión
+    if(rs && (rs.errores || rs.alertas.length)) abrirPanelCola(rs);
+    else if(rs && rs.enviadas) mostrarAvisoTemporal(`${rs.enviadas} venta(s) hecha(s) sin conexión sincronizada(s) correctamente.`);
     await refrescarTodoDesdeServidor();
     suscribirStockEnVivo();
     suscribirCambiosCatalogoEnVivo();
@@ -996,7 +1183,11 @@ async function aplicarEstadoConexion(hayConexion){
 function iniciarVigilanciaConexion(){
   if(_vigilanciaActiva) return;
   _vigilanciaActiva = true;
-  setInterval(async ()=>{ if(state.usuario) await aplicarEstadoConexion(await probarConexion()); }, 20000);
+  setInterval(async ()=>{
+    if(!state.usuario) return;
+    await aplicarEstadoConexion(await probarConexion());
+    if(!state.modoSinConexion && !_reconectando && !_sincronizando && (state.colaPendientes - state.colaConError) > 0) sincronizarYRefrescar();
+  }, 20000);
   window.addEventListener('online', async ()=>{ if(state.usuario) await aplicarEstadoConexion(await probarConexion()); });
   window.addEventListener('offline', ()=>{ if(state.usuario) aplicarEstadoConexion(false); });
   // Red de seguridad: aunque Realtime avise de los cambios, cada 10 min se renueva todo (por si
@@ -1504,6 +1695,8 @@ async function entrarAlPOS(){
     if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{}); // pide al navegador no borrar la copia local sola
     actualizarBadgeTicketsEspera();
   }
+  await actualizarContadorCola();
+  if(state.modoSinConexion) await aplicarColaAStock(); else sincronizarYRefrescar();
   actualizarIndicadorConexion();
   iniciarVigilanciaConexion();
 }
@@ -2977,7 +3170,7 @@ async function finalizarVentaRegistrada(ventaId, payloadVenta, desglose){
 
 $('btn-cobrar').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
-  if(cobroBloqueadoSinConexion()) return;
+  if(state.modoSinConexion){ $('btn-cobrar').disabled = true; await cobrarSinConexion(); return; }
   $('btn-cobrar').disabled = true;
   const { desglose, payloadDetalle, payloadVenta } = construirDetalleYVentaBase('contado');
   const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
@@ -3042,7 +3235,7 @@ $('btn-credito-cliente').addEventListener('click', async ()=>{
   await finalizarVentaRegistrada(ventaId, payloadVenta, desglose);
 });
 
-function mostrarTicket(ventaId, venta, desglose){
+function mostrarTicket(ventaId, venta, desglose, folioProvisional){
   const cliente = state.clientes.find(c=>c.id===state.clienteId);
   const fecha = new Date().toLocaleString('es-MX');
   // Ronda 55b: el cliente debe poder ver el precio normal y el descuento aplicado en el ticket
@@ -3074,6 +3267,7 @@ function mostrarTicket(ventaId, venta, desglose){
   const html = `
     ${logoHtml}
     <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
+    ${folioProvisional ? `<p class="nota" style="font-weight:700;margin:0 0 6px;">Folio provisional: ${folioProvisional}<br>(venta registrada sin conexión)</p>` : ''}
     <p>Cliente: ${cliente?.nombre || 'Público en general'}<br>Atendió: ${state.usuario.nombre}</p>
     <table><tbody>${filasItems}</tbody></table>
     <div class="totales">
