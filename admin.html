@@ -156,6 +156,7 @@
     <button class="tab-btn" data-tab="tab-listas">Listas de precio</button>
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
+    <button class="tab-btn" data-tab="tab-reportes-ventas">Reportes</button>
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
@@ -310,6 +311,57 @@
           <tbody id="reporte-tabla-body"></tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- TAB REPORTES (Ronda 60) -->
+  <div class="tab-panel" id="tab-reportes-ventas" style="display:none;">
+    <div class="card">
+      <h2 style="margin-top:0;">Reportes</h2>
+      <div class="grid-2">
+        <div class="campo"><label>Reporte</label>
+          <select id="rv-reporte">
+            <option value="ventas">Ventas por categoría, línea o artículo</option>
+            <option value="mayores">Mayores ventas por día (de mayor a menor)</option>
+            <option value="promos">Artículos en promoción vigente</option>
+            <option value="rotacion">Rotación de inventario</option>
+          </select>
+        </div>
+        <div class="campo" id="rv-nivel-campo"><label>Nivel de detalle</label>
+          <select id="rv-nivel">
+            <option value="articulo">Por artículo (con subtotales por línea y categoría)</option>
+            <option value="linea">Por línea de artículo</option>
+            <option value="categoria">Por categoría</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid-2" id="rv-fechas">
+        <div class="campo"><label id="rv-desde-label">Desde</label><input type="date" id="rv-desde"></div>
+        <div class="campo" id="rv-hasta-campo"><label id="rv-hasta-label">Hasta</label><input type="date" id="rv-hasta"></div>
+      </div>
+      <div class="grid-2" id="rv-filtros-ventas">
+        <div class="campo"><label>Categoría (opcional)</label><select id="rv-categoria"></select></div>
+        <div class="campo"><label>Línea de artículo (opcional)</label><select id="rv-linea"></select></div>
+      </div>
+      <div class="campo" id="rv-articulo-campo"><label>Artículo específico (opcional)</label>
+        <input type="text" id="rv-articulo" list="rv-articulos-lista" placeholder="Escribe para buscar…">
+        <datalist id="rv-articulos-lista"></datalist>
+      </div>
+      <div class="campo" id="rv-top-campo"><label>Mostrar solo los primeros (opcional)</label><input type="number" min="1" step="1" id="rv-top" placeholder="Todos"></div>
+      <p class="nota" id="rv-nota" style="margin:0 0 10px;"></p>
+      <div class="fila" style="gap:8px;align-items:center;margin:0 0 14px;">
+        <button type="button" class="btn-primario" id="rv-generar">Generar</button>
+        <select id="rv-formato" style="width:auto;">
+          <option value="excel">Excel (.xlsx)</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button type="button" class="btn-secundario" id="rv-exportar" disabled>Exportar</button>
+      </div>
+      <div id="rv-error"></div>
+      <h3 id="rv-titulo-resultado" style="margin:10px 0 2px;"></h3>
+      <p class="nota" id="rv-subtitulo-resultado" style="margin:0 0 8px;"></p>
+      <div class="tabla-scroll"><table><thead id="rv-thead"></thead><tbody id="rv-tbody"></tbody></table></div>
+      <p class="nota" id="rv-vacio" style="display:none;"></p>
     </div>
   </div>
 
@@ -1421,6 +1473,8 @@
         <div class="col" style="min-width:140px;"><label>Desde</label><input type="date" id="kardex-desde"></div>
         <div class="col" style="min-width:140px;"><label>Hasta</label><input type="date" id="kardex-hasta"></div>
         <button type="button" class="btn-secundario" id="kardex-actualizar">Actualizar</button>
+        <select id="kardex-formato" style="width:auto;"><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select>
+        <button type="button" class="btn-secundario" id="kardex-exportar">Exportar</button>
       </div>
       <div class="tabla-scroll tabla-fija" style="margin-top:12px;">
         <table>
@@ -1638,7 +1692,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.29.002';
+const APP_VERSION = '1.30.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2215,6 +2269,7 @@ const MAPA_TAB_PRINCIPAL_A_CLAVE = {
   'tab-listas': 'listas_precio',
   'tab-actualizar-precios': 'actualizar_precios',
   'tab-reporte': 'reporte_precios',
+  'tab-reportes-ventas': 'reporte_precios', // Ronda 60: Reportes comparte el permiso de Reporte de precios
   'tab-clientes': 'clientes',
   'tab-catalogos-base': 'catalogos_base',
 };
@@ -4275,6 +4330,10 @@ async function cargarKardex(){
     const { data: devs } = await sb.from('devoluciones').select('id, venta_id').in('id', idsDevoluciones);
     (devs || []).forEach(d => { mapaDevolucionAVenta[d.id] = d.venta_id; });
   }
+  state.kardexExport = filas.map(f=>{
+    const m = f.movimientos_inventario;
+    return [m.fecha ? m.fecha.split('-').reverse().join('/') : '', TIPO_LABEL[m.tipo] || m.tipo, Number(f.cantidad), f.costo_unitario != null ? Number(f.costo_unitario) : '', m.folio || '', m.descripcion || ''];
+  });
   $('kardex-tabla-body').innerHTML = filas.map(f=>{
     const mov = f.movimientos_inventario;
     let ventaId = null;
@@ -7729,6 +7788,227 @@ $('aud-acceso-filtrar').addEventListener('click', cargarYRenderAccesosSistema);
   const { data } = await sb.auth.getSession();
   if(data?.session){ await iniciarSesionApp(); }
 })();
+
+// ---------- REPORTES: ventas, mayores ventas, promociones y rotación (Ronda 60) ----------
+// Todos se calculan en la base de datos (funciones reporte_*), que resta cancelaciones y devoluciones y
+// reparte el total real de cada venta (con impuestos y descuentos) entre sus renglones — por eso la
+// suma de cualquier reporte de ventas coincide con las ventas del periodo. Pantalla, PDF y Excel salen
+// del mismo resultado (state.rvResultado).
+state.rvResultado = null;
+function rvFechaTexto(iso){ if(!iso) return ''; const [y,m,d] = String(iso).split('-'); return `${d}/${m}/${y}`; }
+function rvRangoTexto(){ return `${rvFechaTexto($('rv-desde').value)} al ${rvFechaTexto($('rv-hasta').value)}`; }
+function rvEscapar(t){ return String(t ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
+
+function rvInicializar(){
+  if(!$('rv-desde').value){
+    const hoy = new Date();
+    $('rv-desde').value = fechaLocalISO(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+    $('rv-hasta').value = fechaLocalISO(hoy);
+  }
+  const cats = (state.categorias || []).filter(c=>c.activo !== false);
+  $('rv-categoria').innerHTML = '<option value="">(todas)</option>' + cats.map(c=>`<option value="${c.id}">${rvEscapar(c.nombre)}</option>`).join('');
+  rvLlenarLineas();
+  $('rv-articulos-lista').innerHTML = [...new Set((state.productos || []).map(p=>p.nombre))].sort().map(n=>`<option value="${rvEscapar(n)}"></option>`).join('');
+  rvActualizarControles();
+}
+function rvLlenarLineas(){
+  const cat = $('rv-categoria').value;
+  const lineas = (state.lineas || []).filter(l=>!cat || l.categoria_id === cat);
+  $('rv-linea').innerHTML = '<option value="">(todas)</option>' + lineas.map(l=>`<option value="${l.id}">${rvEscapar(l.nombre)}</option>`).join('');
+}
+function rvActualizarControles(){
+  const r = $('rv-reporte').value;
+  $('rv-nivel-campo').style.display = r === 'ventas' ? '' : 'none';
+  $('rv-filtros-ventas').style.display = r === 'ventas' ? '' : 'none';
+  $('rv-articulo-campo').style.display = r === 'ventas' ? '' : 'none';
+  $('rv-top-campo').style.display = r === 'mayores' ? '' : 'none';
+  $('rv-desde-label').textContent = r === 'promos' ? 'Vigentes al día' : 'Desde';
+  $('rv-hasta-campo').style.display = r === 'promos' ? 'none' : '';
+  $('rv-nota').textContent = {
+    ventas: 'Importes con impuestos, netos de cancelaciones y devoluciones.',
+    mayores: 'Un renglón por día, ordenado del día con más ventas al de menos. Monto neto con impuestos; el promedio es monto entre número de tickets.',
+    promos: 'Combos vigentes y descuentos activos. Precios sin impuestos, de la lista «Público general».',
+    rotacion: 'Salidas = piezas vendidas netas (sin cancelaciones ni devoluciones) del almacén de esta sesión. Promedio diario = salidas entre los días del rango. Días de inventario = existencia actual entre el promedio diario. Los combos no cuentan (sus componentes sí).',
+  }[r];
+  if(r === 'promos' && !$('rv-desde').value) $('rv-desde').value = fechaLocalISO(new Date());
+}
+$('rv-reporte').addEventListener('change', rvActualizarControles);
+$('rv-categoria').addEventListener('change', rvLlenarLineas);
+document.querySelector('[data-tab="tab-reportes-ventas"]').addEventListener('click', rvInicializar);
+
+function rvVarianteDeArticulo(){
+  const txt = $('rv-articulo').value.trim();
+  if(!txt) return { id: null };
+  const coincidencias = (state.productos || []).filter(p=>p.nombre === txt);
+  if(!coincidencias.length) return { error: `No encontré el artículo «${txt}». Elige uno de la lista que aparece al escribir.` };
+  return { id: coincidencias.length === 1 ? coincidencias[0].varianteId : null, ids: coincidencias.map(c=>c.varianteId) };
+}
+
+async function rvGenerar(){
+  $('rv-error').innerHTML = '';
+  const r = $('rv-reporte').value;
+  const desde = $('rv-desde').value, hasta = r === 'promos' ? $('rv-desde').value : $('rv-hasta').value;
+  if(!desde || !hasta){ $('rv-error').innerHTML = '<div class="msg-error">Elige las fechas.</div>'; return; }
+  if(hasta < desde){ $('rv-error').innerHTML = '<div class="msg-error">La fecha final no puede ser anterior a la inicial.</div>'; return; }
+  $('rv-generar').disabled = true;
+  try{
+    let res;
+    if(r === 'ventas') res = await rvVentas(desde, hasta);
+    else if(r === 'mayores') res = await rvMayores(desde, hasta);
+    else if(r === 'promos') res = await rvPromos(desde);
+    else res = await rvRotacion(desde, hasta);
+    if(!res) return;
+    state.rvResultado = res;
+    rvPintar();
+  } finally { $('rv-generar').disabled = false; }
+}
+$('rv-generar').addEventListener('click', rvGenerar);
+
+async function rvVentas(desde, hasta){
+  const art = rvVarianteDeArticulo();
+  if(art.error){ $('rv-error').innerHTML = `<div class="msg-error">${rvEscapar(art.error)}</div>`; return null; }
+  const { data, error } = await sb.rpc('reporte_ventas_articulos', {
+    p_desde: desde, p_hasta: hasta,
+    p_categoria: $('rv-categoria').value || null, p_linea: $('rv-linea').value || null,
+    p_variante: art.id, p_sucursal: null,
+  });
+  if(error){ $('rv-error').innerHTML = `<div class="msg-error">${rvEscapar(error.message)}</div>`; return null; }
+  let filas = data || [];
+  if(art.ids && art.ids.length > 1) filas = filas.filter(f=>art.ids.includes(f.variante_id));
+  const nivel = $('rv-nivel').value;
+  const num = (x)=> Number(x) || 0;
+  const encabezados = nivel === 'articulo' ? ['Artículo','Unidad','Piezas','Importe'] : [nivel === 'linea' ? 'Línea' : 'Categoría','Piezas','Importe'];
+  const colCant = nivel === 'articulo' ? 2 : 1, colImp = colCant + 1;
+  const out = [], tipos = [];
+  const push = (fila, tipo)=>{ out.push(fila); tipos.push(tipo); };
+  const fila = (nombre, unidad, cant, imp)=> nivel === 'articulo' ? [nombre, unidad, cant, imp] : [nombre, cant, imp];
+  const vacia = (nombre)=> { const f = Array(encabezados.length).fill(''); f[0] = nombre; return f; };
+  const cats = [...new Set(filas.map(f=>f.categoria))];
+  let totC = 0, totI = 0;
+  cats.forEach(cat=>{
+    const deCat = filas.filter(f=>f.categoria === cat);
+    const cCat = deCat.reduce((s,f)=>s+num(f.cantidad),0), iCat = deCat.reduce((s,f)=>s+num(f.importe),0);
+    totC += cCat; totI += iCat;
+    if(nivel === 'categoria'){ push(fila(cat, '', cCat, redondear2(iCat)), 'producto'); return; }
+    push(vacia(cat), 'grupo');
+    [...new Set(deCat.map(f=>f.linea))].forEach(lin=>{
+      const deLin = deCat.filter(f=>f.linea === lin);
+      const cLin = deLin.reduce((s,f)=>s+num(f.cantidad),0), iLin = deLin.reduce((s,f)=>s+num(f.importe),0);
+      if(nivel === 'linea'){ push(fila(lin, '', cLin, redondear2(iLin)), 'producto'); return; }
+      push(vacia(lin), 'subgrupo');
+      deLin.forEach(f=> push(fila(f.articulo, f.unidad || '', num(f.cantidad), num(f.importe)), 'producto'));
+      push(fila(`Subtotal ${lin}`, '', cLin, redondear2(iLin)), 'subtotal');
+    });
+    push(fila(`Subtotal ${cat}`, '', cCat, redondear2(iCat)), 'subtotalCategoria');
+    push(vacia(''), 'espacio');
+  });
+  push(fila('TOTAL', '', totC, redondear2(totI)), 'total');
+  const filtros = [];
+  if($('rv-categoria').value) filtros.push('Categoría: ' + $('rv-categoria').selectedOptions[0].text);
+  if($('rv-linea').value) filtros.push('Línea: ' + $('rv-linea').selectedOptions[0].text);
+  if($('rv-articulo').value.trim()) filtros.push('Artículo: ' + $('rv-articulo').value.trim());
+  return {
+    titulo: 'Ventas por ' + (nivel === 'articulo' ? 'artículo' : nivel === 'linea' ? 'línea de artículo' : 'categoría'),
+    subtitulo: `${rvRangoTexto()}${filtros.length ? ' · ' + filtros.join(' · ') : ''}`,
+    archivo: 'ventas_' + nivel, hoja: 'Ventas', encabezados, filas: out, tipos,
+    columnasMoneda: [colImp], columnasDerecha: nivel === 'articulo' ? [2,3] : [1,2],
+    vacio: !filas.length,
+  };
+}
+async function rvMayores(desde, hasta){
+  const { data, error } = await sb.rpc('reporte_mayores_ventas', { p_desde: desde, p_hasta: hasta, p_sucursal: null });
+  if(error){ $('rv-error').innerHTML = `<div class="msg-error">${rvEscapar(error.message)}</div>`; return null; }
+  let dias = data || [];
+  const top = parseInt($('rv-top').value, 10);
+  if(top > 0) dias = dias.slice(0, top);
+  const filas = dias.map(d=>[rvFechaTexto(d.fecha), Number(d.ventas), Number(d.monto), Number(d.promedio_ticket)]);
+  const tipos = filas.map(()=>'producto');
+  if(filas.length){
+    const tv = dias.reduce((s,d)=>s+Number(d.ventas),0), tm = dias.reduce((s,d)=>s+Number(d.monto),0);
+    filas.push(['TOTAL', tv, redondear2(tm), tv ? redondear2(tm / tv) : 0]); tipos.push('total');
+  }
+  return {
+    titulo: 'Mayores ventas por día', subtitulo: `${rvRangoTexto()}${top > 0 ? ` · primeros ${top}` : ''} · de mayor a menor monto`,
+    archivo: 'mayores_ventas', hoja: 'Mayores ventas',
+    encabezados: ['Fecha','Ventas (tickets)','Monto','Promedio por ticket'], filas, tipos,
+    columnasMoneda: [2,3], columnasDerecha: [1,2,3], vacio: !dias.length,
+  };
+}
+async function rvPromos(fecha){
+  const { data, error } = await sb.rpc('reporte_promociones_vigentes', { p_fecha: fecha });
+  if(error){ $('rv-error').innerHTML = `<div class="msg-error">${rvEscapar(error.message)}</div>`; return null; }
+  const vig = (d,h)=> (!d && !h) ? 'Sin fecha límite' : `${d ? rvFechaTexto(d) : 'siempre'} al ${h ? rvFechaTexto(h) : 'sin límite'}`;
+  const filas = (data || []).map(p=>[p.tipo, p.promocion, p.articulo, p.detalle, p.precio_normal != null ? Number(p.precio_normal) : '', p.precio_promocion != null ? Number(p.precio_promocion) : '', vig(p.vigente_desde, p.vigente_hasta)]);
+  return {
+    titulo: 'Artículos en promoción', subtitulo: `Vigentes al ${rvFechaTexto(fecha)}`,
+    archivo: 'articulos_en_promocion', hoja: 'Promociones',
+    encabezados: ['Tipo','Promoción','Artículo','Detalle','Precio normal','Precio promoción','Vigencia'],
+    filas, tipos: filas.map(()=>'producto'), columnasMoneda: [4,5], columnasDerecha: [4,5], vacio: !filas.length,
+  };
+}
+async function rvRotacion(desde, hasta){
+  const { data, error } = await sb.rpc('reporte_rotacion_inventario', { p_desde: desde, p_hasta: hasta, p_almacen: state.almacenId });
+  if(error){ $('rv-error').innerHTML = `<div class="msg-error">${rvEscapar(error.message)}</div>`; return null; }
+  const filas = (data || []).map(r=>[r.articulo, r.unidad || '', Number(r.salidas), Number(r.promedio_diario), Number(r.existencia), r.dias_inventario != null ? Number(r.dias_inventario) : '']);
+  return {
+    titulo: 'Rotación de inventario', subtitulo: `${rvRangoTexto()} · de mayor a menor rotación`,
+    archivo: 'rotacion_inventario', hoja: 'Rotación',
+    encabezados: ['Artículo','Unidad','Salidas','Promedio diario','Existencia actual','Días de inventario'],
+    filas, tipos: filas.map(()=>'producto'), columnasMoneda: [], columnasDerecha: [2,3,4,5], vacio: !filas.length,
+  };
+}
+
+function rvPintar(){
+  const r = state.rvResultado;
+  $('rv-titulo-resultado').textContent = r.titulo;
+  $('rv-subtitulo-resultado').textContent = r.subtitulo;
+  $('rv-thead').innerHTML = '<tr>' + r.encabezados.map((h,i)=>`<th ${r.columnasDerecha.includes(i) ? 'class="num"' : ''}>${rvEscapar(h)}</th>`).join('') + '</tr>';
+  $('rv-tbody').innerHTML = r.filas.map((fila, i)=>{
+    const tipo = r.tipos[i];
+    if(tipo === 'espacio') return `<tr><td colspan="${r.encabezados.length}" style="padding:2px;"></td></tr>`;
+    if(tipo === 'grupo' || tipo === 'subgrupo'){
+      return `<tr><td colspan="${r.encabezados.length}" style="font-weight:700;${tipo === 'grupo' ? 'background:#e6e6e6;' : 'background:#f2f2f2;padding-left:18px;'}">${rvEscapar(fila[0])}</td></tr>`;
+    }
+    const fuerte = (tipo === 'subtotal' || tipo === 'subtotalCategoria' || tipo === 'total') ? 'font-weight:700;' : '';
+    return '<tr>' + fila.map((v,c)=>{
+      const esNum = r.columnasDerecha.includes(c);
+      const txt = (r.columnasMoneda.includes(c) && v !== '') ? money(v) : (typeof v === 'number' ? v.toLocaleString('es-MX', { maximumFractionDigits: 3 }) : rvEscapar(v));
+      return `<td ${esNum ? 'class="num"' : ''} style="${fuerte}">${txt}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+  $('rv-vacio').textContent = 'No hay información para este reporte con los filtros elegidos.';
+  $('rv-vacio').style.display = r.vacio ? 'block' : 'none';
+  $('rv-exportar').disabled = !!r.vacio;
+}
+$('rv-exportar').addEventListener('click', async ()=>{
+  const r = state.rvResultado;
+  if(!r || r.vacio) return;
+  const nombre = `${r.archivo}_${fechaLocalISO(new Date())}`;
+  if($('rv-formato').value === 'excel'){
+    exportarExcelAgrupado(nombre + '.xlsx', r.hoja, r.encabezados, r.filas, r.tipos, r.columnasMoneda);
+  } else {
+    await exportarPDFAgrupado(nombre + '.pdf', r.titulo, `${state.empresaNombre} · ${r.subtitulo}`, r.encabezados, r.filas, r.tipos, r.columnasMoneda, r.columnasDerecha);
+  }
+});
+
+// ---- Kardex del artículo en PDF y Excel ----
+$('kardex-exportar').addEventListener('click', async ()=>{
+  const filas = state.kardexExport || [];
+  if(!filas.length){ mostrarMensajeKardexVacio(); return; }
+  const p = state.productos.find(x=>x.varianteId === state.varianteEditId);
+  const titulo = `Kardex — ${p ? p.nombre : 'artículo'}`;
+  const subtitulo = `${state.empresaNombre} · ${rvFechaTexto($('kardex-desde').value)} al ${rvFechaTexto($('kardex-hasta').value)}`;
+  const encabezados = ['Fecha','Tipo','Cantidad','Costo unitario','Folio','Descripción'];
+  const tipos = filas.map(()=>'producto');
+  const nombre = `kardex_${(p ? p.nombre : 'articulo').replace(/[^A-Za-z0-9]+/g,'_').slice(0,40)}_${fechaLocalISO(new Date())}`;
+  if($('kardex-formato').value === 'excel'){
+    exportarExcelAgrupado(nombre + '.xlsx', 'Kardex', encabezados, filas, tipos, [3]);
+  } else {
+    await exportarPDFAgrupado(nombre + '.pdf', titulo, subtitulo, encabezados, filas, tipos, [3], [2,3]);
+  }
+});
+function mostrarMensajeKardexVacio(){ $('kardex-vacio').textContent = 'No hay movimientos en este rango para exportar.'; $('kardex-vacio').style.display = 'block'; }
+
 </script>
 </body>
 </html>
