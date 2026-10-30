@@ -362,8 +362,13 @@
       <div style="display:flex;gap:6px;"><input type="text" id="dom-codigo" placeholder="MK-1004" autocapitalize="characters" style="flex:1;"><button type="button" class="btn-secundario" id="dom-buscar">Buscar</button></div></div>
     <div id="dom-resumen-pedido" class="nota" style="display:none;"></div>
     <div class="campo"><label>Repartidor *</label><select id="dom-repartidor"></select></div>
+    <div class="campo"><label>Buscar cliente registrado (nombre o teléfono)</label><input type="text" id="dom-cli-buscar" placeholder="Escribe 3 letras del nombre o el teléfono…" autocomplete="off"></div>
+    <div id="dom-cli-lista" style="margin-bottom:8px;"></div>
+    <div id="dom-cli-sel" class="nota" style="display:none;background:#eaf7ee;border:1px solid #b9e0c4;border-radius:8px;padding:8px;margin-bottom:8px;"></div>
     <div class="campo"><label>Nombre del cliente *</label><input type="text" id="dom-nombre"></div>
     <div class="campo"><label>Teléfono (10 dígitos) *</label><input type="tel" id="dom-telefono" inputmode="numeric" maxlength="14"></div>
+    <p class="nota" id="dom-cli-nuevo" style="margin:-4px 0 8px;">Si no lo encuentras arriba, llena estos datos y se registra como cliente nuevo al guardar el pedido.</p>
+    <div class="campo" id="dom-dir-bloque" style="display:none;"><label>Domicilios guardados</label><select id="dom-dir-sel"></select></div>
     <div class="campo"><label>Domicilio de entrega *</label><input type="text" id="dom-domicilio"></div>
     <div class="campo"><label>Colonia</label><input type="text" id="dom-colonia" list="dom-colonias-lista"><datalist id="dom-colonias-lista"></datalist></div>
     <div class="campo"><label>Servicio a domicilio (se suma a la venta)</label><input type="number" id="dom-envio" min="0" step="1" value="35"></div>
@@ -672,7 +677,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.001';
+const APP_VERSION = '1.9.002';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3344,7 +3349,7 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
 // El pedido se captura SOLO desde caja. La venta se carga a crédito a la cuenta del repartidor; el cliente final
 // queda en ventas.cliente_entrega_id y en la referencia del cargo. Requiere internet.
 const VARIANTE_SERVICIO_DOMICILIO = '4f8c6fe0-2152-48d9-b9b2-47b70f912514';
-state.domicilio = null; state.domRepartidores = []; state.domZonas = []; state.domEnvioBase = 35; state.domPedidoBuscado = null;
+state.domClienteFinal = null; state.domicilio = null; state.domRepartidores = []; state.domZonas = []; state.domEnvioBase = 35; state.domPedidoBuscado = null;
 const domEsc = s => String(s ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 function repoblarSelectClientes(){
   const lista = state.clientes.filter(c=>!c.es_repartidor);
@@ -3378,7 +3383,7 @@ function pintarBannerDomicilio(){
   $('dom-quitar').addEventListener('click', ()=>quitarDomicilio(true));
 }
 function quitarDomicilio(quitarLinea){
-  state.domicilio = null; state.domPedidoBuscado = null;
+  state.domicilio = null; state.domPedidoBuscado = null; state.domClienteFinal = null;
   if(quitarLinea) quitarLineaEnvio();
   $('sel-cliente').disabled = false; repoblarSelectClientes();
   const pub = state.clientes.find(c=>c.es_publico_general);
@@ -3399,11 +3404,13 @@ async function abrirModalDomicilio(){
   const d = state.domicilio;
   $('dom-codigo').value = d?.codigo || ''; $('dom-resumen-pedido').style.display = 'none';
   $('dom-repartidor').value = d?.repartidorId || (state.domRepartidores.length === 1 ? state.domRepartidores[0].id : '');
+  $('dom-cli-buscar').value = ''; $('dom-cli-lista').innerHTML = ''; deseleccionarClienteDom();
   $('dom-nombre').value = d?.nombre || ''; $('dom-telefono').value = d?.telefono || ''; $('dom-domicilio').value = d?.domicilio || '';
   $('dom-colonia').value = d?.colonia || ''; $('dom-envio').value = d ? d.envio : state.domEnvioBase;
   $('dom-fecha').value = d?.fecha || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
   $('dom-desde').value = d?.horaDesde || ''; $('dom-hasta').value = d?.horaHasta || '';
   $('dom-metodo').value = d?.metodoPago || 'efectivo'; $('dom-paga-con').value = d?.pagaCon || ''; $('dom-notas').value = d?.notas || '';
+  if(d?.clienteFinalId) seleccionarClienteDom({ id: d.clienteFinalId, nombre: d.nombre, telefono: d.telefono }, { conservarDomicilio: true });
   if(!state.domRepartidores.length) $('dom-error').innerHTML = '<div class="msg-error">No hay repartidores activos. Da de alta uno en Admin → Reparto.</div>';
   $('modal-domicilio').classList.add('activo');
   setTimeout(()=>$(d ? 'dom-nombre' : 'dom-codigo').focus(), 50);
@@ -3428,6 +3435,9 @@ $('dom-buscar').addEventListener('click', async ()=>{
   $('dom-colonia').value = data.colonia || ''; $('dom-envio').value = data.costo_envio ?? state.domEnvioBase;
   if(data.fecha_entrega) $('dom-fecha').value = data.fecha_entrega; $('dom-desde').value = data.hora_desde || ''; $('dom-hasta').value = data.hora_hasta || '';
   $('dom-metodo').value = data.metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo'; $('dom-paga-con').value = data.paga_con || ''; $('dom-notas').value = data.notas || '';
+  deseleccionarClienteDom(); $('dom-nombre').value = data.nombre || ''; $('dom-telefono').value = data.telefono || ''; $('dom-domicilio').value = data.domicilio || ''; $('dom-colonia').value = data.colonia || '';
+  if(data.cliente_id) await seleccionarClienteDom({ id: data.cliente_id, nombre: data.cliente_nombre, telefono: data.telefono }, { domicilioPedido: { domicilio: data.domicilio, colonia: data.colonia } });
+  else buscarClientesDom(data.telefono);
   const lineas = (data.items||[]).map(i=>`${domEsc(i.cantidad)} × ${domEsc(i.nombre)}`).join('<br>');
   $('dom-resumen-pedido').style.display = 'block';
   $('dom-resumen-pedido').innerHTML = `<strong>Pedido ${domEsc(data.codigo)}</strong>${data.tiene_comprobante ? ' · 📎 trae comprobante de transferencia' : ''}<br>${lineas}<br>Al aplicar, estos artículos reemplazan el carrito, con el precio vigente en la lista del ticket.`;
@@ -3457,7 +3467,7 @@ $('dom-confirmar').addEventListener('click', ()=>{
   }
   if(!state.carrito.some(l=>!l.esEnvio)) return fallo('Agrega artículos al carrito (o captura el código del pedido).');
   state.domicilio = { pedidoId: ped?.id || state.domicilio?.pedidoId || null, codigo: ped?.codigo || state.domicilio?.codigo || null,
-    repartidorId: rep.id, repartidorNombre: rep.nombre, repartidorClienteId: rep.cliente_id,
+    repartidorId: rep.id, repartidorNombre: rep.nombre, repartidorClienteId: rep.cliente_id, clienteFinalId: state.domClienteFinal?.id || null,
     nombre, telefono: tel, domicilio: dom, colonia: $('dom-colonia').value.trim(), envio, fecha: $('dom-fecha').value || null,
     horaDesde: $('dom-desde').value || null, horaHasta: $('dom-hasta').value || null, metodoPago: $('dom-metodo').value,
     pagaCon: Number($('dom-paga-con').value) || null, notas: $('dom-notas').value.trim() };
@@ -3468,6 +3478,59 @@ $('dom-confirmar').addEventListener('click', ()=>{
   actualizarNotaCreditoCliente(); pintarBannerDomicilio(); renderCarrito(); recalcularTotales();
   $('modal-domicilio').classList.remove('activo');
 });
+
+
+// ----- Cliente registrado + varios domicilios (Ronda 62b) -----
+function deseleccionarClienteDom(){
+  state.domClienteFinal = null; $('dom-cli-sel').style.display = 'none'; $('dom-cli-sel').innerHTML = '';
+  $('dom-nombre').readOnly = false; $('dom-telefono').readOnly = false; $('dom-cli-nuevo').style.display = ''; $('dom-dir-bloque').style.display = 'none';
+}
+async function seleccionarClienteDom(c, opc){
+  opc = opc || {};
+  state.domClienteFinal = { id: c.id, nombre: c.nombre, telefono: c.telefono };
+  $('dom-nombre').value = c.nombre || ''; $('dom-telefono').value = c.telefono || '';
+  $('dom-nombre').readOnly = true; $('dom-telefono').readOnly = true; $('dom-cli-nuevo').style.display = 'none';
+  $('dom-cli-lista').innerHTML = '';
+  $('dom-cli-sel').style.display = 'block';
+  $('dom-cli-sel').innerHTML = `✔ Cliente registrado: <strong>${domEsc(c.nombre)}</strong>${c.telefono ? ' · ' + domEsc(c.telefono) : ''} <button type="button" class="btn-gris" id="dom-cli-cambiar" style="margin-left:6px;">Cambiar</button>`;
+  $('dom-cli-cambiar').addEventListener('click', ()=>{ deseleccionarClienteDom(); $('dom-nombre').value = ''; $('dom-telefono').value = ''; $('dom-cli-buscar').focus(); });
+  const { data } = await sb.from('cliente_domicilios').select('id, alias, domicilio, colonia, principal').eq('cliente_id', c.id).eq('activo', true).order('principal', { ascending: false }).order('creado_en');
+  const dirs = data || [];
+  if(opc.domicilioPedido && !dirs.some(x=>String(x.domicilio).trim().toLowerCase() === String(opc.domicilioPedido.domicilio||'').trim().toLowerCase())){
+    dirs.unshift({ id: 'pedido', alias: 'Del pedido', domicilio: opc.domicilioPedido.domicilio, colonia: opc.domicilioPedido.colonia });
+  }
+  state.domDirs = dirs;
+  $('dom-dir-bloque').style.display = 'block';
+  $('dom-dir-sel').innerHTML = dirs.map((x,i)=>`<option value="${i}">${domEsc((x.alias ? x.alias + ': ' : '') + x.domicilio + (x.colonia ? ', ' + x.colonia : ''))}</option>`).join('') + '<option value="otro">➕ Otro domicilio (escribirlo abajo)</option>';
+  if(opc.conservarDomicilio){ $('dom-dir-sel').value = 'otro'; return; }
+  if(dirs.length){ $('dom-dir-sel').value = '0'; aplicarDirDom(); } else { $('dom-dir-sel').value = 'otro'; $('dom-domicilio').value = ''; $('dom-colonia').value = ''; }
+}
+function aplicarDirDom(){
+  const v = $('dom-dir-sel').value;
+  if(v === 'otro'){ $('dom-domicilio').value = ''; $('dom-colonia').value = ''; $('dom-domicilio').focus(); return; }
+  const x = state.domDirs[Number(v)]; if(!x) return;
+  $('dom-domicilio').value = x.domicilio || ''; $('dom-colonia').value = x.colonia || '';
+  const c = costoZonaPorColonia(x.colonia); if(c !== null && !state.domPedidoBuscado) $('dom-envio').value = c;
+}
+$('dom-dir-sel').addEventListener('change', aplicarDirDom);
+let domBuscaTimer = null;
+async function buscarClientesDom(q){
+  q = String(q||'').replace(/[,()%*]/g,' ').trim();
+  const cont = $('dom-cli-lista');
+  if(q.length < 3){ cont.innerHTML = ''; return; }
+  const soloDig = q.replace(/\D/g,'');
+  const filtro = soloDig.length >= 3 && soloDig.length === q.replace(/[\s-]/g,'').length ? `telefono.ilike.%${soloDig}%` : `nombre.ilike.%${q}%,telefono.ilike.%${q}%`;
+  const { data, error } = await sb.from('clientes').select('id, nombre, telefono, colonia').eq('empresa_id', state.empresaId).eq('activo', true).eq('es_repartidor', false).eq('es_publico_general', false).or(filtro).order('nombre').limit(8);
+  if(error){ cont.innerHTML = ''; return; }
+  state.domCliResultados = data || [];
+  cont.innerHTML = state.domCliResultados.length
+    ? state.domCliResultados.map((c,i)=>`<button type="button" class="btn-gris dom-cli-op" data-i="${i}" style="display:block;width:100%;text-align:left;margin-bottom:4px;">${domEsc(c.nombre)} · ${domEsc(c.telefono || 'sin teléfono')}${c.colonia ? ' · ' + domEsc(c.colonia) : ''}</button>`).join('')
+      + '<p class="nota" style="margin:2px 0 0;">¿Hay varios con el mismo nombre o teléfono? Fíjate en la colonia y el teléfono para elegir bien. Si ninguno es, llena los datos abajo y se registra uno nuevo.</p>'
+    : '<p class="nota" style="margin:0;">No hay clientes con ese dato — llena los datos abajo para registrarlo.</p>';
+  cont.querySelectorAll('.dom-cli-op').forEach(b=>b.addEventListener('click', ()=>seleccionarClienteDom(state.domCliResultados[Number(b.dataset.i)])));
+}
+$('dom-cli-buscar').addEventListener('input', ()=>{ clearTimeout(domBuscaTimer); domBuscaTimer = setTimeout(()=>buscarClientesDom($('dom-cli-buscar').value), 300); });
+$('dom-telefono').addEventListener('change', ()=>{ if(!state.domClienteFinal){ const t = $('dom-telefono').value.replace(/\D/g,''); if(t.length === 10) buscarClientesDom(t); } });
 
 async function ventaDomicilio(){
   const d = state.domicilio; if(!d) return;
@@ -3485,7 +3548,7 @@ async function ventaDomicilio(){
     const r = await pedirAutorizacionSupervisor('pos.vender_credito', etiqueta); if(!r) return; autorizadoPor = r.usuarioId;
   }
   $('btn-credito-cliente').disabled = true;
-  const pedido = { pedido_id: d.pedidoId, repartidor_id: d.repartidorId, nombre: d.nombre, telefono: d.telefono, domicilio: d.domicilio, colonia: d.colonia,
+  const pedido = { pedido_id: d.pedidoId, cliente_final_id: d.clienteFinalId, repartidor_id: d.repartidorId, nombre: d.nombre, telefono: d.telefono, domicilio: d.domicilio, colonia: d.colonia,
     costo_envio: d.envio, fecha_entrega: d.fecha, hora_desde: d.horaDesde, hora_hasta: d.horaHasta, metodo_pago: d.metodoPago, paga_con: d.pagaCon, notas: d.notas,
     items: state.carrito.filter(l=>!l.esEnvio).map(l=>({ variante_id: l.varianteId, nombre: l.nombre, cantidad: l.cantidad, precio: precioMostrar(l), subtotal: Math.round(precioMostrar(l)*l.cantidad*100)/100 })) };
   const { data, error } = await sb.rpc('registrar_venta_domicilio', { p_venta: payloadVenta, p_detalle: payloadDetalle, p_autorizado_por: autorizadoPor, p_condicion_pago_id: state.condicionPagoVentaId, p_pedido: pedido });
@@ -3501,7 +3564,7 @@ $('ticket-imprimir').addEventListener('click', ()=> window.print());
 function reiniciarVenta(){
   state.carrito = [];
   state.pagos = [];
-  if(state.domicilio){ state.domicilio = null; state.domPedidoBuscado = null; $('sel-cliente').disabled = false; repoblarSelectClientes(); pintarBannerDomicilio(); }
+  if(state.domicilio){ state.domicilio = null; state.domPedidoBuscado = null; state.domClienteFinal = null; $('sel-cliente').disabled = false; repoblarSelectClientes(); pintarBannerDomicilio(); }
   // Las autorizaciones de supervisor A NIVEL TICKET (lista de precio, descuento a toda la venta)
   // solo valen para la venta que se acaba de cobrar — la siguiente venta vuelve a pedirlas si el
   // cajero no tiene el privilegio, aunque el mismo supervisor las haya dado hace un momento.
