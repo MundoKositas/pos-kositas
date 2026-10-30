@@ -181,6 +181,8 @@
           </table>
         </div>
         <p id="carrito-vacio" style="color:var(--gris);">Aún no hay productos en el carrito.</p>
+        <div id="domicilio-banner" style="display:none;background:#eef6ff;border:1px solid #b9d6f5;border-radius:8px;padding:10px;margin:8px 0;font-size:.88rem;"></div>
+        <button class="btn-secundario" id="btn-domicilio" style="width:100%;margin-top:10px;">🛵 Venta a domicilio (con repartidor / código de pedido)</button>
         <input type="text" id="espera-nota" placeholder="Nota para identificar este ticket en espera (opcional) — ej. &quot;señor de la gorra&quot;, &quot;mostrador&quot;" style="margin-top:10px;">
         <button class="btn-secundario" id="btn-poner-en-espera" style="width:100%;margin-top:6px;">🕓 Poner esta venta en espera (atender a otro cliente)</button>
       </div>
@@ -351,6 +353,38 @@
      lista de la venta ni en "Público general"; el cajero captura el precio solo para este ticket,
      con un mínimo de costo/0.90 (10% de utilidad), y queda registrado como incidente para el
      reporte de cierre de caja. -->
+<!-- Ronda 62: VENTA A DOMICILIO -->
+<div class="modal-fondo" id="modal-domicilio">
+  <div class="modal" style="max-width:560px;max-height:92vh;overflow:auto;">
+    <h2>🛵 Venta a domicilio</h2>
+    <p class="nota">Si el cliente hizo su pedido en el catálogo, captura aquí su código. Si no, llena los datos a mano (el carrito actual se queda).</p>
+    <div class="campo"><label>Código del pedido (catálogo)</label>
+      <div style="display:flex;gap:6px;"><input type="text" id="dom-codigo" placeholder="MK-1004" autocapitalize="characters" style="flex:1;"><button type="button" class="btn-secundario" id="dom-buscar">Buscar</button></div></div>
+    <div id="dom-resumen-pedido" class="nota" style="display:none;"></div>
+    <div class="campo"><label>Repartidor *</label><select id="dom-repartidor"></select></div>
+    <div class="campo"><label>Nombre del cliente *</label><input type="text" id="dom-nombre"></div>
+    <div class="campo"><label>Teléfono (10 dígitos) *</label><input type="tel" id="dom-telefono" inputmode="numeric" maxlength="14"></div>
+    <div class="campo"><label>Domicilio de entrega *</label><input type="text" id="dom-domicilio"></div>
+    <div class="campo"><label>Colonia</label><input type="text" id="dom-colonia" list="dom-colonias-lista"><datalist id="dom-colonias-lista"></datalist></div>
+    <div class="campo"><label>Servicio a domicilio (se suma a la venta)</label><input type="number" id="dom-envio" min="0" step="1" value="35"></div>
+    <div style="display:flex;gap:8px;">
+      <div class="campo" style="flex:1;"><label>Fecha de entrega</label><input type="date" id="dom-fecha"></div>
+      <div class="campo" style="flex:1;"><label>Desde</label><input type="time" id="dom-desde"></div>
+      <div class="campo" style="flex:1;"><label>Hasta</label><input type="time" id="dom-hasta"></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <div class="campo" style="flex:1;"><label>El cliente paga</label><select id="dom-metodo"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option></select></div>
+      <div class="campo" style="flex:1;"><label>Paga con (efectivo)</label><input type="number" id="dom-paga-con" min="0" step="1"></div>
+    </div>
+    <div class="campo"><label>Notas</label><input type="text" id="dom-notas" maxlength="500"></div>
+    <div id="dom-error"></div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button type="button" class="btn-gris" style="flex:1;" id="dom-cancelar">Cancelar</button>
+      <button type="button" class="btn-primario" style="flex:1;" id="dom-confirmar">Aplicar al carrito</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-precio-emergencia">
   <div class="modal">
     <h2>Precio no encontrado</h2>
@@ -638,7 +672,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.8.002';
+const APP_VERSION = '1.9.001';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1763,8 +1797,8 @@ function actualizarBloqueosPermisos(){
   // Ronda 22: el candado aquí es solo indicativo (si el cajero no tiene pos.vender_credito, o si el
   // importe excede el crédito disponible del cliente, el clic de todos modos pide PIN) — nunca refleja
   // con certeza si hará falta PIN o no, porque eso depende del total del ticket en ese momento.
-  $('btn-credito-cliente').textContent = tienePermiso('pos.vender_credito')
-    ? '💳 Cargar a crédito del cliente' : '🔒 Cargar a crédito del cliente';
+  $('btn-credito-cliente').textContent = state.domicilio ? '🛵 Registrar pedido a domicilio (crédito del repartidor)' : (tienePermiso('pos.vender_credito')
+    ? '💳 Cargar a crédito del cliente' : '🔒 Cargar a crédito del cliente');
 }
 
 // Abre el modal de PIN y regresa una Promise: {usuarioId, nombre} del supervisor si el PIN fue
@@ -2228,15 +2262,15 @@ async function cargarClientes(){
   const { data, error } = await consultaConRespaldo('clientes', () => sb.from('clientes').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('es_publico_general', {ascending:false}));
   if(error) return; // sin conexión (o error): se conservan los clientes ya cargados
   state.clientes = data || [];
-  llenarSelect('sel-cliente', state.clientes, c=>c.id, c=>c.nombre);
+  if(!state.domicilio) llenarSelect('sel-cliente', state.clientes.filter(c=>!c.es_repartidor), c=>c.id, c=>c.nombre);
   // Si ya había un cliente elegido (ej. al refrescar saldos después de una venta a crédito), se
   // respeta esa selección — solo se recae a "Público en general" en la carga inicial de la sesión.
-  const seleccionSigueValida = state.clienteId && state.clientes.some(c=>c.id===state.clienteId);
+  const seleccionSigueValida = state.clienteId && state.clientes.some(c=>c.id===state.clienteId && (state.domicilio || !c.es_repartidor));
   if(!seleccionSigueValida){
     const publico = state.clientes.find(c=>c.es_publico_general);
     state.clienteId = publico ? publico.id : (state.clientes[0]?.id || null);
   }
-  if(state.clienteId) $('sel-cliente').value = state.clienteId;
+  if(state.clienteId && !state.domicilio) $('sel-cliente').value = state.clienteId;
   actualizarNotaCreditoCliente();
 }
 $('sel-cliente').addEventListener('change', aplicarClienteSeleccionado);
@@ -2507,17 +2541,17 @@ function renderCarrito(){
     const linkEditarProducto = tienePermiso('pos.ver_editar_producto')
       ? ` <a href="#" class="editar-producto-link" data-variante="${l.varianteId}" title="Abrir este producto en Admin">Editar producto</a>`
       : '';
-    const descUnitario = sinPrecio ? 0 : descuentoMostrarLinea(l);
-    const normalUnitario = sinPrecio ? null : precioNormalMostrar(l);
+    const descUnitario = (sinPrecio || l.esEnvio) ? 0 : descuentoMostrarLinea(l);
+    const normalUnitario = (sinPrecio || l.esEnvio) ? null : precioNormalMostrar(l);
     return `
     <tr>
       <td>${l.nombre}${linkEditarProducto}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}${notaLineaEditada(l)}</td>
-      <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"${l.esEnvio?' disabled':''}></td>
       <td class="num">${sinPrecio || normalUnitario===null ? '—' : money(normalUnitario)}</td>
       <td class="num">${descUnitario>0 ? money(descUnitario) : '—'}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(precioMostrar(l)*l.cantidad)}</td>
-      <td style="white-space:nowrap;"><button class="btn-gris editar-linea" data-idx="${i}" title="Cambiar lista de precio, descuento o precio manual">✎</button> <button class="quitar" data-idx="${i}">Quitar</button></td>
+      <td style="white-space:nowrap;">${l.esEnvio ? '' : `<button class="btn-gris editar-linea" data-idx="${i}" title="Cambiar lista de precio, descuento o precio manual">✎</button> <button class="quitar" data-idx="${i}">Quitar</button>`}</td>
     </tr>`;
   }).join('');
   body.querySelectorAll('.editar-producto-link').forEach(a=>{
@@ -3000,7 +3034,7 @@ function recalcularTotales(){
   $('pago-aviso').textContent = sinPrecio
     ? 'Hay un artículo sin precio en la lista elegida — cambia la lista de precios del ticket, o de ese artículo con el ícono ✎, o quítalo para poder cobrar.'
     : (faltaAuth ? 'Falta capturar el número de autorización de un pago con tarjeta.' : '');
-  $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth || sinPrecio;
+  $('btn-cobrar').disabled = state.carrito.length===0 || pagado < total - 0.001 || faltaAuth || sinPrecio || !!state.domicilio;
   $('btn-agregar-pago').disabled = (pagado >= total - 0.001 && total > 0) || formasDisponiblesNuevaLinea().length===0;
   // Ronda 22: "Cargar a crédito del cliente" no depende de haber capturado formas de pago (al
   // contrario, se usa en vez de eso) — solo de que el carrito no esté vacío, que todo tenga precio,
@@ -3010,6 +3044,7 @@ function recalcularTotales(){
   // Ronda 23: además de no ser "Público en general", el cliente debe tener una condición de pago
   // configurada distinta de "Contado" (dias > 0) — un cliente de Contado no tiene línea de crédito.
   $('btn-credito-cliente').disabled = state.carrito.length===0 || sinPrecio || !clienteActual || clienteActual.es_publico_general || !clienteTieneCreditoAutorizado(clienteActual);
+  if(state.domicilio){ $('btn-credito-cliente').textContent = '🛵 Registrar pedido a domicilio (crédito del repartidor)'; $('pago-aviso').textContent = 'Venta a domicilio: se carga a crédito del repartidor; el cliente paga al recibir.'; }
 }
 
 // ---------- PAGOS ----------
@@ -3122,7 +3157,7 @@ function resumenCambiosVenta(){
     if(l.descuentoTipo){
       cambios.push({ tipo: 'descuento_linea', articulo: l.nombre, forma: l.descuentoTipo, valor: Number(l.descuentoValor)||0, autorizado_por: l.autorizaciones.descuento });
     }
-    if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== ''){
+    if(!l.esEnvio && l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== ''){
       cambios.push({ tipo: 'precio_manual', articulo: l.nombre, precio: Number(l.precioManual), precio_lista: l.precio, autorizado_por: l.autorizaciones.precioManual });
     }
   });
@@ -3196,6 +3231,7 @@ $('btn-cobrar').addEventListener('click', async ()=>{
 // Si el cajero no tiene el permiso pos.vender_credito, también se pide PIN para poder usar esta
 // opción, aunque el importe sí quepa en el crédito disponible.
 $('btn-credito-cliente').addEventListener('click', async ()=>{
+  if(state.domicilio){ await ventaDomicilio(); return; }
   $('cobro-error').innerHTML = '';
   if(cobroBloqueadoSinConexion()) return;
   const cliente = clienteSeleccionado();
@@ -3268,7 +3304,8 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
     ${logoHtml}
     <p><strong>${state.empresaNombre}</strong><br>${state.sucursalNombre}<br>${fecha}</p>
     ${folioProvisional ? `<p class="nota" style="font-weight:700;margin:0 0 6px;">Folio provisional: ${folioProvisional}<br>(venta registrada sin conexión)</p>` : ''}
-    <p>Cliente: ${cliente?.nombre || 'Público en general'}<br>Atendió: ${state.usuario.nombre}</p>
+    <p>Cliente: ${state.domicilio ? domEsc(state.domicilio.nombre) : (cliente?.nombre || 'Público en general')}<br>Atendió: ${state.usuario.nombre}</p>
+    ${state.domicilio ? `<p style="margin-top:0;"><strong>🛵 Pedido a domicilio${state.domicilio.codigo ? ' ' + domEsc(state.domicilio.codigo) : ''}</strong><br>Entregar en: ${domEsc(state.domicilio.domicilio)}${state.domicilio.colonia ? ', ' + domEsc(state.domicilio.colonia) : ''}<br>Tel. cliente: ${domEsc(state.domicilio.telefono)}<br>Repartidor: ${domEsc(state.domicilio.repartidorNombre)}${state.domicilio.fecha ? '<br>Fecha: ' + domEsc(state.domicilio.fecha) + (state.domicilio.horaDesde ? ' · ' + domEsc(state.domicilio.horaDesde) + '–' + domEsc(state.domicilio.horaHasta || '') : '') : ''}${state.domicilio.notas ? '<br>Notas: ' + domEsc(state.domicilio.notas) : ''}</p>` : ''}
     <table><tbody>${filasItems}</tbody></table>
     <div class="totales">
       ${state.desglosarImpuestos ? `
@@ -3278,7 +3315,10 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
       ${descuentoTotalTicket > 0 ? `<div class="linea"><span>Descuento aplicado</span><span>−${money(descuentoTotalTicket)}</span></div>` : ''}
       <div class="linea total-final"><span>Total${state.desglosarImpuestos ? '' : ' (impuestos incluidos)'}</span><span>${money(venta.total)}</span></div>
     </div>
-    ${venta.tipo_venta === 'credito' ? `
+    ${state.domicilio ? `
+    <p class="nota" style="margin-top:12px;font-weight:700;">${state.domicilio.metodoPago === 'transferencia' ? 'El cliente paga por transferencia (ya o al recibir).' : 'El cliente paga en efectivo' + (state.domicilio.pagaCon ? ' · paga con ' + money(state.domicilio.pagaCon) + ' · cambio a llevar: ' + money(Math.max(0, state.domicilio.pagaCon - venta.total)) : '') + '.'}</p>
+    <div style="margin-top:14px;border-top:1px dashed #000;padding-top:10px;"><p style="margin:0;">Recibí de conformidad los artículos de este pedido por un total de <strong>${money(venta.total)}</strong>, cargados a mi cuenta, y me comprometo a entregarlos al cliente y liquidar el importe a ${domEsc(state.empresaNombre)}.</p><div style="margin:64px auto 0;border-top:1px solid #000;width:85%;"></div><p style="text-align:center;margin:4px 0 0;">Firma del repartidor</p><p style="text-align:center;margin:2px 0 0;">${domEsc(state.domicilio.repartidorNombre)}</p></div>
+    ` : venta.tipo_venta === 'credito' ? `
     <p class="nota" style="margin-top:12px;margin-bottom:2px;font-weight:700;">Venta a crédito — cargada a la cuenta de ${cliente?.nombre || 'cliente'}.</p>
     ${(()=>{ const cp = state.condicionesPago.find(c=>c.id===state.condicionPagoVentaId); if(!cp) return ''; const venc = new Date(); venc.setDate(venc.getDate()+cp.dias); return `<p class="nota" style="margin:2px 0 0;">Condición de pago: ${cp.nombre} · Vence: ${venc.toLocaleDateString('es-MX')}</p>`; })()}
     <div style="margin-top:14px;border-top:1px dashed #000;padding-top:10px;">
@@ -3300,12 +3340,168 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
   $('modal-ticket').classList.add('activo');
   $('ticket-nueva-venta').focus(); // así el foco no se queda "atrapado" en la pantalla de cobro
 }
+// ---------- Ronda 62: VENTA A DOMICILIO (repartidor = cliente de crédito; cliente final = quien pidió) ----------
+// El pedido se captura SOLO desde caja. La venta se carga a crédito a la cuenta del repartidor; el cliente final
+// queda en ventas.cliente_entrega_id y en la referencia del cargo. Requiere internet.
+const VARIANTE_SERVICIO_DOMICILIO = '4f8c6fe0-2152-48d9-b9b2-47b70f912514';
+state.domicilio = null; state.domRepartidores = []; state.domZonas = []; state.domEnvioBase = 35; state.domPedidoBuscado = null;
+const domEsc = s => String(s ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+function repoblarSelectClientes(){
+  const lista = state.clientes.filter(c=>!c.es_repartidor);
+  llenarSelect('sel-cliente', lista, c=>c.id, c=>c.nombre);
+}
+function productoServicioDomicilio(){
+  return state.catalogo.find(p=>p.varianteId === VARIANTE_SERVICIO_DOMICILIO) || state.catalogo.find(p=>/^servicio a domicilio/i.test(p.nombre));
+}
+function quitarLineaEnvio(){ state.carrito = state.carrito.filter(l=>!l.esEnvio); }
+function aplicarLineaEnvio(){
+  quitarLineaEnvio();
+  const d = state.domicilio; if(!d || !(d.envio > 0)) return;
+  const p = productoServicioDomicilio();
+  if(!p) throw new Error('No se encontró el artículo «Servicio a Domicilio» en el catálogo del POS. Actualiza el catálogo e intenta de nuevo.');
+  // El monto que escribe el cajero es el precio FINAL del servicio; se guarda como precio manual de esa línea
+  // (sin impuestos extra: el artículo no los lleva, pero se divide por si algún día los tuviera).
+  const base = Math.round(d.envio / (1 + (p.impuestos||[]).reduce((s,i)=>s+i.tasa,0)) * 100) / 100;
+  state.carrito.push({ varianteId: p.varianteId, nombre: p.nombre, precio: base, preciosPorLista: p.preciosPorLista, listaPrecioId: null,
+    cantidad: 1, impuestos: p.impuestos, stock: 9999, codigo: null, descuentoTipo: null, descuentoValor: 0, descuentoOrigen: null,
+    precioManual: base, esPrecioEmergencia: false, esEnvio: true, autorizaciones: { listaPrecio: null, descuento: null, precioManual: null } });
+}
+function pintarBannerDomicilio(){
+  const b = $('domicilio-banner'); const d = state.domicilio;
+  if(!d){ b.style.display = 'none'; b.innerHTML = ''; return; }
+  b.style.display = 'block';
+  b.innerHTML = `<strong>🛵 Venta a domicilio${d.codigo ? ' · pedido ' + domEsc(d.codigo) : ''}</strong><br>
+    Cliente: ${domEsc(d.nombre)} · ${domEsc(d.telefono)}<br>${domEsc(d.domicilio)}${d.colonia ? ', ' + domEsc(d.colonia) : ''}<br>
+    Repartidor: ${domEsc(d.repartidorNombre)} (se le carga a crédito) · ${d.metodoPago === 'transferencia' ? 'Paga por transferencia' : 'Paga en efectivo' + (d.pagaCon ? ' con ' + money(d.pagaCon) : '')}
+    <div style="margin-top:6px;display:flex;gap:6px;"><button type="button" class="btn-gris" id="dom-editar">Editar datos</button><button type="button" class="btn-gris" id="dom-quitar">Quitar domicilio</button></div>`;
+  $('dom-editar').addEventListener('click', abrirModalDomicilio);
+  $('dom-quitar').addEventListener('click', ()=>quitarDomicilio(true));
+}
+function quitarDomicilio(quitarLinea){
+  state.domicilio = null; state.domPedidoBuscado = null;
+  if(quitarLinea) quitarLineaEnvio();
+  $('sel-cliente').disabled = false; repoblarSelectClientes();
+  const pub = state.clientes.find(c=>c.es_publico_general);
+  if(pub){ $('sel-cliente').value = pub.id; aplicarClienteSeleccionado(); }
+  pintarBannerDomicilio(); renderCarrito(); recalcularTotales();
+}
+async function abrirModalDomicilio(){
+  $('dom-error').innerHTML = '';
+  if(state.modoSinConexion){ $('cobro-error').innerHTML = '<div class="msg-error">Las ventas a domicilio necesitan conexión a internet (se carga al crédito del repartidor).</div>'; return; }
+  const [{ data: reps }, { data: zonas }, { data: cfg }] = await Promise.all([
+    sb.from('repartidores').select('id, nombre, cliente_id').eq('empresa_id', state.empresaId).eq('estado', 'activo').order('nombre'),
+    sb.from('zonas_reparto').select('nombre, costo, colonias').eq('empresa_id', state.empresaId).eq('activo', true),
+    sb.from('config_reparto').select('envio_base').eq('empresa_id', state.empresaId).maybeSingle(),
+  ]);
+  state.domRepartidores = reps || []; state.domZonas = zonas || []; state.domEnvioBase = Number(cfg?.envio_base ?? 35);
+  $('dom-repartidor').innerHTML = '<option value="">— Elige repartidor —</option>' + state.domRepartidores.map(r=>`<option value="${r.id}">${domEsc(r.nombre)}</option>`).join('');
+  $('dom-colonias-lista').innerHTML = state.domZonas.flatMap(z=>z.colonias||[]).map(c=>`<option value="${domEsc(c)}">`).join('');
+  const d = state.domicilio;
+  $('dom-codigo').value = d?.codigo || ''; $('dom-resumen-pedido').style.display = 'none';
+  $('dom-repartidor').value = d?.repartidorId || (state.domRepartidores.length === 1 ? state.domRepartidores[0].id : '');
+  $('dom-nombre').value = d?.nombre || ''; $('dom-telefono').value = d?.telefono || ''; $('dom-domicilio').value = d?.domicilio || '';
+  $('dom-colonia').value = d?.colonia || ''; $('dom-envio').value = d ? d.envio : state.domEnvioBase;
+  $('dom-fecha').value = d?.fecha || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  $('dom-desde').value = d?.horaDesde || ''; $('dom-hasta').value = d?.horaHasta || '';
+  $('dom-metodo').value = d?.metodoPago || 'efectivo'; $('dom-paga-con').value = d?.pagaCon || ''; $('dom-notas').value = d?.notas || '';
+  if(!state.domRepartidores.length) $('dom-error').innerHTML = '<div class="msg-error">No hay repartidores activos. Da de alta uno en Admin → Reparto.</div>';
+  $('modal-domicilio').classList.add('activo');
+  setTimeout(()=>$(d ? 'dom-nombre' : 'dom-codigo').focus(), 50);
+}
+$('btn-domicilio').addEventListener('click', abrirModalDomicilio);
+$('dom-cancelar').addEventListener('click', ()=>{ $('modal-domicilio').classList.remove('activo'); });
+function costoZonaPorColonia(col){
+  const c = String(col||'').trim().toUpperCase(); if(!c) return null;
+  const z = state.domZonas.find(z=>(z.colonias||[]).some(x=>String(x).toUpperCase() === c));
+  return z ? Number(z.costo) : null;
+}
+$('dom-colonia').addEventListener('change', ()=>{ const c = costoZonaPorColonia($('dom-colonia').value); if(c !== null && !state.domPedidoBuscado) $('dom-envio').value = c; });
+$('dom-buscar').addEventListener('click', async ()=>{
+  const codigo = $('dom-codigo').value.trim().toUpperCase(); $('dom-error').innerHTML = '';
+  if(!codigo){ $('dom-error').innerHTML = '<div class="msg-error">Escribe el código del pedido.</div>'; return; }
+  $('dom-buscar').disabled = true;
+  const { data, error } = await sb.rpc('buscar_pedido_reparto', { p_codigo: codigo });
+  $('dom-buscar').disabled = false;
+  if(error){ state.domPedidoBuscado = null; $('dom-resumen-pedido').style.display = 'none'; $('dom-error').innerHTML = `<div class="msg-error">${domEsc(error.message)}</div>`; return; }
+  state.domPedidoBuscado = data;
+  $('dom-nombre').value = data.nombre || ''; $('dom-telefono').value = data.telefono || ''; $('dom-domicilio').value = data.domicilio || '';
+  $('dom-colonia').value = data.colonia || ''; $('dom-envio').value = data.costo_envio ?? state.domEnvioBase;
+  if(data.fecha_entrega) $('dom-fecha').value = data.fecha_entrega; $('dom-desde').value = data.hora_desde || ''; $('dom-hasta').value = data.hora_hasta || '';
+  $('dom-metodo').value = data.metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo'; $('dom-paga-con').value = data.paga_con || ''; $('dom-notas').value = data.notas || '';
+  const lineas = (data.items||[]).map(i=>`${domEsc(i.cantidad)} × ${domEsc(i.nombre)}`).join('<br>');
+  $('dom-resumen-pedido').style.display = 'block';
+  $('dom-resumen-pedido').innerHTML = `<strong>Pedido ${domEsc(data.codigo)}</strong>${data.tiene_comprobante ? ' · 📎 trae comprobante de transferencia' : ''}<br>${lineas}<br>Al aplicar, estos artículos reemplazan el carrito, con el precio vigente en la lista del ticket.`;
+});
+$('dom-confirmar').addEventListener('click', ()=>{
+  const fallo = m => { $('dom-error').innerHTML = `<div class="msg-error">${domEsc(m)}</div>`; };
+  const rep = state.domRepartidores.find(r=>r.id === $('dom-repartidor').value);
+  const nombre = $('dom-nombre').value.trim(), tel = $('dom-telefono').value.replace(/\D/g,'').slice(-10), dom = $('dom-domicilio').value.trim();
+  const envio = Number($('dom-envio').value);
+  if(!rep) return fallo('Elige el repartidor.');
+  if(!nombre) return fallo('Captura el nombre del cliente.');
+  if(tel.length !== 10) return fallo('El teléfono debe tener 10 dígitos.');
+  if(!dom) return fallo('Captura el domicilio de entrega.');
+  if(!(envio >= 0)) return fallo('El costo del servicio no es válido.');
+  const ped = state.domPedidoBuscado;
+  if(ped){
+    const faltan = [];
+    const nuevas = [];
+    for(const it of (ped.items||[])){
+      const p = state.catalogo.find(x=>x.varianteId === it.variante_id);
+      if(!p){ faltan.push(it.nombre); continue; }
+      nuevas.push({ p, cant: Number(it.cantidad)||1 });
+    }
+    if(faltan.length) return fallo('Estos artículos del pedido no están en el catálogo del POS (actualiza el catálogo): ' + faltan.join(', '));
+    state.carrito = []; state.pagos = [];
+    for(const n of nuevas){ if(!agregarAlCarrito(n.p, null, n.cant)){ return fallo('No se pudo cargar «' + n.p.nombre + '» (sin precio). Corrige su precio y vuelve a capturar el pedido.'); } }
+  }
+  if(!state.carrito.some(l=>!l.esEnvio)) return fallo('Agrega artículos al carrito (o captura el código del pedido).');
+  state.domicilio = { pedidoId: ped?.id || state.domicilio?.pedidoId || null, codigo: ped?.codigo || state.domicilio?.codigo || null,
+    repartidorId: rep.id, repartidorNombre: rep.nombre, repartidorClienteId: rep.cliente_id,
+    nombre, telefono: tel, domicilio: dom, colonia: $('dom-colonia').value.trim(), envio, fecha: $('dom-fecha').value || null,
+    horaDesde: $('dom-desde').value || null, horaHasta: $('dom-hasta').value || null, metodoPago: $('dom-metodo').value,
+    pagaCon: Number($('dom-paga-con').value) || null, notas: $('dom-notas').value.trim() };
+  try{ aplicarLineaEnvio(); }catch(e){ state.domicilio = null; return fallo(e.message); }
+  // El cargo va a la cuenta del repartidor: ese es el "cliente" de la venta.
+  state.clienteId = rep.cliente_id;
+  const sel = $('sel-cliente'); sel.innerHTML = `<option value="${rep.cliente_id}">${domEsc('Repartidor: ' + rep.nombre)}</option>`; sel.value = rep.cliente_id; sel.disabled = true;
+  actualizarNotaCreditoCliente(); pintarBannerDomicilio(); renderCarrito(); recalcularTotales();
+  $('modal-domicilio').classList.remove('activo');
+});
+
+async function ventaDomicilio(){
+  const d = state.domicilio; if(!d) return;
+  $('cobro-error').innerHTML = '';
+  if(cobroBloqueadoSinConexion()) return;
+  const cliente = clienteSeleccionado();
+  if(!cliente || !clienteTieneCreditoAutorizado(cliente)){
+    $('cobro-error').innerHTML = '<div class="msg-error">El repartidor no tiene línea de crédito. Revisa su cuenta en Admin → Reparto / Clientes.</div>'; return;
+  }
+  const { desglose, payloadDetalle, payloadVenta, total } = construirDetalleYVentaBase('credito');
+  const excede = total > creditoDisponibleCliente(cliente) + 0.001;
+  let autorizadoPor = null;
+  if(excede || !tienePermiso('pos.vender_credito')){
+    const etiqueta = excede ? `este pedido excede el crédito disponible de ${cliente.nombre} (disponible: ${money(creditoDisponibleCliente(cliente))}, pedido: ${money(total)})` : 'vender a crédito';
+    const r = await pedirAutorizacionSupervisor('pos.vender_credito', etiqueta); if(!r) return; autorizadoPor = r.usuarioId;
+  }
+  $('btn-credito-cliente').disabled = true;
+  const pedido = { pedido_id: d.pedidoId, repartidor_id: d.repartidorId, nombre: d.nombre, telefono: d.telefono, domicilio: d.domicilio, colonia: d.colonia,
+    costo_envio: d.envio, fecha_entrega: d.fecha, hora_desde: d.horaDesde, hora_hasta: d.horaHasta, metodo_pago: d.metodoPago, paga_con: d.pagaCon, notas: d.notas,
+    items: state.carrito.filter(l=>!l.esEnvio).map(l=>({ variante_id: l.varianteId, nombre: l.nombre, cantidad: l.cantidad, precio: precioMostrar(l), subtotal: Math.round(precioMostrar(l)*l.cantidad*100)/100 })) };
+  const { data, error } = await sb.rpc('registrar_venta_domicilio', { p_venta: payloadVenta, p_detalle: payloadDetalle, p_autorizado_por: autorizadoPor, p_condicion_pago_id: state.condicionPagoVentaId, p_pedido: pedido });
+  $('btn-credito-cliente').disabled = false;
+  if(error){ $('cobro-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
+  state.domicilio.codigo = data.codigo; state.domicilio.clienteFinal = data.cliente_final;
+  await finalizarVentaRegistrada(data.venta_id, payloadVenta, desglose);
+}
+
 $('ticket-nueva-venta').addEventListener('click', ()=>{ $('modal-ticket').classList.remove('activo'); reiniciarVenta(); });
 $('ticket-imprimir').addEventListener('click', ()=> window.print());
 
 function reiniciarVenta(){
   state.carrito = [];
   state.pagos = [];
+  if(state.domicilio){ state.domicilio = null; state.domPedidoBuscado = null; $('sel-cliente').disabled = false; repoblarSelectClientes(); pintarBannerDomicilio(); }
   // Las autorizaciones de supervisor A NIVEL TICKET (lista de precio, descuento a toda la venta)
   // solo valen para la venta que se acaba de cobrar — la siguiente venta vuelve a pedirlas si el
   // cajero no tiene el privilegio, aunque el mismo supervisor las haya dado hace un momento.
@@ -3359,6 +3555,7 @@ async function actualizarBadgeTicketsEspera(){
 
 $('btn-poner-en-espera').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
+  if(state.domicilio){ $('cobro-error').innerHTML = '<div class="msg-error">Termina o quita la venta a domicilio antes de ponerla en espera.</div>'; return; }
   if(!state.carrito.length){ alert('No hay artículos en el carrito para poner en espera.'); return; }
   const lineas = state.carrito.map(l=>({
     varianteId: l.varianteId, cantidad: l.cantidad, listaPrecioId: l.listaPrecioId,
