@@ -393,6 +393,7 @@
           <div id="rp-rep-error"></div>
           <div class="fila" style="gap:8px;"><button type="button" class="btn-primario" id="rp-rep-guardar">Guardar</button><button type="button" class="btn-gris" id="rp-rep-cancelar">Cancelar</button></div>
         </div>
+        <div id="rp-link-caja" style="display:none;border:1px solid var(--borde);border-radius:10px;padding:12px;margin:10px 0;background:#f6fbf7;"></div>
         <div class="tabla-scroll"><table>
           <thead><tr><th>Nombre</th><th>Teléfono</th><th>Estado</th><th class="num">Debe</th><th class="num">Límite</th><th class="num">Calificación</th><th></th></tr></thead>
           <tbody id="rp-rep-body"></tbody></table></div>
@@ -1776,7 +1777,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.31.001';
+const APP_VERSION = '1.31.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -8167,8 +8168,9 @@ async function rpCargarRepartidores(){
     <td>${rpEsc(r.nombre)}</td><td>${rpEsc(r.telefono || '—')}</td><td>${r.estado === 'activo' ? 'Activo' : 'Inactivo'}</td>
     <td class="num">${money(r.cli ? r.cli.saldo_actual : 0)}</td><td class="num">${money(r.cli ? r.cli.limite_credito : 0)}</td>
     <td class="num">${r.total_resenas ? Number(r.calificacion_promedio).toFixed(1) + ' ★ (' + r.total_resenas + ')' : '—'}</td>
-    <td><button type="button" class="btn-gris rp-rep-editar" data-id="${r.id}">Editar</button></td></tr>`).join('');
+    <td style="white-space:nowrap;"><button type="button" class="btn-gris rp-rep-editar" data-id="${r.id}">Editar</button> <button type="button" class="btn-gris rp-rep-link" data-id="${r.id}">🔗 Link</button></td></tr>`).join('');
   $('rp-rep-body').querySelectorAll('.rp-rep-editar').forEach(b=>b.addEventListener('click', ()=>rpAbrirRepartidor(b.dataset.id)));
+  $('rp-rep-body').querySelectorAll('.rp-rep-link').forEach(b=>b.addEventListener('click', ()=>rpGenerarLink(b.dataset.id)));
 }
 function rpAbrirRepartidor(id){
   state.rpRepEditId = id || null;
@@ -8251,6 +8253,23 @@ $('rp-cfg-guardar').addEventListener('click', async ()=>{
   const { error } = await sb.from('config_reparto').upsert(fila, { onConflict: 'empresa_id' });
   $('rp-cfg-error').innerHTML = error ? `<div class="msg-error">${rpEsc(error.message)}</div>` : '<div class="msg-ok">Guardado.</div>';
 });
+
+
+// ----- Link personal del repartidor (pantalla repartidor2.html) -----
+const RP_BASE_URL = 'https://mundokositas.github.io/mundo-kositas/';
+async function rpGenerarLink(id){
+  const r = state.rpRepartidores.find(x=>x.id===id); if(!r) return;
+  if(!confirm('Se genera un link nuevo para ' + r.nombre + ' y el anterior deja de servir. ¿Continuar?')) return;
+  const { data, error } = await sb.rpc('rep_generar_token', { p_repartidor_id: id, p_dias: 30 });
+  const caja = $('rp-link-caja'); caja.style.display = 'block';
+  if(error){ caja.innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  const url = RP_BASE_URL + 'repartidor2.html?token=' + data;
+  const msg = 'Hola ' + r.nombre + ', este es tu link de reparto de Mundo Kositas 🛵 (válido 30 días, no lo compartas):\n' + url;
+  const wa = r.telefono ? 'https://wa.me/52' + String(r.telefono).replace(/\D/g,'').slice(-10) + '?text=' + encodeURIComponent(msg) : null;
+  caja.innerHTML = `<strong>Link de ${rpEsc(r.nombre)}</strong> (válido 30 días)<br><input type="text" readonly id="rp-link-url" value="${rpEsc(url)}" style="width:100%;margin:6px 0;">
+    <div class="fila" style="gap:8px;"><button type="button" class="btn-primario" id="rp-link-copiar">Copiar link</button>${wa ? `<a class="btn-primario" style="text-decoration:none;" target="_blank" rel="noopener" href="${rpEsc(wa)}">Enviar por WhatsApp</a>` : ''}</div>`;
+  $('rp-link-copiar').addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(url); }catch(e){ $('rp-link-url').select(); document.execCommand('copy'); } $('rp-link-copiar').textContent = '¡Copiado!'; });
+}
 
 </script>
 </body>

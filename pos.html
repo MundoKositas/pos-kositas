@@ -512,6 +512,7 @@
       <select id="abono-cliente"></select>
     </div>
     <p class="nota" id="abono-saldo-nota"></p>
+    <div id="abono-reportes" style="display:none;background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:8px;margin-bottom:10px;"></div>
     <div class="campo"><label>Monto recibido</label><input type="text" inputmode="decimal" id="abono-monto" class="money-input"></div>
     <div class="campo"><label>Forma de pago</label><select id="abono-forma-pago"></select></div>
     <div class="campo"><label>Referencia (opcional)</label><input type="text" id="abono-referencia" placeholder="Ej. núm. de autorización de tarjeta"></div>
@@ -677,7 +678,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.002';
+const APP_VERSION = '1.9.003';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3393,28 +3394,34 @@ function quitarDomicilio(quitarLinea){
 async function abrirModalDomicilio(){
   $('dom-error').innerHTML = '';
   if(state.modoSinConexion){ $('cobro-error').innerHTML = '<div class="msg-error">Las ventas a domicilio necesitan conexión a internet (se carga al crédito del repartidor).</div>'; return; }
-  const [{ data: reps }, { data: zonas }, { data: cfg }] = await Promise.all([
-    sb.from('repartidores').select('id, nombre, cliente_id').eq('empresa_id', state.empresaId).eq('estado', 'activo').order('nombre'),
-    sb.from('zonas_reparto').select('nombre, costo, colonias').eq('empresa_id', state.empresaId).eq('activo', true),
-    sb.from('config_reparto').select('envio_base').eq('empresa_id', state.empresaId).maybeSingle(),
-  ]);
-  state.domRepartidores = reps || []; state.domZonas = zonas || []; state.domEnvioBase = Number(cfg?.envio_base ?? 35);
-  $('dom-repartidor').innerHTML = '<option value="">— Elige repartidor —</option>' + state.domRepartidores.map(r=>`<option value="${r.id}">${domEsc(r.nombre)}</option>`).join('');
-  $('dom-colonias-lista').innerHTML = state.domZonas.flatMap(z=>z.colonias||[]).map(c=>`<option value="${domEsc(c)}">`).join('');
+  // 1) se abre y se llena al instante con lo ya capturado; 2) las listas (repartidores/zonas) llegan después sin pisar lo que el cajero ya escribió
   const d = state.domicilio;
+  delete $('dom-repartidor').dataset.elegido;
   $('dom-codigo').value = d?.codigo || ''; $('dom-resumen-pedido').style.display = 'none';
-  $('dom-repartidor').value = d?.repartidorId || (state.domRepartidores.length === 1 ? state.domRepartidores[0].id : '');
+  $('dom-repartidor').innerHTML = '<option value="">— Cargando… —</option>';
   $('dom-cli-buscar').value = ''; $('dom-cli-lista').innerHTML = ''; deseleccionarClienteDom();
   $('dom-nombre').value = d?.nombre || ''; $('dom-telefono').value = d?.telefono || ''; $('dom-domicilio').value = d?.domicilio || '';
   $('dom-colonia').value = d?.colonia || ''; $('dom-envio').value = d ? d.envio : state.domEnvioBase;
   $('dom-fecha').value = d?.fecha || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
   $('dom-desde').value = d?.horaDesde || ''; $('dom-hasta').value = d?.horaHasta || '';
   $('dom-metodo').value = d?.metodoPago || 'efectivo'; $('dom-paga-con').value = d?.pagaCon || ''; $('dom-notas').value = d?.notas || '';
-  if(d?.clienteFinalId) seleccionarClienteDom({ id: d.clienteFinalId, nombre: d.nombre, telefono: d.telefono }, { conservarDomicilio: true });
-  if(!state.domRepartidores.length) $('dom-error').innerHTML = '<div class="msg-error">No hay repartidores activos. Da de alta uno en Admin → Reparto.</div>';
+  state.domPedidoBuscado = null;
   $('modal-domicilio').classList.add('activo');
   setTimeout(()=>$(d ? 'dom-nombre' : 'dom-codigo').focus(), 50);
+  if(d?.clienteFinalId) seleccionarClienteDom({ id: d.clienteFinalId, nombre: d.nombre, telefono: d.telefono }, { conservarDomicilio: true });
+  const [{ data: reps }, { data: zonas }, { data: cfg }] = await Promise.all([
+    sb.from('repartidores').select('id, nombre, cliente_id').eq('empresa_id', state.empresaId).eq('estado', 'activo').order('nombre'),
+    sb.from('zonas_reparto').select('nombre, costo, colonias').eq('empresa_id', state.empresaId).eq('activo', true),
+    sb.from('config_reparto').select('envio_base').eq('empresa_id', state.empresaId).maybeSingle(),
+  ]);
+  state.domRepartidores = reps || []; state.domZonas = zonas || []; state.domEnvioBase = Number(cfg?.envio_base ?? 35);
+  const elegido = $('dom-repartidor').dataset.elegido || d?.repartidorId || '';
+  $('dom-repartidor').innerHTML = '<option value="">— Elige repartidor —</option>' + state.domRepartidores.map(r=>`<option value="${r.id}">${domEsc(r.nombre)}</option>`).join('');
+  $('dom-repartidor').value = elegido || (state.domRepartidores.length === 1 ? state.domRepartidores[0].id : '');
+  $('dom-colonias-lista').innerHTML = state.domZonas.flatMap(z=>z.colonias||[]).map(c=>`<option value="${domEsc(c)}">`).join('');
+  if(!state.domRepartidores.length) $('dom-error').innerHTML = '<div class="msg-error">No hay repartidores activos. Da de alta uno en Admin → Reparto.</div>';
 }
+$('dom-repartidor').addEventListener('change', ()=>{ $('dom-repartidor').dataset.elegido = $('dom-repartidor').value; });
 $('btn-domicilio').addEventListener('click', abrirModalDomicilio);
 $('dom-cancelar').addEventListener('click', ()=>{ $('modal-domicilio').classList.remove('activo'); });
 function costoZonaPorColonia(col){
@@ -4440,7 +4447,34 @@ function recalcularAplicadoAbono(){
     $('abono-cambio-monto').textContent = money(cambio);
   }
 }
-$('abono-cliente').addEventListener('change', actualizarNotaSaldoAbono);
+$('abono-cliente').addEventListener('change', ()=>{ actualizarNotaSaldoAbono(); cargarReportesRepartidor(); });
+// ---- Ronda 63: transferencias que el repartidor reporta; el cajero las valida antes de descontarlas ----
+async function cargarReportesRepartidor(){
+  const cont = $('abono-reportes'); cont.style.display = 'none'; cont.innerHTML = '';
+  const c = clienteAbonoSeleccionado(); if(!c || !c.es_repartidor || state.modoSinConexion) return;
+  const { data: rep } = await sb.from('repartidores').select('id').eq('cliente_id', c.id).maybeSingle();
+  if(!rep) return;
+  const { data, error } = await sb.from('repartidor_reportes_pago').select('id, monto, referencia, creado_en, pedido:pedidos_reparto(codigo, nombre)').eq('repartidor_id', rep.id).eq('estado', 'pendiente').order('creado_en');
+  if(error || !data || !data.length) return;
+  state.abonoReportes = data;
+  cont.style.display = 'block';
+  cont.innerHTML = '<p class="nota" style="margin:0 0 6px;font-weight:700;">⏳ Transferencias reportadas por el repartidor — verifica que el dinero llegó a la cuenta antes de validar:</p>' + data.map((r,i)=>`
+    <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;border-top:1px solid #f0d58a;padding:6px 0;">
+      <span style="font-size:.85rem;">${domEsc(r.pedido?.codigo || '')} · ${domEsc(r.pedido?.nombre || '')} · <strong>${money(r.monto)}</strong>${r.referencia ? '<br><small>Ref: ' + domEsc(r.referencia) + '</small>' : ''}</span>
+      <span style="white-space:nowrap;"><button type="button" class="btn-primario abono-rep-ok" data-i="${i}">✔ Validar</button> <button type="button" class="btn-gris abono-rep-no" data-i="${i}">✖</button></span></div>`).join('');
+  cont.querySelectorAll('.abono-rep-ok').forEach(b=>b.addEventListener('click', ()=>resolverReporteRepartidor(Number(b.dataset.i), true)));
+  cont.querySelectorAll('.abono-rep-no').forEach(b=>b.addEventListener('click', ()=>resolverReporteRepartidor(Number(b.dataset.i), false)));
+}
+async function resolverReporteRepartidor(i, aprobar){
+  const r = state.abonoReportes[i]; if(!r) return;
+  const forma = state.formasPago.find(f=>/transfer/i.test(f.nombre));
+  if(aprobar && !forma){ $('abono-error').innerHTML = '<div class="msg-error">No hay una forma de pago «Transferencia» configurada.</div>'; return; }
+  if(!aprobar && !confirm('¿Rechazar esta transferencia? El repartidor seguirá debiendo ese importe.')) return;
+  $('abono-error').innerHTML = '';
+  const { error } = await sb.rpc('validar_reporte_pago', { p_reporte_id: r.id, p_forma_pago_id: forma ? forma.id : null, p_sesion_caja_id: state.sesionCaja.id, p_aprobar: aprobar, p_nota: null });
+  if(error){ $('abono-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
+  await cargarClientes(); actualizarNotaSaldoAbono(); await cargarReportesRepartidor();
+}
 $('abono-forma-pago').addEventListener('change', recalcularAplicadoAbono);
 $('abono-monto').addEventListener('input', recalcularAplicadoAbono);
 $('btn-abono-cliente').addEventListener('click', ()=>{
@@ -4457,7 +4491,7 @@ $('btn-abono-cliente').addEventListener('click', ()=>{
   llenarSelect('abono-cliente', pendientes, c=>c.id, c=>`${c.nombre} — saldo ${money(c.saldo_actual)}`);
   llenarSelect('abono-forma-pago', state.formasPago, f=>f.id, f=>f.nombre);
   $('abono-monto').value=''; $('abono-referencia').value='';
-  actualizarNotaSaldoAbono();
+  actualizarNotaSaldoAbono(); cargarReportesRepartidor();
   $('modal-abono').classList.add('activo');
   $('abono-monto').focus();
 });
