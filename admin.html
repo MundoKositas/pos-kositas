@@ -1692,7 +1692,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.30.001';
+const APP_VERSION = '1.30.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -6852,9 +6852,12 @@ const CATALOGOS_SIMPLES = {
   },
   categorias: {
     tabla: 'categorias', tituloPlural: 'Categorías', tituloSingular: 'categoría',
-    campos: [{ id:'nombre', label:'Nombre', tipo:'texto', requerido:true }],
+    campos: [
+      { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'imagen_url', label:'Imagen en el catálogo en línea (opcional; si no hay, se usa la de un artículo)', tipo:'imagen' },
+    ],
     tieneActivo: true, orden: 'nombre',
-    columnas: [{ label:'Nombre', valor:r=>r.nombre }],
+    columnas: [{ label:'Nombre', valor:r=>r.nombre }, { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' }],
   },
   lineas: {
     tabla: 'lineas_articulo', tituloPlural: 'Líneas de artículo', tituloSingular: 'línea de artículo',
@@ -6862,11 +6865,13 @@ const CATALOGOS_SIMPLES = {
     campos: [
       { id:'categoria_id', label:'Categoría', tipo:'select', fuente:'categorias', requerido:true },
       { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'imagen_url', label:'Imagen en el catálogo en línea (opcional; si no hay, se usa la de un artículo)', tipo:'imagen' },
     ],
     tieneActivo: true, orden: 'nombre',
     columnas: [
       { label:'Categoría', valor:r=>state.categorias.find(c=>c.id===r.categoria_id)?.nombre || '—' },
       { label:'Nombre', valor:r=>r.nombre },
+      { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' },
     ],
   },
   unidades: {
@@ -7139,6 +7144,17 @@ function abrirModalCfg(key, id){
     if(campo.tipo === 'fecha'){
       return `<div class="campo"><label>${campo.label}</label><input type="date" id="cfg-campo-${campo.id}" value="${valorActual||''}"></div>`;
     }
+    if(campo.tipo === 'imagen'){
+      const url = valorActual ? String(valorActual).replace(/"/g,'&quot;') : '';
+      return `<div class="campo"><label>${campo.label}</label>
+        <input type="hidden" id="cfg-campo-${campo.id}" value="${url}">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <img id="cfg-img-prev-${campo.id}" src="${url}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--borde);${url?'':'display:none;'}">
+          <div><input type="file" accept="image/*" class="cfg-archivo-imagen" data-campo="${campo.id}">
+          <button type="button" class="btn-secundario cfg-quitar-imagen" data-campo="${campo.id}" style="margin-top:6px;">Quitar imagen</button>
+          <p class="nota cfg-img-estado" id="cfg-img-estado-${campo.id}" style="margin:4px 0 0;"></p></div>
+        </div></div>`;
+    }
     if(campo.tipo === 'select'){
       const opciones = campo.fuente ? CFG_FUENTES[campo.fuente]() : campo.opciones;
       const optionsHtml = opciones.map(([val,txt])=>`<option value="${val}" ${String(valorActual)===String(val)?'selected':''}>${txt}</option>`).join('');
@@ -7154,6 +7170,41 @@ function abrirModalCfg(key, id){
   $('modal-cfg').classList.add('activo');
 }
 $('cfg-nuevo').addEventListener('click', ()=>abrirModalCfg(state.cfgTabActivo, null));
+// Imagen de categoría / línea (Ronda 61): se reduce a 700 px y se sube al mismo bucket «productos».
+function reducirImagenABlob(file, maxPx = 700, calidad = 0.85){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ev => { const img = new Image(); img.onload = ()=>{
+      let w = img.width, h = img.height;
+      if(w > maxPx || h > maxPx){ if(w > h){ h = Math.round(h*maxPx/w); w = maxPx; } else { w = Math.round(w*maxPx/h); h = maxPx; } }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      cv.toBlob(b => b ? resolve(b) : reject(new Error('No se pudo procesar la imagen.')), 'image/jpeg', calidad);
+    }; img.onerror = ()=>reject(new Error('El archivo no es una imagen válida.')); img.src = ev.target.result; };
+    r.onerror = ()=>reject(new Error('No se pudo leer el archivo.')); r.readAsDataURL(file);
+  });
+}
+$('cfg-modal-campos').addEventListener('change', async (e)=>{
+  const inp = e.target.closest('.cfg-archivo-imagen'); if(!inp) return;
+  const file = inp.files[0]; if(!file) return;
+  const campo = inp.dataset.campo, est = $(`cfg-img-estado-${campo}`);
+  est.textContent = 'Subiendo imagen…';
+  try{
+    const blob = await reducirImagenABlob(file);
+    const nombre = `cat-${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+    const { error } = await sb.storage.from('productos').upload(nombre, blob, { upsert: true, contentType: 'image/jpeg' });
+    if(error) throw error;
+    const { data } = sb.storage.from('productos').getPublicUrl(nombre);
+    $(`cfg-campo-${campo}`).value = data.publicUrl;
+    $(`cfg-img-prev-${campo}`).src = data.publicUrl; $(`cfg-img-prev-${campo}`).style.display = 'block';
+    est.textContent = 'Imagen lista — se guardará al presionar Guardar.';
+  }catch(err){ est.textContent = 'Error al subir la imagen: ' + (err.message || err); }
+});
+$('cfg-modal-campos').addEventListener('click', (e)=>{
+  const b = e.target.closest('.cfg-quitar-imagen'); if(!b) return;
+  const campo = b.dataset.campo;
+  $(`cfg-campo-${campo}`).value = ''; $(`cfg-img-prev-${campo}`).style.display = 'none'; $(`cfg-img-estado-${campo}`).textContent = 'Imagen quitada — se guardará al presionar Guardar.';
+});
 // Ronda 37: calcula el mes siguiente al último período ya creado (o el mes actual, si no hay
 // ninguno) y prellena el formulario de alta — así no hay que sacar cuentas de fechas cada vez.
 $('cfg-generar-proximo-mes').addEventListener('click', ()=>{
