@@ -158,6 +158,7 @@
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
     <button class="tab-btn" data-tab="tab-reportes-ventas">Reportes</button>
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
+    <button class="tab-btn" data-tab="tab-reparto">Reparto</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
     <button class="tab-btn" data-tab="tab-catalogos-base">Catálogos base</button>
@@ -362,6 +363,89 @@
       <p class="nota" id="rv-subtitulo-resultado" style="margin:0 0 8px;"></p>
       <div class="tabla-scroll"><table><thead id="rv-thead"></thead><tbody id="rv-tbody"></tbody></table></div>
       <p class="nota" id="rv-vacio" style="display:none;"></p>
+    </div>
+  </div>
+
+  <!-- TAB REPARTO (Ronda 61) -->
+  <div class="tab-panel" id="tab-reparto" style="display:none;">
+    <div class="tabs" id="rp-tabs" style="margin-bottom:14px;">
+      <button type="button" class="tab-btn activo" data-rptab="rp-repartidores">Repartidores</button>
+      <button type="button" class="tab-btn" data-rptab="rp-zonas">Zonas de envío</button>
+      <button type="button" class="tab-btn" data-rptab="rp-config">Datos del servicio</button>
+    </div>
+
+    <div id="rp-repartidores">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Repartidores</h2>
+          <button type="button" class="btn-primario" id="rp-rep-nuevo">+ Nuevo repartidor</button>
+        </div>
+        <p class="nota">Cada repartidor tiene su propia cuenta de crédito: lo que lleva en pedidos queda a su cargo hasta que paga con abonos en el POS.</p>
+        <div id="rp-rep-form" style="display:none;border:1px solid var(--borde);border-radius:10px;padding:12px;margin:10px 0;">
+          <div class="grid-2">
+            <div class="campo"><label>Nombre *</label><input type="text" id="rp-rep-nombre"></div>
+            <div class="campo"><label>Teléfono (WhatsApp)</label><input type="tel" id="rp-rep-telefono" inputmode="numeric"></div>
+          </div>
+          <div class="grid-2">
+            <div class="campo"><label>Límite de crédito</label><input type="number" id="rp-rep-limite" min="0" step="100" value="5000"></div>
+            <div class="campo"><label>Estado</label><select id="rp-rep-estado"><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></div>
+          </div>
+          <div id="rp-rep-error"></div>
+          <div class="fila" style="gap:8px;"><button type="button" class="btn-primario" id="rp-rep-guardar">Guardar</button><button type="button" class="btn-gris" id="rp-rep-cancelar">Cancelar</button></div>
+        </div>
+        <div class="tabla-scroll"><table>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th>Estado</th><th class="num">Debe</th><th class="num">Límite</th><th class="num">Calificación</th><th></th></tr></thead>
+          <tbody id="rp-rep-body"></tbody></table></div>
+        <p class="nota" id="rp-rep-vacio" style="display:none;">Todavía no hay repartidores.</p>
+      </div>
+    </div>
+
+    <div id="rp-zonas" style="display:none;">
+      <div class="card">
+        <div class="fila" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Zonas de envío</h2>
+          <button type="button" class="btn-primario" id="rp-zona-nueva">+ Nueva zona</button>
+        </div>
+        <p class="nota">El cliente elige su colonia en el catálogo; el costo de envío sale de la zona que la contiene. Si la colonia no está en ninguna zona se cobra el envío base.</p>
+        <div id="rp-zona-form" style="display:none;border:1px solid var(--borde);border-radius:10px;padding:12px;margin:10px 0;">
+          <div class="grid-2">
+            <div class="campo"><label>Nombre de la zona *</label><input type="text" id="rp-zona-nombre" placeholder="Ej. NORTE"></div>
+            <div class="campo"><label>Costo de envío *</label><input type="number" id="rp-zona-costo" min="0" step="1" value="35"></div>
+          </div>
+          <div class="campo"><label>Colonias (una por línea, o separadas por coma)</label><textarea id="rp-zona-colonias" rows="6"></textarea></div>
+          <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="rp-zona-activa" checked style="width:auto;"> Activa</label>
+          <div id="rp-zona-error"></div>
+          <div class="fila" style="gap:8px;margin-top:8px;"><button type="button" class="btn-primario" id="rp-zona-guardar">Guardar</button><button type="button" class="btn-gris" id="rp-zona-cancelar">Cancelar</button></div>
+        </div>
+        <div class="tabla-scroll"><table>
+          <thead><tr><th>Zona</th><th class="num">Costo</th><th class="num">Colonias</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="rp-zona-body"></tbody></table></div>
+        <p class="nota" id="rp-zona-vacio" style="display:none;">Todavía no hay zonas.</p>
+      </div>
+    </div>
+
+    <div id="rp-config" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Datos del servicio a domicilio</h2>
+        <p class="nota">Esta información se muestra en el catálogo en línea.</p>
+        <div class="grid-2">
+          <div class="campo"><label>Nombre del negocio</label><input type="text" id="rp-cfg-nombre"></div>
+          <div class="campo"><label>Teléfono de WhatsApp del negocio</label><input type="tel" id="rp-cfg-telefono"></div>
+        </div>
+        <div class="campo"><label>Dirección</label><input type="text" id="rp-cfg-direccion"></div>
+        <div class="grid-2">
+          <div class="campo"><label>Horario entre semana (desde)</label><input type="time" id="rp-cfg-desde"></div>
+          <div class="campo"><label>Horario entre semana (hasta)</label><input type="time" id="rp-cfg-hasta"></div>
+        </div>
+        <div class="grid-2">
+          <div class="campo"><label>Horario domingo (desde)</label><input type="time" id="rp-cfg-dom-desde"></div>
+          <div class="campo"><label>Horario domingo (hasta)</label><input type="time" id="rp-cfg-dom-hasta"></div>
+        </div>
+        <div class="campo"><label>Envío base (para colonias fuera de las zonas)</label><input type="number" id="rp-cfg-envio" min="0" step="1"></div>
+        <div class="campo"><label>Datos para transferencia (se muestran al cliente que paga por transferencia)</label><textarea id="rp-cfg-banco" rows="3"></textarea></div>
+        <div id="rp-cfg-error"></div>
+        <button type="button" class="btn-primario" id="rp-cfg-guardar">Guardar</button>
+      </div>
     </div>
   </div>
 
@@ -1692,7 +1776,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.30.002';
+const APP_VERSION = '1.31.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2272,6 +2356,7 @@ const MAPA_TAB_PRINCIPAL_A_CLAVE = {
   'tab-reportes-ventas': 'reporte_precios', // Ronda 60: Reportes comparte el permiso de Reporte de precios
   'tab-clientes': 'clientes',
   'tab-catalogos-base': 'catalogos_base',
+  'tab-reparto': 'catalogos_base', // Ronda 61: Reparto comparte el permiso de Catálogos base
 };
 const MAPA_CLITAB_A_CLAVE = { 'cli-panel-cxc': 'clientes.cxc' };
 const MAPA_CFGTAB_A_CLAVE = {
@@ -8059,6 +8144,113 @@ $('kardex-exportar').addEventListener('click', async ()=>{
   }
 });
 function mostrarMensajeKardexVacio(){ $('kardex-vacio').textContent = 'No hay movimientos en este rango para exportar.'; $('kardex-vacio').style.display = 'block'; }
+
+
+// ---------- REPARTO: repartidores, zonas y datos del servicio (Ronda 61) ----------
+state.rpRepEditId = null; state.rpZonaEditId = null; state.rpRepartidores = []; state.rpZonas = [];
+const rpEsc = s => String(s ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+document.querySelectorAll('#rp-tabs .tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
+  document.querySelectorAll('#rp-tabs .tab-btn').forEach(b=>b.classList.remove('activo')); btn.classList.add('activo');
+  ['rp-repartidores','rp-zonas','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
+}));
+document.querySelector('[data-tab="tab-reparto"]').addEventListener('click', ()=>{ rpCargarRepartidores(); rpCargarZonas(); rpCargarConfig(); });
+
+// ----- Repartidores -----
+async function rpCargarRepartidores(){
+  const { data: reps, error } = await sb.from('repartidores').select('*').eq('empresa_id', state.empresaId).order('nombre');
+  if(error){ return; }
+  const ids = (reps||[]).map(r=>r.cliente_id).filter(Boolean);
+  const { data: clis } = ids.length ? await sb.from('clientes').select('id, saldo_actual, limite_credito').in('id', ids) : { data: [] };
+  state.rpRepartidores = (reps||[]).map(r=>({ ...r, cli: (clis||[]).find(c=>c.id===r.cliente_id) || null }));
+  $('rp-rep-vacio').style.display = state.rpRepartidores.length ? 'none' : 'block';
+  $('rp-rep-body').innerHTML = state.rpRepartidores.map(r=>`<tr>
+    <td>${rpEsc(r.nombre)}</td><td>${rpEsc(r.telefono || '—')}</td><td>${r.estado === 'activo' ? 'Activo' : 'Inactivo'}</td>
+    <td class="num">${money(r.cli ? r.cli.saldo_actual : 0)}</td><td class="num">${money(r.cli ? r.cli.limite_credito : 0)}</td>
+    <td class="num">${r.total_resenas ? Number(r.calificacion_promedio).toFixed(1) + ' ★ (' + r.total_resenas + ')' : '—'}</td>
+    <td><button type="button" class="btn-gris rp-rep-editar" data-id="${r.id}">Editar</button></td></tr>`).join('');
+  $('rp-rep-body').querySelectorAll('.rp-rep-editar').forEach(b=>b.addEventListener('click', ()=>rpAbrirRepartidor(b.dataset.id)));
+}
+function rpAbrirRepartidor(id){
+  state.rpRepEditId = id || null;
+  const r = id ? state.rpRepartidores.find(x=>x.id===id) : null;
+  $('rp-rep-nombre').value = r ? r.nombre : ''; $('rp-rep-telefono').value = r ? (r.telefono || '') : '';
+  $('rp-rep-limite').value = r && r.cli ? r.cli.limite_credito : 5000; $('rp-rep-estado').value = r ? r.estado : 'activo';
+  $('rp-rep-error').innerHTML = ''; $('rp-rep-form').style.display = 'block';
+}
+$('rp-rep-nuevo').addEventListener('click', ()=>rpAbrirRepartidor(null));
+$('rp-rep-cancelar').addEventListener('click', ()=>{ $('rp-rep-form').style.display = 'none'; });
+$('rp-rep-guardar').addEventListener('click', async ()=>{
+  const nombre = $('rp-rep-nombre').value.trim().toUpperCase(), tel = $('rp-rep-telefono').value.replace(/\D/g,''), limite = Number($('rp-rep-limite').value) || 0, estado = $('rp-rep-estado').value;
+  const fallo = m => { $('rp-rep-error').innerHTML = `<div class="msg-error">${m}</div>`; };
+  if(!nombre) return fallo('Escribe el nombre del repartidor.');
+  if(tel && tel.length !== 10) return fallo('El teléfono debe tener 10 dígitos.');
+  $('rp-rep-guardar').disabled = true;
+  try{
+    if(!state.rpRepEditId){
+      const { error } = await sb.rpc('crear_repartidor', { p: { empresa_id: state.empresaId, nombre, telefono: tel, limite_credito: limite } });
+      if(error) throw error;
+      if(estado === 'inactivo'){ /* se crea activo; para inactivarlo se edita después */ }
+    } else {
+      const r = state.rpRepartidores.find(x=>x.id===state.rpRepEditId);
+      let e1 = (await sb.from('repartidores').update({ nombre, telefono: tel || null, estado }).eq('id', r.id)).error; if(e1) throw e1;
+      if(r.cliente_id){ const e2 = (await sb.from('clientes').update({ nombre: 'REPARTIDOR ' + nombre, telefono: tel || null, limite_credito: limite, activo: estado === 'activo' }).eq('id', r.cliente_id)).error; if(e2) throw e2; }
+    }
+    $('rp-rep-form').style.display = 'none'; await rpCargarRepartidores();
+  }catch(err){ fallo(rpEsc(err.message || err)); }
+  finally{ $('rp-rep-guardar').disabled = false; }
+});
+
+// ----- Zonas -----
+async function rpCargarZonas(){
+  const { data, error } = await sb.from('zonas_reparto').select('*').eq('empresa_id', state.empresaId).order('nombre');
+  if(error) return;
+  state.rpZonas = data || [];
+  $('rp-zona-vacio').style.display = state.rpZonas.length ? 'none' : 'block';
+  $('rp-zona-body').innerHTML = state.rpZonas.map(z=>`<tr><td>${rpEsc(z.nombre)}</td><td class="num">${money(z.costo)}</td><td class="num">${(z.colonias||[]).length}</td>
+    <td>${z.activo ? 'Activa' : 'Inactiva'}</td><td><button type="button" class="btn-gris rp-zona-editar" data-id="${z.id}">Editar</button></td></tr>`).join('');
+  $('rp-zona-body').querySelectorAll('.rp-zona-editar').forEach(b=>b.addEventListener('click', ()=>rpAbrirZona(b.dataset.id)));
+}
+function rpAbrirZona(id){
+  state.rpZonaEditId = id || null;
+  const z = id ? state.rpZonas.find(x=>x.id===id) : null;
+  $('rp-zona-nombre').value = z ? z.nombre : ''; $('rp-zona-costo').value = z ? z.costo : 35;
+  $('rp-zona-colonias').value = z ? (z.colonias||[]).join('\n') : ''; $('rp-zona-activa').checked = z ? z.activo : true;
+  $('rp-zona-error').innerHTML = ''; $('rp-zona-form').style.display = 'block';
+}
+$('rp-zona-nueva').addEventListener('click', ()=>rpAbrirZona(null));
+$('rp-zona-cancelar').addEventListener('click', ()=>{ $('rp-zona-form').style.display = 'none'; });
+$('rp-zona-guardar').addEventListener('click', async ()=>{
+  const nombre = $('rp-zona-nombre').value.trim().toUpperCase(), costo = Number($('rp-zona-costo').value);
+  const colonias = [...new Set($('rp-zona-colonias').value.split(/[\n,]+/).map(c=>c.trim().toUpperCase()).filter(Boolean))];
+  const fallo = m => { $('rp-zona-error').innerHTML = `<div class="msg-error">${m}</div>`; };
+  if(!nombre) return fallo('Escribe el nombre de la zona.');
+  if(!(costo >= 0)) return fallo('El costo de envío no es válido.');
+  const repetidas = colonias.filter(c=>state.rpZonas.some(z=>z.id !== state.rpZonaEditId && z.activo && (z.colonias||[]).some(x=>x.toUpperCase() === c)));
+  if(repetidas.length) return fallo('Estas colonias ya están en otra zona: ' + rpEsc(repetidas.join(', ')));
+  const fila = { nombre, costo, colonias, activo: $('rp-zona-activa').checked };
+  $('rp-zona-guardar').disabled = true;
+  const { error } = state.rpZonaEditId ? await sb.from('zonas_reparto').update(fila).eq('id', state.rpZonaEditId) : await sb.from('zonas_reparto').insert({ ...fila, empresa_id: state.empresaId });
+  $('rp-zona-guardar').disabled = false;
+  if(error) return fallo(rpEsc(error.message));
+  $('rp-zona-form').style.display = 'none'; rpCargarZonas();
+});
+
+// ----- Datos del servicio -----
+async function rpCargarConfig(){
+  const { data } = await sb.from('config_reparto').select('*').eq('empresa_id', state.empresaId).maybeSingle();
+  const c = data || {};
+  $('rp-cfg-nombre').value = c.nombre || ''; $('rp-cfg-telefono').value = c.telefono || ''; $('rp-cfg-direccion').value = c.direccion || '';
+  $('rp-cfg-desde').value = c.horario_desde || ''; $('rp-cfg-hasta').value = c.horario_hasta || '';
+  $('rp-cfg-dom-desde').value = c.horario_dom_desde || ''; $('rp-cfg-dom-hasta').value = c.horario_dom_hasta || '';
+  $('rp-cfg-envio').value = c.envio_base ?? 35; $('rp-cfg-banco').value = c.datos_bancarios || '';
+}
+$('rp-cfg-guardar').addEventListener('click', async ()=>{
+  const fila = { empresa_id: state.empresaId, nombre: $('rp-cfg-nombre').value.trim(), telefono: $('rp-cfg-telefono').value.replace(/\D/g,''), direccion: $('rp-cfg-direccion').value.trim(),
+    horario_desde: $('rp-cfg-desde').value || null, horario_hasta: $('rp-cfg-hasta').value || null, horario_dom_desde: $('rp-cfg-dom-desde').value || null, horario_dom_hasta: $('rp-cfg-dom-hasta').value || null,
+    envio_base: Number($('rp-cfg-envio').value) || 0, datos_bancarios: $('rp-cfg-banco').value.trim(), actualizado_en: new Date().toISOString() };
+  const { error } = await sb.from('config_reparto').upsert(fila, { onConflict: 'empresa_id' });
+  $('rp-cfg-error').innerHTML = error ? `<div class="msg-error">${rpEsc(error.message)}</div>` : '<div class="msg-ok">Guardado.</div>';
+});
 
 </script>
 </body>
