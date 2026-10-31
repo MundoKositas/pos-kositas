@@ -371,6 +371,8 @@
     <div class="tabs" id="rp-tabs" style="margin-bottom:14px;">
       <button type="button" class="tab-btn activo" data-rptab="rp-repartidores">Repartidores</button>
       <button type="button" class="tab-btn" data-rptab="rp-zonas">Zonas de envío</button>
+      <button type="button" class="tab-btn" data-rptab="rp-pedidos">Pedidos</button>
+      <button type="button" class="tab-btn" data-rptab="rp-mensajes">Mensajes WhatsApp</button>
       <button type="button" class="tab-btn" data-rptab="rp-config">Datos del servicio</button>
     </div>
 
@@ -422,6 +424,33 @@
           <thead><tr><th>Zona</th><th class="num">Costo</th><th class="num">Colonias</th><th>Estado</th><th></th></tr></thead>
           <tbody id="rp-zona-body"></tbody></table></div>
         <p class="nota" id="rp-zona-vacio" style="display:none;">Todavía no hay zonas.</p>
+      </div>
+    </div>
+
+    <div id="rp-pedidos" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Pedidos a domicilio</h2>
+        <p class="nota">Los pedidos se registran desde la caja (POS). Para volver a enviar uno <strong>no entregado</strong>: en el POS cancela su venta con el procedimiento normal y luego captura el código otra vez en «🛵 Venta a domicilio» — puedes elegir el mismo repartidor u otro.</p>
+        <div class="grid-2">
+          <div class="campo"><label>Estado</label><select id="rp-ped-estado"><option value="">Todos</option><option value="nuevo">Nuevo (sin capturar en caja)</option><option value="asignado">Con repartidor</option><option value="entregado">Entregado</option><option value="noentregado">No entregado</option><option value="cancelado">Cancelado</option></select></div>
+          <div class="campo"><label>Buscar (código, nombre, teléfono)</label><input type="text" id="rp-ped-buscar"></div>
+        </div>
+        <div class="tabla-scroll"><table>
+          <thead><tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Colonia</th><th>Repartidor</th><th>Estado</th><th class="num">Total</th><th>Motivo</th></tr></thead>
+          <tbody id="rp-ped-body"></tbody></table></div>
+        <p class="nota" id="rp-ped-vacio" style="display:none;">No hay pedidos con ese filtro.</p>
+      </div>
+    </div>
+
+    <div id="rp-mensajes" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Mensajes de WhatsApp</h2>
+        <p class="nota">Son los textos que arma la pantalla del repartidor. Puedes usar: <strong>[Nombre]</strong>, <strong>[Productos]</strong>, <strong>[Total]</strong>, <strong>[Codigo]</strong>, <strong>[Minutos]</strong> (solo «voy en camino»), <strong>[Motivo]</strong> (solo «no entregado») y <strong>[Link]</strong> (solo «entregado», es el link para calificar).</p>
+        <div class="campo"><label>🚀 Voy en camino</label><textarea id="rp-msg-voyEnCamino" rows="5"></textarea></div>
+        <div class="campo"><label>📦 Entregado (incluye el link de reseña)</label><textarea id="rp-msg-entregado" rows="6"></textarea></div>
+        <div class="campo"><label>⚠️ No se pudo entregar</label><textarea id="rp-msg-noEntregado" rows="5"></textarea></div>
+        <div id="rp-msg-error"></div>
+        <div class="fila" style="gap:8px;"><button type="button" class="btn-primario" id="rp-msg-guardar">Guardar mensajes</button><button type="button" class="btn-gris" id="rp-msg-restaurar">Restaurar los de fábrica</button></div>
       </div>
     </div>
 
@@ -1777,7 +1806,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.31.002';
+const APP_VERSION = '1.31.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -8152,9 +8181,9 @@ state.rpRepEditId = null; state.rpZonaEditId = null; state.rpRepartidores = []; 
 const rpEsc = s => String(s ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 document.querySelectorAll('#rp-tabs .tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
   document.querySelectorAll('#rp-tabs .tab-btn').forEach(b=>b.classList.remove('activo')); btn.classList.add('activo');
-  ['rp-repartidores','rp-zonas','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
+  ['rp-repartidores','rp-zonas','rp-pedidos','rp-mensajes','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
 }));
-document.querySelector('[data-tab="tab-reparto"]').addEventListener('click', ()=>{ rpCargarRepartidores(); rpCargarZonas(); rpCargarConfig(); });
+document.querySelector('[data-tab="tab-reparto"]').addEventListener('click', ()=>{ rpCargarRepartidores().then(rpCargarPedidos); rpCargarZonas(); rpCargarConfig(); rpCargarMensajes(); });
 
 // ----- Repartidores -----
 async function rpCargarRepartidores(){
@@ -8270,6 +8299,58 @@ async function rpGenerarLink(id){
     <div class="fila" style="gap:8px;"><button type="button" class="btn-primario" id="rp-link-copiar">Copiar link</button>${wa ? `<a class="btn-primario" style="text-decoration:none;" target="_blank" rel="noopener" href="${rpEsc(wa)}">Enviar por WhatsApp</a>` : ''}</div>`;
   $('rp-link-copiar').addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(url); }catch(e){ $('rp-link-url').select(); document.execCommand('copy'); } $('rp-link-copiar').textContent = '¡Copiado!'; });
 }
+
+
+// ----- Mensajes de WhatsApp (los usa repartidor2.html) -----
+const RP_MENSAJES_DEFECTO = {
+  voyEnCamino: '🏠 Hola [Nombre], soy el repartidor de Mundo Kositas 🛵\nSigo con tu pedido [Codigo]: [Productos]\nTotal a pagar: $[Total]\n\nEstoy en camino, llego aproximadamente en [Minutos] minutos 📍\n¡Favor de estar al pendiente! 😊',
+  entregado: '📦 ¡Entregado! Gracias [Nombre] 💛\nFue un gusto atenderte en Mundo Kositas 🏠\n¿Todo llegó bien? Escríbenos 😊\n\n⭐ ¿Cómo estuvo tu experiencia?\nCalifica nuestro servicio aquí 👇\n[Link]',
+  noEntregado: 'Hola [Nombre], pasamos a dejar tu pedido [Codigo] de Mundo Kositas 🛵 pero no fue posible entregarlo.\nMotivo: [Motivo]\n\nSi todavía lo quieres, respóndenos por aquí y lo volvemos a programar 😊',
+};
+async function rpCargarMensajes(){
+  const { data } = await sb.from('config_reparto').select('mensajes').eq('empresa_id', state.empresaId).maybeSingle();
+  const m = Object.assign({}, RP_MENSAJES_DEFECTO, (data && data.mensajes) || {});
+  Object.keys(RP_MENSAJES_DEFECTO).forEach(k=>{ $('rp-msg-'+k).value = String(m[k]).replace(/\\n/g,'\n'); });
+}
+$('rp-msg-restaurar').addEventListener('click', ()=>{ Object.keys(RP_MENSAJES_DEFECTO).forEach(k=>{ $('rp-msg-'+k).value = RP_MENSAJES_DEFECTO[k].replace(/\\n/g,'\n'); }); });
+$('rp-msg-guardar').addEventListener('click', async ()=>{
+  const mensajes = {}; Object.keys(RP_MENSAJES_DEFECTO).forEach(k=>{ mensajes[k] = $('rp-msg-'+k).value.trim() || RP_MENSAJES_DEFECTO[k]; });
+  const { error } = await sb.from('config_reparto').update({ mensajes, actualizado_en: new Date().toISOString() }).eq('empresa_id', state.empresaId);
+  $('rp-msg-error').innerHTML = error ? `<div class="msg-error">${rpEsc(error.message)}</div>` : '<div class="msg-ok">Mensajes guardados.</div>';
+});
+
+// ----- Pedidos (consulta) -----
+async function rpCargarPedidos(){
+  const { data, error } = await sb.from('pedidos_reparto').select('codigo, creado_en, fecha_entrega, nombre, telefono, colonia, estado, total, motivo_no_entrega, repartidor_id').eq('empresa_id', state.empresaId).order('creado_en', { ascending: false }).limit(300);
+  if(error){ $('rp-ped-body').innerHTML = `<tr><td colspan="8" class="nota">${rpEsc(error.message)}</td></tr>`; return; }
+  state.rpPedidos = data || []; rpRenderPedidos();
+}
+const RP_ESTADOS = { nuevo:'🆕 Nuevo', capturado:'✅ Capturado', asignado:'🛵 Con repartidor', entregado:'📦 Entregado', noentregado:'⚠️ No entregado', cancelado:'❌ Cancelado' };
+function rpRenderPedidos(){
+  const est = $('rp-ped-estado').value, q = $('rp-ped-buscar').value.trim().toLowerCase();
+  const filas = (state.rpPedidos||[]).filter(p=>(!est || p.estado === est) && (!q || [p.codigo, p.nombre, p.telefono].join(' ').toLowerCase().includes(q)));
+  $('rp-ped-vacio').style.display = filas.length ? 'none' : 'block';
+  $('rp-ped-body').innerHTML = filas.map(p=>{
+    const r = state.rpRepartidores.find(x=>x.id === p.repartidor_id);
+    return `<tr><td><strong>${rpEsc(p.codigo)}</strong></td><td>${rpEsc(p.fecha_entrega || String(p.creado_en||'').slice(0,10))}</td><td>${rpEsc(p.nombre)}<br><small>${rpEsc(p.telefono||'')}</small></td><td>${rpEsc(p.colonia||'—')}</td><td>${rpEsc(r ? r.nombre : '—')}</td><td>${RP_ESTADOS[p.estado] || rpEsc(p.estado)}</td><td class="num">${money(p.total)}</td><td>${rpEsc(p.motivo_no_entrega||'')}</td></tr>`;
+  }).join('');
+}
+$('rp-ped-estado').addEventListener('change', rpRenderPedidos);
+$('rp-ped-buscar').addEventListener('input', rpRenderPedidos);
+
+// Al volver a esta ventana (por ejemplo después de registrar un abono en el POS) se actualizan Clientes/Cuentas por cobrar y el estado de cuenta abierto
+async function refrescarSiHaceFalta(){
+  if(document.hidden || !state.empresaId) return;
+  const activa = document.querySelector('.tab-panel.activo, .tab-panel[style*="block"]');
+  const enClientes = document.querySelector('[data-tab="tab-clientes"].activo');
+  if(!enClientes) return;
+  await refrescarPantallaClientes();
+  const abierto = $('modal-estado-cuenta').classList.contains('activo');
+  if(abierto && state.ecClienteActual) abrirEstadoCuenta(state.ecClienteActual.id);
+}
+document.addEventListener('visibilitychange', refrescarSiHaceFalta);
+window.addEventListener('focus', refrescarSiHaceFalta);
+setInterval(refrescarSiHaceFalta, 30000);
 
 </script>
 </body>
