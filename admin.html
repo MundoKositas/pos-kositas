@@ -372,6 +372,7 @@
       <button type="button" class="tab-btn activo" data-rptab="rp-repartidores">Repartidores</button>
       <button type="button" class="tab-btn" data-rptab="rp-zonas">Zonas de envío</button>
       <button type="button" class="tab-btn" data-rptab="rp-pedidos">Pedidos</button>
+      <button type="button" class="tab-btn" data-rptab="rp-reportes">Reportes</button>
       <button type="button" class="tab-btn" data-rptab="rp-mensajes">Mensajes WhatsApp</button>
       <button type="button" class="tab-btn" data-rptab="rp-config">Datos del servicio</button>
     </div>
@@ -427,6 +428,24 @@
       </div>
     </div>
 
+    <div id="rp-reportes" style="display:none;">
+      <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="campo"><label>Del</label><input type="date" id="rpg-desde"></div>
+        <div class="campo"><label>Al</label><input type="date" id="rpg-hasta"></div>
+        <div class="campo"><label>Repartidor</label><select id="rpg-rep"><option value="">Todos</option></select></div>
+        <button type="button" class="btn-primario" id="rpg-ver">Ver reporte</button>
+      </div>
+      <div id="rpg-error"></div>
+      <div id="rpg-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:10px 0;"></div>
+      <h3>Por repartidor</h3>
+      <div class="tabla-scroll"><table><thead><tr><th>Repartidor</th><th class="num">Pedidos</th><th class="num">Entregados</th><th class="num">No entregados</th><th class="num">% entrega</th><th class="num">Vendido entregado</th><th class="num">Tiempo prom.</th><th class="num">⭐ Repartidor</th><th class="num">⭐ Servicio</th></tr></thead><tbody id="rpg-rep-body"></tbody></table></div>
+      <h3>Por colonia</h3>
+      <div class="tabla-scroll"><table><thead><tr><th>Colonia</th><th class="num">Pedidos</th><th class="num">Entregados</th><th class="num">No entregados</th><th class="num">Vendido entregado</th></tr></thead><tbody id="rpg-col-body"></tbody></table></div>
+      <h3>Motivos de no entrega</h3>
+      <div class="tabla-scroll"><table><thead><tr><th>Motivo</th><th class="num">Veces</th></tr></thead><tbody id="rpg-mot-body"></tbody></table></div>
+      <h3>Comentarios de clientes</h3>
+      <div id="rpg-coment"></div>
+    </div>
     <div id="rp-pedidos" style="display:none;">
       <div class="card">
         <h2 style="margin-top:0;">Pedidos a domicilio</h2>
@@ -1221,6 +1240,21 @@
     <p class="nota" id="cliente-condicion-pago-nota">Es el plazo MÁXIMO que este cliente puede usar al comprar a crédito — al cobrar, el cajero puede elegir esta condición o una más corta, pero nunca una más larga. Si es "Contado", no puede tener línea de crédito (el límite se guarda en $0).</p>
     <div class="campo"><label>Lista de precio default</label><select id="cliente-lista-precio"><option value="">(usar la de la sucursal)</option></select></div>
     <p class="nota">El cajero puede seguir cambiando la lista de precio del ticket manualmente al cobrar — esta es solo la que se propone automáticamente al seleccionar a este cliente.</p>
+    <div id="cli-dom-bloque" style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:8px;">
+      <strong>🏠 Domicilios de entrega</strong>
+      <div id="cli-dom-lista" style="margin:6px 0;"></div>
+      <div id="cli-dom-form" style="display:none;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:8px;">
+        <div class="grid-2"><div class="campo"><label>Nombre (ej. Casa, Trabajo)</label><input type="text" id="cdom-alias"></div>
+          <div class="campo"><label>Colonia</label><input type="text" id="cdom-colonia"></div></div>
+        <div class="campo"><label>Calle y número</label><input type="text" id="cdom-domicilio"></div>
+        <div class="campo"><label>Referencias (opcional)</label><input type="text" id="cdom-ref"></div>
+        <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cdom-principal" style="width:auto;"> Domicilio principal</label>
+        <div id="cdom-error"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;"><button type="button" class="btn-gris" id="cdom-cancelar">Cancelar</button><button type="button" class="btn-primario" id="cdom-guardar">Guardar domicilio</button></div>
+      </div>
+      <button type="button" class="btn-gris" id="cli-dom-nuevo" style="margin-top:4px;">+ Agregar domicilio</button>
+      <p class="nota" id="cli-dom-nota" style="display:none;">Guarda primero al cliente para poder agregarle domicilios.</p>
+    </div>
     <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="cliente-activo" checked style="width:auto;"> Activo</label></div>
     <div id="cliente-error"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -1825,7 +1859,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.31.004';
+const APP_VERSION = '1.32.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -6337,12 +6371,58 @@ function abrirCliente(id){
   $('cliente-condicion-pago').value = c?.condicion_pago_id || '';
   $('cliente-activo').checked = c ? c.activo : true;
   state.clienteEditId = c?.id || null;
+  cdomIniciar(c);
   actualizarBloqueoLimiteCreditoCliente();
   // Ronda 35: consulta-only en "Clientes" — se puede ver la ficha, no guardar.
   $('cliente-guardar').style.display = tieneEdicionMenu('clientes') ? '' : 'none';
   $('modal-cliente').classList.add('activo');
 }
 $('btn-nuevo-cliente').addEventListener('click', ()=>abrirCliente(null));
+
+// ---- Domicilios de entrega del cliente (los usa el POS «Venta a domicilio» y el catálogo) ----
+let cdomLista = [], cdomEditId = null;
+async function cdomIniciar(c){
+  cdomLista = []; cdomEditId = null; $('cli-dom-form').style.display = 'none';
+  const nuevo = !c;
+  $('cli-dom-nuevo').style.display = nuevo ? 'none' : ''; $('cli-dom-nota').style.display = nuevo ? 'block' : 'none';
+  $('cli-dom-lista').innerHTML = nuevo ? '' : '<p class="nota">Cargando…</p>';
+  if(nuevo) return;
+  await cdomCargar();
+}
+async function cdomCargar(){
+  const { data, error } = await sb.from('cliente_domicilios').select('*').eq('cliente_id', state.clienteEditId).order('principal', { ascending:false }).order('creado_en');
+  if(error){ $('cli-dom-lista').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  cdomLista = data || [];
+  $('cli-dom-lista').innerHTML = cdomLista.length ? cdomLista.map(d=>`<div style="display:flex;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #f1f1f1;${d.activo ? '' : 'opacity:.5;'}">
+      <div style="flex:1;font-size:.88rem;"><strong>${rpEsc(d.alias || 'Domicilio')}</strong>${d.principal ? ' ⭐' : ''}${d.activo ? '' : ' (quitado)'}<br>${rpEsc(d.domicilio)}${d.colonia ? ', ' + rpEsc(d.colonia) : ''}${d.referencias ? '<br><small>' + rpEsc(d.referencias) + '</small>' : ''}</div>
+      <button type="button" class="btn-gris cdom-editar" data-id="${d.id}">Editar</button>
+      <button type="button" class="btn-gris cdom-toggle" data-id="${d.id}">${d.activo ? 'Quitar' : 'Reactivar'}</button></div>`).join('') : '<p class="nota">Sin domicilios guardados todavía.</p>';
+}
+$('cli-dom-lista').addEventListener('click', async e=>{
+  const ed = e.target.closest('.cdom-editar'), tg = e.target.closest('.cdom-toggle');
+  if(ed) cdomAbrirForm(cdomLista.find(x=>x.id === ed.dataset.id));
+  if(tg){ const d = cdomLista.find(x=>x.id === tg.dataset.id); if(!d) return;
+    const { error } = await sb.from('cliente_domicilios').update({ activo: !d.activo, ...(d.activo ? { principal:false } : {}) }).eq('id', d.id);
+    if(error){ $('cli-dom-lista').insertAdjacentHTML('afterbegin', `<div class="msg-error">${rpEsc(error.message)}</div>`); return; } await cdomCargar(); }
+});
+function cdomAbrirForm(d){
+  cdomEditId = d?.id || null; $('cdom-error').innerHTML = '';
+  $('cdom-alias').value = d?.alias || ''; $('cdom-colonia').value = d?.colonia || ''; $('cdom-domicilio').value = d?.domicilio || '';
+  $('cdom-ref').value = d?.referencias || ''; $('cdom-principal').checked = d ? !!d.principal : !cdomLista.some(x=>x.activo && x.principal);
+  $('cli-dom-form').style.display = 'block'; $('cdom-domicilio').focus();
+}
+$('cli-dom-nuevo').addEventListener('click', ()=>cdomAbrirForm(null));
+$('cdom-cancelar').addEventListener('click', ()=>{ $('cli-dom-form').style.display = 'none'; });
+$('cdom-guardar').addEventListener('click', async ()=>{
+  const dom = $('cdom-domicilio').value.trim();
+  if(!dom){ $('cdom-error').innerHTML = '<div class="msg-error">Captura la calle y número.</div>'; return; }
+  const fila = { alias: $('cdom-alias').value.trim() || null, domicilio: dom, colonia: $('cdom-colonia').value.trim().toUpperCase() || null, referencias: $('cdom-ref').value.trim() || null, principal: $('cdom-principal').checked };
+  if(fila.principal) await sb.from('cliente_domicilios').update({ principal:false }).eq('cliente_id', state.clienteEditId);
+  const r = cdomEditId ? await sb.from('cliente_domicilios').update(fila).eq('id', cdomEditId)
+                       : await sb.from('cliente_domicilios').insert({ ...fila, empresa_id: state.empresaId, cliente_id: state.clienteEditId, activo:true });
+  if(r.error){ $('cdom-error').innerHTML = `<div class="msg-error">${rpEsc(r.error.message)}</div>`; return; }
+  $('cli-dom-form').style.display = 'none'; await cdomCargar();
+});
 $('cliente-cancelar').addEventListener('click', ()=>{ $('modal-cliente').classList.remove('activo'); });
 // Ronda 23: un cliente de "Contado" (o sin condición de pago) no puede tener línea de crédito — el
 // campo se deshabilita y se fuerza a 0 en pantalla; guardar_cliente también lo fuerza del lado del
@@ -8200,7 +8280,8 @@ state.rpRepEditId = null; state.rpZonaEditId = null; state.rpRepartidores = []; 
 const rpEsc = s => String(s ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 document.querySelectorAll('#rp-tabs .tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
   document.querySelectorAll('#rp-tabs .tab-btn').forEach(b=>b.classList.remove('activo')); btn.classList.add('activo');
-  ['rp-repartidores','rp-zonas','rp-pedidos','rp-mensajes','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
+  ['rp-repartidores','rp-zonas','rp-pedidos','rp-reportes','rp-mensajes','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
+  if(btn.dataset.rptab === 'rp-reportes') rpgCargar();
 }));
 document.querySelector('[data-tab="tab-reparto"]').addEventListener('click', ()=>{ rpCargarRepartidores().then(rpCargarPedidos); rpCargarZonas(); rpCargarConfig(); rpCargarMensajes(); });
 
@@ -8344,6 +8425,55 @@ async function rpCargarPedidos(){
   if(error){ $('rp-ped-body').innerHTML = `<tr><td colspan="8" class="nota">${rpEsc(error.message)}</td></tr>`; return; }
   state.rpPedidos = data || []; rpRenderPedidos();
 }
+// ---- Reportes de reparto ----
+async function rpgCargar(){
+  if(!$('rpg-desde').value){ const h = new Date(), d = new Date(h.getTime() - 29*86400000); $('rpg-desde').value = fechaLocalISO(d); $('rpg-hasta').value = fechaLocalISO(h); }
+  const sel = $('rpg-rep'), previo = sel.value;
+  sel.innerHTML = '<option value="">Todos</option>' + (state.rpRepartidores||[]).map(r=>`<option value="${r.id}">${rpEsc(r.nombre)}</option>`).join(''); sel.value = previo;
+  await rpgVer();
+}
+async function rpgVer(){
+  $('rpg-error').innerHTML = '';
+  const desde = $('rpg-desde').value, hasta = $('rpg-hasta').value, repId = $('rpg-rep').value;
+  if(!desde || !hasta){ $('rpg-error').innerHTML = '<div class="msg-error">Elige el rango de fechas.</div>'; return; }
+  let q = sb.from('pedidos_reparto').select('id, codigo, estado, total, costo_envio, colonia, repartidor_id, motivo_no_entrega, creado_en, entregado_en').eq('empresa_id', state.empresaId)
+    .gte('creado_en', desde + 'T00:00:00-06:00').lte('creado_en', hasta + 'T23:59:59-06:00').order('creado_en', { ascending:false }).limit(5000);
+  if(repId) q = q.eq('repartidor_id', repId);
+  let qr = sb.from('resenas_reparto').select('pedido_id, repartidor_id, estrellas_repartidor, estrellas_servicio, comentario, cliente_nombre, respondida_en').eq('empresa_id', state.empresaId).eq('respondida', true)
+    .gte('respondida_en', desde + 'T00:00:00-06:00').lte('respondida_en', hasta + 'T23:59:59-06:00').limit(2000);
+  if(repId) qr = qr.eq('repartidor_id', repId);
+  const [{ data: peds, error }, { data: ress }] = await Promise.all([q, qr]);
+  if(error){ $('rpg-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  rpgPintar(peds||[], ress||[]);
+}
+function rpgPintar(peds, ress){
+  const suma = (a,f)=>a.reduce((s,x)=>s+(Number(f(x))||0),0), prom = a=>a.length ? a.reduce((s,x)=>s+x,0)/a.length : null;
+  const fmtMin = m => m == null ? '—' : (m >= 90 ? (m/60).toFixed(1) + ' h' : Math.round(m) + ' min');
+  const asig = peds.filter(p=>p.repartidor_id), ent = peds.filter(p=>p.estado === 'entregado'), noent = peds.filter(p=>p.estado === 'noentregado' || (p.estado === 'cancelado' && p.motivo_no_entrega));
+  const resueltos = ent.length + noent.length;
+  const mins = p => (p.entregado_en && p.creado_en) ? (new Date(p.entregado_en) - new Date(p.creado_en)) / 60000 : null;
+  const tiempos = ent.map(mins).filter(x=>x != null && x >= 0);
+  const kpi = (t,v,sub)=>`<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;"><div style="font-size:.74rem;color:#6b7280;">${t}</div><div style="font-size:1.3rem;font-weight:800;">${v}</div>${sub ? `<div style="font-size:.72rem;color:#6b7280;">${sub}</div>` : ''}</div>`;
+  $('rpg-kpis').innerHTML = kpi('Pedidos', peds.length, `${peds.filter(p=>p.estado==='cancelado' && !p.motivo_no_entrega).length} cancelados`)
+    + kpi('Entregados', ent.length, resueltos ? Math.round(ent.length/resueltos*100) + '% de los resueltos' : '')
+    + kpi('No entregados', noent.length) + kpi('Vendido (entregado)', money(suma(ent,p=>p.total)), 'incluye servicio ' + money(suma(ent,p=>p.costo_envio)))
+    + kpi('Tiempo prom. de entrega', fmtMin(prom(tiempos)), 'desde que se hace el pedido')
+    + kpi('⭐ Servicio', ress.length ? prom(ress.map(r=>r.estrellas_servicio||0)).toFixed(1) : '—', ress.length + ' reseñas');
+  const reps = [...new Set(asig.map(p=>p.repartidor_id))];
+  $('rpg-rep-body').innerHTML = reps.map(id=>{
+    const pr = peds.filter(p=>p.repartidor_id === id), e = pr.filter(p=>p.estado==='entregado'), n = pr.filter(p=>p.estado==='noentregado' || (p.estado==='cancelado' && p.motivo_no_entrega)), rs = ress.filter(r=>r.repartidor_id === id);
+    const t = prom(e.map(mins).filter(x=>x != null && x >= 0)), res = e.length + n.length;
+    return `<tr><td>${rpEsc((state.rpRepartidores||[]).find(r=>r.id===id)?.nombre || '—')}</td><td class="num">${pr.length}</td><td class="num">${e.length}</td><td class="num">${n.length}</td><td class="num">${res ? Math.round(e.length/res*100) + '%' : '—'}</td><td class="num">${money(suma(e,p=>p.total))}</td><td class="num">${fmtMin(t)}</td><td class="num">${rs.length ? prom(rs.map(r=>r.estrellas_repartidor||0)).toFixed(1) : '—'}</td><td class="num">${rs.length ? prom(rs.map(r=>r.estrellas_servicio||0)).toFixed(1) : '—'}</td></tr>`;
+  }).join('') || '<tr><td colspan="9" class="nota">Sin pedidos asignados en el rango.</td></tr>';
+  const cols = {}; peds.forEach(p=>{ const c = (p.colonia||'(sin colonia)').toUpperCase(); (cols[c] = cols[c] || []).push(p); });
+  $('rpg-col-body').innerHTML = Object.entries(cols).sort((a,b)=>b[1].length-a[1].length).slice(0,15).map(([c,l])=>{
+    const e = l.filter(p=>p.estado==='entregado'); return `<tr><td>${rpEsc(c)}</td><td class="num">${l.length}</td><td class="num">${e.length}</td><td class="num">${l.filter(p=>p.estado==='noentregado' || (p.estado==='cancelado' && p.motivo_no_entrega)).length}</td><td class="num">${money(suma(e,p=>p.total))}</td></tr>`; }).join('') || '<tr><td colspan="5" class="nota">Sin datos.</td></tr>';
+  const mot = {}; noent.forEach(p=>{ const m = (p.motivo_no_entrega||'(sin motivo)').trim(); mot[m] = (mot[m]||0) + 1; });
+  $('rpg-mot-body').innerHTML = Object.entries(mot).sort((a,b)=>b[1]-a[1]).map(([m,n])=>`<tr><td>${rpEsc(m)}</td><td class="num">${n}</td></tr>`).join('') || '<tr><td colspan="2" class="nota">Sin no entregados en el rango. 🎉</td></tr>';
+  const cm = ress.filter(r=>r.comentario && r.comentario.trim()).sort((a,b)=>String(b.respondida_en).localeCompare(String(a.respondida_en))).slice(0,15);
+  $('rpg-coment').innerHTML = cm.length ? cm.map(r=>`<div style="border-bottom:1px solid #f1f1f1;padding:6px 0;font-size:.88rem;">${'⭐'.repeat(r.estrellas_servicio||0)} <strong>${rpEsc(r.cliente_nombre||'Cliente')}</strong> · ${rpEsc((state.rpRepartidores||[]).find(x=>x.id===r.repartidor_id)?.nombre||'')}<br>${rpEsc(r.comentario)}</div>`).join('') : '<p class="nota">Sin comentarios en el rango.</p>';
+}
+$('rpg-ver').addEventListener('click', rpgVer);
 const RP_ESTADOS = { nuevo:'🆕 Nuevo', capturado:'✅ Capturado', asignado:'🛵 Con repartidor', entregado:'📦 Entregado', noentregado:'⚠️ No entregado', cancelado:'❌ Cancelado' };
 function rpRenderPedidos(){
   const est = $('rp-ped-estado').value, q = $('rp-ped-buscar').value.trim().toLowerCase();
