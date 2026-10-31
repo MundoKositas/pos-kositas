@@ -183,6 +183,7 @@
         <p id="carrito-vacio" style="color:var(--gris);">Aún no hay productos en el carrito.</p>
         <div id="domicilio-banner" style="display:none;background:#eef6ff;border:1px solid #b9d6f5;border-radius:8px;padding:10px;margin:8px 0;font-size:.88rem;"></div>
         <button class="btn-secundario" id="btn-domicilio" style="width:100%;margin-top:10px;">🛵 Venta a domicilio (con repartidor / código de pedido)</button>
+        <button class="btn-secundario" id="btn-por-resolver" style="width:100%;margin-top:6px;">📋 Pedidos por resolver <span id="por-resolver-n" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:0 7px;font-size:.78rem;margin-left:4px;"></span></button>
         <input type="text" id="espera-nota" placeholder="Nota para identificar este ticket en espera (opcional) — ej. &quot;señor de la gorra&quot;, &quot;mostrador&quot;" style="margin-top:10px;">
         <button class="btn-secundario" id="btn-poner-en-espera" style="width:100%;margin-top:6px;">🕓 Poner esta venta en espera (atender a otro cliente)</button>
       </div>
@@ -354,6 +355,16 @@
      con un mínimo de costo/0.90 (10% de utilidad), y queda registrado como incidente para el
      reporte de cierre de caja. -->
 <!-- Ronda 62: VENTA A DOMICILIO -->
+<div class="modal-fondo" id="modal-resolver">
+  <div class="modal" style="max-width:640px;max-height:92vh;overflow:auto;">
+    <h2>📋 Pedidos por resolver</h2>
+    <p class="nota">Pedidos <strong>no entregados</strong> o con una <strong>solicitud del administrador</strong>. Mientras la venta siga activa, el importe sigue cargado al repartidor. Al resolver se cancela la venta (se le quita el cargo) y, si quieres, el pedido se vuelve a mandar.</p>
+    <div id="resolver-error"></div>
+    <div id="resolver-lista"></div>
+    <div class="acciones"><button class="btn-gris" id="resolver-cerrar">Cerrar</button></div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-domicilio">
   <div class="modal" style="max-width:560px;max-height:92vh;overflow:auto;">
     <h2>🛵 Venta a domicilio</h2>
@@ -380,7 +391,7 @@
     <p class="nota" id="dom-horario-hint" style="margin:-4px 0 8px;font-size:.75rem;"></p>
     <div style="display:flex;gap:8px;">
       <div class="campo" style="flex:1;"><label>El cliente paga</label><select id="dom-metodo"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option></select></div>
-      <div class="campo" style="flex:1;"><label>Paga con (efectivo)</label><input type="number" id="dom-paga-con" min="0" step="1"></div>
+      <div class="campo" style="flex:1;"><label>Paga con (efectivo)</label><input type="number" id="dom-paga-con" min="0" step="1"><small id="dom-total-hint" style="display:block;color:#6b7280;font-size:.75rem;margin-top:2px;"></small></div>
     </div>
     <div class="campo"><label>Notas</label><input type="text" id="dom-notas" maxlength="500"></div>
     <div id="dom-error"></div>
@@ -679,7 +690,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.004';
+const APP_VERSION = '1.9.005';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3405,7 +3416,7 @@ async function abrirModalDomicilio(){
   $('dom-colonia').value = d?.colonia || ''; $('dom-envio').value = d ? d.envio : state.domEnvioBase;
   $('dom-fecha').value = d?.fecha || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
   $('dom-desde').value = d?.horaDesde || ''; $('dom-hasta').value = d?.horaHasta || '';
-  $('dom-metodo').value = d?.metodoPago || 'efectivo'; $('dom-paga-con').value = d?.pagaCon || ''; $('dom-notas').value = d?.notas || '';
+  $('dom-metodo').value = d?.metodoPago || 'efectivo'; $('dom-paga-con').value = d?.pagaCon || ''; $('dom-paga-con').dataset.manual = d?.pagaCon ? '1' : ''; $('dom-notas').value = d?.notas || '';
   state.domPedidoBuscado = null;
   actualizarMetodoDom(); actualizarHintHorario();
   $('modal-domicilio').classList.add('activo');
@@ -3433,7 +3444,7 @@ function costoZonaPorColonia(col){
   const z = state.domZonas.find(z=>(z.colonias||[]).some(x=>String(x).toUpperCase() === c));
   return z ? Number(z.costo) : null;
 }
-$('dom-colonia').addEventListener('change', ()=>{ const c = costoZonaPorColonia($('dom-colonia').value); if(c !== null && !state.domPedidoBuscado) $('dom-envio').value = c; });
+$('dom-colonia').addEventListener('change', ()=>{ const c = costoZonaPorColonia($('dom-colonia').value); if(c !== null && !state.domPedidoBuscado) $('dom-envio').value = c; actualizarPagaConSugerido(); });
 $('dom-buscar').addEventListener('click', async ()=>{
   const codigo = $('dom-codigo').value.trim().toUpperCase(); $('dom-error').innerHTML = '';
   if(!codigo){ $('dom-error').innerHTML = '<div class="msg-error">Escribe el código del pedido.</div>'; return; }
@@ -3445,11 +3456,12 @@ $('dom-buscar').addEventListener('click', async ()=>{
   $('dom-nombre').value = data.nombre || ''; $('dom-telefono').value = data.telefono || ''; $('dom-domicilio').value = data.domicilio || '';
   $('dom-colonia').value = data.colonia || ''; $('dom-envio').value = data.costo_envio ?? state.domEnvioBase;
   if(data.fecha_entrega) $('dom-fecha').value = data.fecha_entrega; $('dom-desde').value = data.hora_desde || ''; $('dom-hasta').value = data.hora_hasta || '';
-  $('dom-metodo').value = data.metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo'; $('dom-paga-con').value = data.paga_con || ''; $('dom-notas').value = data.notas || ''; actualizarMetodoDom(); actualizarHintHorario();
+  $('dom-metodo').value = data.metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo'; $('dom-paga-con').value = data.paga_con || ''; $('dom-paga-con').dataset.manual = data.paga_con ? '1' : ''; $('dom-notas').value = data.notas || ''; actualizarMetodoDom(); actualizarHintHorario();
   deseleccionarClienteDom(); $('dom-nombre').value = data.nombre || ''; $('dom-telefono').value = data.telefono || ''; $('dom-domicilio').value = data.domicilio || ''; $('dom-colonia').value = data.colonia || '';
   if(data.cliente_id) await seleccionarClienteDom({ id: data.cliente_id, nombre: data.cliente_nombre, telefono: data.telefono }, { domicilioPedido: { domicilio: data.domicilio, colonia: data.colonia } });
   else buscarClientesDom(data.telefono);
   const lineas = (data.items||[]).map(i=>`${domEsc(i.cantidad)} × ${domEsc(i.nombre)}`).join('<br>');
+  actualizarPagaConSugerido();
   $('dom-resumen-pedido').style.display = 'block';
   $('dom-resumen-pedido').innerHTML = `<strong>Pedido ${domEsc(data.codigo)}</strong>${data.tiene_comprobante ? ' · 📎 trae comprobante de transferencia' : ''}<br>${lineas}<br>Al aplicar, estos artículos reemplazan el carrito, con el precio vigente en la lista del ticket.`;
 });
@@ -3477,6 +3489,8 @@ $('dom-confirmar').addEventListener('click', ()=>{
     for(const n of nuevas){ if(!agregarAlCarrito(n.p, null, n.cant)){ return fallo('No se pudo cargar «' + n.p.nombre + '» (sin precio). Corrige su precio y vuelve a capturar el pedido.'); } }
   }
   if(!state.carrito.some(l=>!l.esEnvio)) return fallo('Agrega artículos al carrito (o captura el código del pedido).');
+  actualizarPagaConSugerido();
+  { const pc = Number($('dom-paga-con').value) || 0; if($('dom-metodo').value === 'efectivo' && pc > 0){ const totEsperado = Math.round((domTotalArticulos(true) + envio) * 100) / 100; if(pc + 0.001 < totEsperado) return fallo('«Paga con» (' + money(pc) + ') es menor que el total a cobrar (' + money(totEsperado) + ').'); } }
   state.domicilio = { pedidoId: ped?.id || state.domicilio?.pedidoId || null, codigo: ped?.codigo || state.domicilio?.codigo || null,
     repartidorId: rep.id, repartidorNombre: rep.nombre, repartidorClienteId: rep.cliente_id, clienteFinalId: state.domClienteFinal?.id || null,
     nombre, telefono: tel, domicilio: dom, colonia: $('dom-colonia').value.trim(), envio, fecha: $('dom-fecha').value || null,
@@ -3523,7 +3537,7 @@ function aplicarDirDom(){
   $('dom-domicilio').value = x.domicilio || ''; $('dom-colonia').value = x.colonia || '';
   const c = costoZonaPorColonia(x.colonia); if(c !== null && !state.domPedidoBuscado) $('dom-envio').value = c;
 }
-$('dom-dir-sel').addEventListener('change', aplicarDirDom);
+$('dom-dir-sel').addEventListener('change', ()=>{ aplicarDirDom(); actualizarPagaConSugerido(); });
 let domBuscaTimer = null;
 async function buscarClientesDom(q){
   q = String(q||'').replace(/[,()%*]/g,' ').trim();
@@ -3565,8 +3579,27 @@ function actualizarMetodoDom(){
   const t = $('dom-metodo').value === 'transferencia';
   $('dom-paga-con').disabled = t; if(t) $('dom-paga-con').value = '';
   $('dom-paga-con').placeholder = t ? 'No aplica' : '';
+  if(!t) $('dom-paga-con').dataset.manual = $('dom-paga-con').value ? $('dom-paga-con').dataset.manual : '';
+  actualizarPagaConSugerido();
 }
 $('dom-metodo').addEventListener('change', actualizarMetodoDom);
+// «Paga con» se prellena con el total a cobrar (artículos + servicio a domicilio); el cajero solo lo cambia si el cliente paga con más.
+function domTotalArticulos(desdeCarrito){
+  const p = state.domPedidoBuscado;
+  if(p && !desdeCarrito) return Number(p.subtotal ?? (Number(p.total||0) - Number(p.costo_envio||0))) || 0;
+  let total = calcularTotales().total;
+  const le = state.carrito.find(l=>l.esEnvio); if(le) total -= (Number(le.precioManual)||0) * (Number(le.cantidad)||1);
+  return Math.max(0, total);
+}
+function actualizarPagaConSugerido(){
+  const inp = $('dom-paga-con'), hint = $('dom-total-hint');
+  if(inp.disabled){ hint.textContent = ''; return; }
+  const art = domTotalArticulos(), env = Number($('dom-envio').value)||0, tot = Math.round((art + env) * 100) / 100;
+  hint.textContent = tot > 0 ? `Total a cobrar: ${money(tot)} (artículos ${money(art)} + servicio ${money(env)}). Cámbialo solo si paga con más.` : '';
+  if(inp.dataset.manual !== '1' && tot > 0) inp.value = tot;
+}
+$('dom-paga-con').addEventListener('input', ()=>{ $('dom-paga-con').dataset.manual = '1'; });
+$('dom-envio').addEventListener('input', actualizarPagaConSugerido);
 
 async function ventaDomicilio(){
   const d = state.domicilio; if(!d) return;
@@ -3794,7 +3827,8 @@ const ESTADO_VENTA_ETIQUETA = { completada: 'Completada', cancelada: 'Cancelada'
 // aplican del lado del navegador sobre ese conjunto (Ronda 20, a petición de Adrián) — así los
 // combos se llenan solo con lo que de verdad aparece en el rango, y cambiar un filtro no necesita
 // volver a consultar el servidor.
-let vdVentasCompletas = [];
+let vdVentasCompletas = [], vdPedidosPorVenta = {}, vdRepNombres = {};
+const VD_PED_ESTADO = { asignado:'con repartidor', entregado:'entregado', noentregado:'no entregado', cancelado:'cancelado', capturado:'capturado', nuevo:'nuevo' };
 async function cargarVentasDia(){
   $('vd-error').innerHTML = '';
   const desde = $('vd-fecha-desde').value || fechaLocalISO();
@@ -3805,6 +3839,13 @@ async function cargarVentasDia(){
     return;
   }
   vdVentasCompletas = data || [];
+  vdPedidosPorVenta = {};
+  if(vdVentasCompletas.length){
+    const { data: peds } = await sb.from('pedidos_reparto').select('codigo, estado, venta_id, repartidor_id, cancelado_por').in('venta_id', vdVentasCompletas.map(v=>v.venta_id));
+    (peds||[]).forEach(p=>{ vdPedidosPorVenta[p.venta_id] = p; });
+    const ids = [...new Set((peds||[]).map(p=>p.repartidor_id).filter(Boolean))];
+    if(ids.length){ const { data: rs } = await sb.from('repartidores').select('id, nombre').in('id', ids); (rs||[]).forEach(r=>{ vdRepNombres[r.id] = r.nombre; }); }
+  }
   const folios = [...new Set(vdVentasCompletas.map(v=>v.folio))].sort();
   const clientes = [...new Set(vdVentasCompletas.map(v=>v.cliente))].sort((a,b)=>a.localeCompare(b,'es'));
   const estados = [...new Set(vdVentasCompletas.map(v=>v.estado))];
@@ -3854,7 +3895,7 @@ function renderVentasDiaFiltradas(){
       : (puedeModificar ? 'Modificar' : 'Solo se puede modificar el mismo día, sin devoluciones');
     const hora = v.fecha_hora ? new Date(v.fecha_hora).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
     filasHtml += `<tr>
-      <td>${v.folio}${v.tiene_devolucion ? ' <span class="nota" style="display:inline;">(con devolución)</span>' : ''}${v.tiene_modificacion ? ' <span class="nota" style="display:inline;">(Modificado)</span>' : ''}</td>
+      <td>${v.folio}${v.tiene_devolucion ? ' <span class="nota" style="display:inline;">(con devolución)</span>' : ''}${v.tiene_modificacion ? ' <span class="nota" style="display:inline;">(Modificado)</span>' : ''}${(()=>{ const pd = vdPedidosPorVenta[v.venta_id]; return pd ? `<div style="color:#9ca3af;font-size:.72rem;line-height:1.2;">🛵 Pedido ${pd.codigo} · ${VD_PED_ESTADO[pd.estado]||pd.estado}${vdRepNombres[pd.repartidor_id] ? ' · ' + vdRepNombres[pd.repartidor_id] : ''}</div>` : ''; })()}</td>
       <td>${hora}</td>
       <td>${v.cliente}</td>
       <td>${v.cajero}</td>
@@ -3875,6 +3916,65 @@ function renderVentasDiaFiltradas(){
   $('vd-body').querySelectorAll('.vd-modificar').forEach(b=>b.addEventListener('click', ()=>abrirModificarVenta(b.dataset.id)));
   $('vd-body').querySelectorAll('.vd-cancelar').forEach(b=>b.addEventListener('click', ()=>abrirCancelarVenta(b.dataset.id)));
   $('vd-body').querySelectorAll('.vd-devolver').forEach(b=>b.addEventListener('click', ()=>abrirDevolverVenta(b.dataset.id)));
+}
+
+// ---- Pedidos por resolver (no entregados / solicitudes del administrador) ----
+state.porResolver = []; state.trasCancelar = null;
+async function cargarPorResolver(){
+  if(state.modoSinConexion || !state.empresaId) return;
+  const { data } = await sb.from('pedidos_reparto').select('id, codigo, nombre, telefono, estado, total, venta_id, repartidor_id, motivo_no_entrega, solicitud, fecha_entrega')
+    .eq('empresa_id', state.empresaId).not('venta_id', 'is', null).in('estado', ['asignado','noentregado']).order('creado_en', { ascending: false }).limit(200);
+  state.porResolver = (data||[]).filter(p => p.estado === 'noentregado' || p.solicitud);
+  const n = state.porResolver.length, b = $('por-resolver-n');
+  b.style.display = n ? 'inline' : 'none'; b.textContent = n;
+}
+async function abrirPorResolver(){
+  $('resolver-error').innerHTML = ''; $('resolver-lista').innerHTML = '<p class="nota">Cargando…</p>';
+  $('modal-resolver').classList.add('activo');
+  const { data: reps } = await sb.from('repartidores').select('id, nombre').eq('empresa_id', state.empresaId).eq('estado','activo').order('nombre');
+  state.resolverReps = reps || [];
+  await cargarPorResolver(); pintarPorResolver();
+}
+function pintarPorResolver(){
+  const L = state.porResolver, nombreRep = id => (state.resolverReps||[]).find(r=>r.id===id)?.nombre || '—';
+  if(!L.length){ $('resolver-lista').innerHTML = '<p class="nota">✅ No hay pedidos por resolver.</p>'; return; }
+  $('resolver-lista').innerHTML = L.map(p=>{
+    const sol = p.solicitud;
+    const etiqueta = p.estado === 'noentregado' ? `⚠️ No entregado${p.motivo_no_entrega ? ': ' + domEsc(p.motivo_no_entrega) : ''}` : '🛵 Con repartidor';
+    const aviso = sol ? `<div style="color:#b45309;font-size:.85rem;">📣 El administrador pide ${sol.tipo === 'cancelar' ? '<strong>cancelar</strong>' : 'reasignar a <strong>' + domEsc(sol.repartidor||'') + '</strong>'}${sol.motivo ? ' — ' + domEsc(sol.motivo) : ''}</div>` : '';
+    const opciones = state.resolverReps.map(r=>`<option value="${r.id}" ${(sol?.repartidor_id || p.repartidor_id) === r.id ? 'selected' : ''}>${domEsc(r.nombre)}</option>`).join('');
+    return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:8px;" data-id="${p.id}">
+      <div><strong>${domEsc(p.codigo)}</strong> · ${domEsc(p.nombre)} · ${money(p.total)} · Repartidor: ${domEsc(nombreRep(p.repartidor_id))}</div>
+      <div style="font-size:.85rem;color:#6b7280;">${etiqueta}</div>${aviso}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">
+        <button class="btn-peligro rs-cancelar" data-id="${p.id}">Cancelar venta y liberar saldo</button>
+        <span style="flex:1;"></span>
+        <select class="rs-rep">${opciones}</select>
+        <button class="btn-secundario rs-reasignar" data-id="${p.id}">Reasignar</button>
+      </div>
+    </div>`;
+  }).join('');
+  $('resolver-lista').querySelectorAll('.rs-cancelar').forEach(b=>b.addEventListener('click', ()=>resolverPedido(b.dataset.id, null)));
+  $('resolver-lista').querySelectorAll('.rs-reasignar').forEach(b=>b.addEventListener('click', ()=>resolverPedido(b.dataset.id, b.closest('div[data-id]').querySelector('.rs-rep').value)));
+}
+async function resolverPedido(pedidoId, repartidorId){
+  const p = state.porResolver.find(x=>x.id === pedidoId); if(!p) return;
+  state.trasCancelar = repartidorId ? { codigo: p.codigo, repartidorId } : null;
+  $('modal-resolver').classList.remove('activo');
+  await abrirCancelarVenta(p.venta_id);
+  if(!$('modal-cancelar-venta').classList.contains('activo')) state.trasCancelar = null;
+}
+$('btn-por-resolver').addEventListener('click', abrirPorResolver);
+setInterval(()=>{ if(state.sesionCaja && !document.hidden) cargarPorResolver(); }, 60000);
+setTimeout(()=>{ if(state.sesionCaja) cargarPorResolver(); }, 4000);
+$('resolver-cerrar').addEventListener('click', ()=>{ $('modal-resolver').classList.remove('activo'); cargarPorResolver(); });
+// tras cancelar la venta (flujo reasignar): se abre «Venta a domicilio» con el código y el repartidor elegido (puede ser el mismo)
+async function seguirReasignacion(){
+  const t = state.trasCancelar; state.trasCancelar = null; if(!t) return;
+  await abrirModalDomicilio();
+  $('dom-codigo').value = t.codigo; $('dom-repartidor').dataset.elegido = t.repartidorId;
+  $('dom-repartidor').value = t.repartidorId;
+  $('dom-buscar').click();
 }
 
 // ---- Reimprimir ----
@@ -4183,7 +4283,7 @@ async function abrirCancelarVenta(ventaId){
     $('cv-aviso-tarjeta').style.display = 'block';
   }
 }
-$('cv-cancelar').addEventListener('click', ()=>{ $('modal-cancelar-venta').classList.remove('activo'); });
+$('cv-cancelar').addEventListener('click', ()=>{ $('modal-cancelar-venta').classList.remove('activo'); state.trasCancelar = null; });
 $('cv-confirmar').addEventListener('click', async ()=>{
   $('cv-error').innerHTML = '';
   const motivo = $('cv-motivo').value.trim();
@@ -4206,6 +4306,8 @@ $('cv-confirmar').addEventListener('click', async ()=>{
   // Ronda 42) — se refresca por si acaso (no vale la pena consultar antes si era a crédito solo para
   // decidir si hace falta).
   await cargarClientes();
+  cargarPorResolver();
+  await seguirReasignacion();
 });
 
 // ---- Devolver artículos ----

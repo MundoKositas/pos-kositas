@@ -436,7 +436,7 @@
           <div class="campo"><label>Buscar (código, nombre, teléfono)</label><input type="text" id="rp-ped-buscar"></div>
         </div>
         <div class="tabla-scroll"><table>
-          <thead><tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Colonia</th><th>Repartidor</th><th>Estado</th><th class="num">Total</th><th>Motivo</th></tr></thead>
+          <thead><tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Colonia</th><th>Repartidor</th><th>Estado</th><th class="num">Total</th><th>Motivo / aviso</th><th></th></tr></thead>
           <tbody id="rp-ped-body"></tbody></table></div>
         <p class="nota" id="rp-ped-vacio" style="display:none;">No hay pedidos con ese filtro.</p>
       </div>
@@ -1049,6 +1049,25 @@
 </div>
 
 <!-- MODAL: alta/edición de rol, con matriz de permisos (Ronda 32) -->
+<div class="modal-fondo" id="modal-rp-ped">
+  <div class="modal" style="max-width:520px;">
+    <h2 id="rpp-titulo">Pedido</h2>
+    <p class="nota" id="rpp-info"></p>
+    <div id="rpp-error"></div>
+    <div id="rpp-bloque-venta">
+      <p class="nota">Este pedido ya está <strong>cargado al crédito del repartidor</strong>. El dinero solo se mueve desde caja: aquí dejas la solicitud y en el POS aparece en «Pedidos por resolver», donde el cajero cancela la venta y (si aplica) lo vuelve a mandar.</p>
+      <div class="campo"><label>Reasignar a (puede ser el mismo repartidor)</label><select id="rpp-rep"></select></div>
+    </div>
+    <div class="campo"><label>Motivo (opcional)</label><input type="text" id="rpp-motivo" maxlength="200"></div>
+    <div class="acciones" style="flex-wrap:wrap;">
+      <button class="btn-gris" id="rpp-cerrar">Cerrar</button>
+      <button class="btn-gris" id="rpp-quitar" style="display:none;">Quitar solicitud</button>
+      <button class="btn-peligro" id="rpp-cancelar"></button>
+      <button class="btn-primario" id="rpp-reasignar">Solicitar reasignación</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-rol">
   <div class="modal" style="max-width:560px;">
     <h2 id="rol-modal-titulo">Nuevo rol</h2>
@@ -1806,7 +1825,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.31.003';
+const APP_VERSION = '1.31.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -8321,7 +8340,7 @@ $('rp-msg-guardar').addEventListener('click', async ()=>{
 
 // ----- Pedidos (consulta) -----
 async function rpCargarPedidos(){
-  const { data, error } = await sb.from('pedidos_reparto').select('codigo, creado_en, fecha_entrega, nombre, telefono, colonia, estado, total, motivo_no_entrega, repartidor_id').eq('empresa_id', state.empresaId).order('creado_en', { ascending: false }).limit(300);
+  const { data, error } = await sb.from('pedidos_reparto').select('id, codigo, creado_en, fecha_entrega, nombre, telefono, colonia, estado, total, motivo_no_entrega, repartidor_id, venta_id, solicitud').eq('empresa_id', state.empresaId).order('creado_en', { ascending: false }).limit(300);
   if(error){ $('rp-ped-body').innerHTML = `<tr><td colspan="8" class="nota">${rpEsc(error.message)}</td></tr>`; return; }
   state.rpPedidos = data || []; rpRenderPedidos();
 }
@@ -8332,9 +8351,34 @@ function rpRenderPedidos(){
   $('rp-ped-vacio').style.display = filas.length ? 'none' : 'block';
   $('rp-ped-body').innerHTML = filas.map(p=>{
     const r = state.rpRepartidores.find(x=>x.id === p.repartidor_id);
-    return `<tr><td><strong>${rpEsc(p.codigo)}</strong></td><td>${rpEsc(p.fecha_entrega || String(p.creado_en||'').slice(0,10))}</td><td>${rpEsc(p.nombre)}<br><small>${rpEsc(p.telefono||'')}</small></td><td>${rpEsc(p.colonia||'—')}</td><td>${rpEsc(r ? r.nombre : '—')}</td><td>${RP_ESTADOS[p.estado] || rpEsc(p.estado)}</td><td class="num">${money(p.total)}</td><td>${rpEsc(p.motivo_no_entrega||'')}</td></tr>`;
+    return `<tr><td><strong>${rpEsc(p.codigo)}</strong></td><td>${rpEsc(p.fecha_entrega || String(p.creado_en||'').slice(0,10))}</td><td>${rpEsc(p.nombre)}<br><small>${rpEsc(p.telefono||'')}</small></td><td>${rpEsc(p.colonia||'—')}</td><td>${rpEsc(r ? r.nombre : '—')}</td><td>${RP_ESTADOS[p.estado] || rpEsc(p.estado)}</td><td class="num">${money(p.total)}</td><td>${rpEsc(p.motivo_no_entrega||'')}${p.solicitud ? `<br><small style="color:#b45309;">📣 Solicitud: ${p.solicitud.tipo === 'cancelar' ? 'cancelar' : 'reasignar a ' + rpEsc(p.solicitud.repartidor||'')} (pendiente en caja)</small>` : ''}</td><td>${['entregado','cancelado'].includes(p.estado) ? '' : `<button class="btn-gris rpp-editar" data-id="${p.id}">✎ Editar</button>`}</td></tr>`;
   }).join('');
 }
+$('rp-ped-body').addEventListener('click', e=>{ const b = e.target.closest('.rpp-editar'); if(b) rppAbrir(b.dataset.id); });
+let rppActual = null;
+function rppAbrir(id){
+  const p = (state.rpPedidos||[]).find(x=>x.id === id); if(!p) return; rppActual = p;
+  const conVenta = !!p.venta_id;
+  $('rpp-titulo').textContent = 'Pedido ' + p.codigo; $('rpp-error').innerHTML = ''; $('rpp-motivo').value = '';
+  $('rpp-info').textContent = `${p.nombre} · ${money(p.total)} · ${RP_ESTADOS[p.estado] || p.estado}`;
+  $('rpp-bloque-venta').style.display = conVenta ? 'block' : 'none';
+  $('rpp-reasignar').style.display = conVenta ? '' : 'none';
+  $('rpp-quitar').style.display = p.solicitud ? '' : 'none';
+  $('rpp-cancelar').textContent = conVenta ? 'Solicitar cancelación' : 'Cancelar pedido';
+  $('rpp-rep').innerHTML = (state.rpRepartidores||[]).filter(r=>r.estado === 'activo' || r.id === p.repartidor_id).map(r=>`<option value="${r.id}" ${r.id === (p.solicitud?.repartidor_id || p.repartidor_id) ? 'selected' : ''}>${rpEsc(r.nombre)}</option>`).join('');
+  $('modal-rp-ped').classList.add('activo');
+}
+async function rppAccion(accion){
+  const p = rppActual; if(!p) return;
+  if(accion === 'cancelar' && !p.venta_id && !confirm('¿Cancelar el pedido ' + p.codigo + '? Esta acción no se puede deshacer.')) return;
+  const { error } = await sb.rpc('admin_pedido_accion', { p_pedido_id: p.id, p_accion: accion, p_repartidor_id: accion === 'solicitar_reasignar' ? $('rpp-rep').value : null, p_motivo: $('rpp-motivo').value });
+  if(error){ $('rpp-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  $('modal-rp-ped').classList.remove('activo'); await rpCargarPedidos();
+}
+$('rpp-cancelar').addEventListener('click', ()=>rppAccion(rppActual?.venta_id ? 'solicitar_cancelar' : 'cancelar'));
+$('rpp-reasignar').addEventListener('click', ()=>rppAccion('solicitar_reasignar'));
+$('rpp-quitar').addEventListener('click', ()=>rppAccion('quitar_solicitud'));
+$('rpp-cerrar').addEventListener('click', ()=>{ $('modal-rp-ped').classList.remove('activo'); });
 $('rp-ped-estado').addEventListener('change', rpRenderPedidos);
 $('rp-ped-buscar').addEventListener('input', rpRenderPedidos);
 
