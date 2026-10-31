@@ -690,7 +690,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.005';
+const APP_VERSION = '1.9.006';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3887,10 +3887,16 @@ function renderVentasDiaFiltradas(){
     // no basta con comparar contra la fecha buscada, porque ahora el rango puede incluir varios días.
     const esHoy = fechaLocalDia === hoyISO;
     const esCompletada = v.estado === 'completada';
-    const puedeModificar = esCompletada && esHoy && !v.articulo_unico;
-    const puedeCancelar = esCompletada && esHoy;
-    const puedeDevolver = v.estado !== 'cancelada';
-    const tituloModificar = v.articulo_unico
+    // Ventas a domicilio (ligadas a un pedido de reparto): entregado → solo devolución (total o parcial);
+    // con repartidor / no entregado → solo cancelar (la mercancía no llegó al cliente); nunca se editan.
+    const pdv = vdPedidosPorVenta[v.venta_id];
+    const dom = !!pdv && pdv.estado !== 'cancelado';
+    const domEntregado = dom && pdv.estado === 'entregado';
+    const domPendiente = dom && !domEntregado;
+    const puedeModificar = esCompletada && esHoy && !v.articulo_unico && !dom;
+    const puedeCancelar = esCompletada && esHoy && !domEntregado;
+    const puedeDevolver = v.estado !== 'cancelada' && !domPendiente;
+    const tituloModificar = dom ? 'Los tickets de reparto no se editan: si ya se entregó, usa devolución; si no, cancélalo.' : v.articulo_unico
       ? 'Este ticket es de un solo producto y una sola pieza — solo se puede cancelar o devolver'
       : (puedeModificar ? 'Modificar' : 'Solo se puede modificar el mismo día, sin devoluciones');
     const hora = v.fecha_hora ? new Date(v.fecha_hora).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
@@ -3905,8 +3911,8 @@ function renderVentasDiaFiltradas(){
         <button class="btn-gris vd-reimprimir" data-id="${v.venta_id}" title="Reimprimir">🖨️</button>
         <button class="btn-secundario vd-volver-cobrar" data-id="${v.venta_id}" ${esCompletada?'':'disabled'} title="${esCompletada?'Volver a cobrar (mismo cliente u otro)':'Solo se pueden volver a cobrar tickets completados'}">🔁</button>
         <button class="btn-gris vd-modificar" data-id="${v.venta_id}" ${puedeModificar?'':'disabled'} title="${tituloModificar}">✎</button>
-        <button class="btn-peligro vd-cancelar" data-id="${v.venta_id}" ${puedeCancelar?'':'disabled'} title="${puedeCancelar?'Cancelar':'Solo se puede cancelar el mismo día, sin devoluciones'}">✕</button>
-        <button class="btn-secundario vd-devolver" data-id="${v.venta_id}" ${puedeDevolver?'':'disabled'} title="${puedeDevolver?'Devolver':'Este ticket ya está cancelado'}">↩</button>
+        <button class="btn-peligro vd-cancelar" data-id="${v.venta_id}" ${puedeCancelar?'':'disabled'} title="${puedeCancelar?'Cancelar':(domEntregado?'Pedido ya entregado: solo se puede devolver':'Solo se puede cancelar el mismo día, sin devoluciones')}">✕</button>
+        <button class="btn-secundario vd-devolver" data-id="${v.venta_id}" ${puedeDevolver?'':'disabled'} title="${puedeDevolver?'Devolver':(domPendiente?'El pedido aún no se entrega: cancela el ticket':'Este ticket ya está cancelado')}">↩</button>
       </td>
     </tr>`;
   });
