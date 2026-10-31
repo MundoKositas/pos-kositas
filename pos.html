@@ -690,7 +690,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.006';
+const APP_VERSION = '1.9.007';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3894,7 +3894,7 @@ function renderVentasDiaFiltradas(){
     const domEntregado = dom && pdv.estado === 'entregado';
     const domPendiente = dom && !domEntregado;
     const puedeModificar = esCompletada && esHoy && !v.articulo_unico && !dom;
-    const puedeCancelar = esCompletada && esHoy && !domEntregado;
+    const puedeCancelar = esCompletada && (esHoy || domPendiente) && !domEntregado; // reparto sin entregar se cancela aunque sea de otro día
     const puedeDevolver = v.estado !== 'cancelada' && !domPendiente;
     const tituloModificar = dom ? 'Los tickets de reparto no se editan: si ya se entregó, usa devolución; si no, cancélalo.' : v.articulo_unico
       ? 'Este ticket es de un solo producto y una sola pieza — solo se puede cancelar o devolver'
