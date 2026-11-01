@@ -373,6 +373,7 @@
       <button type="button" class="tab-btn" data-rptab="rp-zonas">Zonas de envío</button>
       <button type="button" class="tab-btn" data-rptab="rp-pedidos">Pedidos</button>
       <button type="button" class="tab-btn" data-rptab="rp-reportes">Reportes</button>
+      <button type="button" class="tab-btn" data-rptab="rp-campanas">Clientes y promociones</button>
       <button type="button" class="tab-btn" data-rptab="rp-mensajes">Mensajes WhatsApp</button>
       <button type="button" class="tab-btn" data-rptab="rp-config">Datos del servicio</button>
     </div>
@@ -441,6 +442,12 @@
       <div class="tabla-scroll"><table><thead><tr><th>Repartidor</th><th class="num">Pedidos</th><th class="num">Entregados</th><th class="num">No entregados</th><th class="num">% entrega</th><th class="num">Vendido entregado</th><th class="num">Tiempo prom.</th><th class="num">⭐ Repartidor</th><th class="num">⭐ Servicio</th></tr></thead><tbody id="rpg-rep-body"></tbody></table></div>
       <h3>Por colonia</h3>
       <div class="tabla-scroll"><table><thead><tr><th>Colonia</th><th class="num">Pedidos</th><th class="num">Entregados</th><th class="num">No entregados</th><th class="num">Vendido entregado</th></tr></thead><tbody id="rpg-col-body"></tbody></table></div>
+      <h3>Por mes</h3>
+      <div class="tabla-scroll"><table><thead><tr><th>Mes</th><th class="num">Pedidos entregados</th><th class="num">Vendido</th><th class="num">Ticket promedio</th></tr></thead><tbody id="rpg-mes-body"></tbody></table></div>
+      <h3>Forma de pago (entregados)</h3>
+      <div class="tabla-scroll"><table><thead><tr><th>Forma</th><th class="num">Pedidos</th><th class="num">Importe</th></tr></thead><tbody id="rpg-pago-body"></tbody></table></div>
+      <h3>Mejores clientes</h3>
+      <div class="tabla-scroll"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Pedidos</th><th class="num">Comprado</th></tr></thead><tbody id="rpg-cli-body"></tbody></table></div>
       <h3>Motivos de no entrega</h3>
       <div class="tabla-scroll"><table><thead><tr><th>Motivo</th><th class="num">Veces</th></tr></thead><tbody id="rpg-mot-body"></tbody></table></div>
       <h3>Artículos calificados por los clientes</h3>
@@ -460,6 +467,25 @@
           <thead><tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Colonia</th><th>Repartidor</th><th>Estado</th><th class="num">Total</th><th>Motivo / aviso</th><th></th></tr></thead>
           <tbody id="rp-ped-body"></tbody></table></div>
         <p class="nota" id="rp-ped-vacio" style="display:none;">No hay pedidos con ese filtro.</p>
+      </div>
+    </div>
+
+    <div id="rp-campanas" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Clientes y promociones por WhatsApp</h2>
+        <p class="nota">Arma una promoción, elige a quién y envíala cliente por cliente: cada botón abre WhatsApp con el mensaje ya escrito y solo tienes que oprimir enviar. Así no hay riesgo de que bloqueen tu número por envíos automáticos masivos. Quien pida no recibir mensajes se marca «No contactar» y ya no aparece.</p>
+        <div class="grid-2">
+          <div class="campo"><label>¿A quién?</label><select id="cp-segmento"><option value="todos">Todos los que ya compraron</option><option value="una">Solo una compra (reactivar)</option><option value="frecuentes">Frecuentes (3 o más pedidos)</option><option value="inactivos">Sin comprar desde hace… días</option><option value="colonia">De una colonia</option></select></div>
+          <div class="campo" id="cp-dias-box" style="display:none;"><label>Días sin comprar</label><input type="number" id="cp-dias" value="30" min="1"></div>
+          <div class="campo" id="cp-colonia-box" style="display:none;"><label>Colonia</label><select id="cp-colonia"></select></div>
+          <div class="campo"><label>No repetir a quien ya se le envió en los últimos (días)</label><input type="number" id="cp-reenvio" value="7" min="0"></div>
+        </div>
+        <div class="campo"><label>Mensaje (usa {nombre})</label><textarea id="cp-mensaje" rows="5">Hola {nombre} 👋 Te saluda Mundo Kositas. Esta semana tenemos promociones en artículos para el hogar y entrega a domicilio en Durango 📦 Escríbenos por WhatsApp para pedir.</textarea></div>
+        <div class="campo"><label>Nombre de la campaña (para tu control)</label><input type="text" id="cp-nombre" value="Promoción" maxlength="60"></div>
+        <div class="acciones"><button class="btn-primario" id="cp-ver">Ver destinatarios</button><button class="btn-gris" id="cp-siguiente" style="display:none;">Abrir el siguiente pendiente ➜</button></div>
+        <p class="nota" id="cp-resumen"></p>
+        <div id="cp-error"></div>
+        <div class="tabla-scroll"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Pedidos</th><th>Última compra</th><th>Envíos</th><th></th></tr></thead><tbody id="cp-body"></tbody></table></div>
       </div>
     </div>
 
@@ -1147,11 +1173,13 @@
       <p class="nota">Este pedido ya está <strong>cargado al crédito del repartidor</strong>. El dinero solo se mueve desde caja: aquí dejas la solicitud y en el POS aparece en «Pedidos por resolver», donde el cajero cancela la venta y (si aplica) lo vuelve a mandar.</p>
       <div class="campo"><label>Reasignar a (puede ser el mismo repartidor)</label><select id="rpp-rep"></select></div>
     </div>
-    <div class="campo"><label>Motivo (opcional)</label><input type="text" id="rpp-motivo" maxlength="200"></div>
+    <p class="nota" id="rpp-nota-revertir" style="display:none;">Úsalo solo si por error se marcó como entregado un pedido que no era. Regresa a «Con repartidor» para que el repartidor marque el correcto; el motivo es obligatorio y queda en la bitácora.</p>
+    <div class="campo"><label id="rpp-motivo-label">Motivo (opcional)</label><input type="text" id="rpp-motivo" maxlength="200"></div>
     <div class="acciones" style="flex-wrap:wrap;">
       <button class="btn-gris" id="rpp-cerrar">Cerrar</button>
       <button class="btn-gris" id="rpp-quitar" style="display:none;">Quitar solicitud</button>
       <button class="btn-peligro" id="rpp-cancelar"></button>
+      <button class="btn-primario" id="rpp-revertir" style="display:none;">↩️ Revertir a «Con repartidor»</button>
       <button class="btn-primario" id="rpp-reasignar">Solicitar reasignación</button>
     </div>
   </div>
@@ -1939,7 +1967,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.33.004';
+const APP_VERSION = '1.34.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -8579,10 +8607,71 @@ state.rpRepEditId = null; state.rpZonaEditId = null; state.rpRepartidores = []; 
 const rpEsc = s => String(s ?? '').replace(/[&<>"]/g, c=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 document.querySelectorAll('#rp-tabs .tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
   document.querySelectorAll('#rp-tabs .tab-btn').forEach(b=>b.classList.remove('activo')); btn.classList.add('activo');
-  ['rp-repartidores','rp-zonas','rp-pedidos','rp-reportes','rp-mensajes','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
+  ['rp-repartidores','rp-zonas','rp-pedidos','rp-reportes','rp-campanas','rp-mensajes','rp-config'].forEach(id=>{ $(id).style.display = id === btn.dataset.rptab ? 'block' : 'none'; });
   if(btn.dataset.rptab === 'rp-reportes') rpgCargar();
+  if(btn.dataset.rptab === 'rp-campanas') cpPreparar();
 }));
 document.querySelector('[data-tab="tab-reparto"]').addEventListener('click', ()=>{ rpCargarRepartidores().then(rpCargarPedidos); rpCargarZonas(); rpCargarConfig(); rpCargarMensajes(); });
+
+// ----- Clientes y promociones (WhatsApp) -----
+let cpClientes = [], cpContactos = {}, cpLista = [];
+const cpTel = t => String(t||'').replace(/\D/g,'').slice(-10);
+async function cpPreparar(){
+  $('cp-error').innerHTML = '';
+  try{ const g = localStorage.getItem('cp-mensaje'); if(g) $('cp-mensaje').value = g; }catch(e){}
+  const [{ data: peds, error }, { data: cts }] = await Promise.all([
+    sb.from('pedidos_reparto').select('nombre, telefono, colonia, total, creado_en, entregado_en').eq('empresa_id', state.empresaId).eq('estado','entregado').order('creado_en', { ascending:false }).limit(5000),
+    sb.from('wa_contactos').select('*').eq('empresa_id', state.empresaId).limit(5000),
+  ]);
+  if(error){ $('cp-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  cpContactos = {}; (cts||[]).forEach(c=>{ cpContactos[c.telefono] = c; });
+  const m = {};
+  (peds||[]).forEach(p=>{ const t = cpTel(p.telefono); if(t.length !== 10) return; const f = p.entregado_en || p.creado_en; const c = m[t] = m[t] || { tel:t, nombre:p.nombre, colonia:p.colonia, n:0, ultima:f, total:0 }; c.n++; c.total += Number(p.total)||0; });
+  cpClientes = Object.values(m);
+  const cols = [...new Set(cpClientes.map(c=>(c.colonia||'').toUpperCase()).filter(Boolean))].sort();
+  $('cp-colonia').innerHTML = cols.map(c=>`<option>${rpEsc(c)}</option>`).join('');
+  cpVer();
+}
+function cpVer(){
+  const seg = $('cp-segmento').value, dias = Number($('cp-dias').value)||30, reenv = Number($('cp-reenvio').value)||0, ahora = Date.now();
+  $('cp-dias-box').style.display = seg === 'inactivos' ? '' : 'none'; $('cp-colonia-box').style.display = seg === 'colonia' ? '' : 'none';
+  let l = cpClientes.filter(c=>{
+    const ct = cpContactos[c.tel]; if(ct?.no_contactar) return false;
+    if(reenv && ct?.ultimo_envio && (ahora - new Date(ct.ultimo_envio)) < reenv*86400000) return false;
+    if(seg === 'una') return c.n === 1;
+    if(seg === 'frecuentes') return c.n >= 3;
+    if(seg === 'inactivos') return (ahora - new Date(c.ultima)) >= dias*86400000;
+    if(seg === 'colonia') return (c.colonia||'').toUpperCase() === $('cp-colonia').value;
+    return true;
+  }).sort((a,b)=>new Date(b.ultima) - new Date(a.ultima));
+  cpLista = l;
+  const bloqueados = cpClientes.filter(c=>cpContactos[c.tel]?.no_contactar).length;
+  $('cp-resumen').textContent = `${l.length} destinatario(s) listos${bloqueados ? ` · ${bloqueados} marcado(s) «No contactar» fuera de la lista` : ''}.`;
+  $('cp-siguiente').style.display = l.length ? '' : 'none';
+  $('cp-body').innerHTML = l.slice(0,300).map(c=>{ const ct = cpContactos[c.tel]; return `<tr><td>${rpEsc(c.nombre)}</td><td>${c.tel}</td><td class="num">${c.n}</td><td>${String(c.ultima).slice(0,10)}</td><td>${ct?.envios||0}</td><td style="white-space:nowrap;"><button class="btn-primario cp-enviar" data-tel="${c.tel}">💬 Enviar</button> <button class="btn-gris cp-no" data-tel="${c.tel}" title="Pidió no recibir mensajes">🚫 No contactar</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="nota">Nadie cumple ese filtro.</td></tr>';
+}
+async function cpMarcar(tel, campos){
+  const prev = cpContactos[tel] || {};
+  const fila = { empresa_id: state.empresaId, telefono: tel, no_contactar: prev.no_contactar || false, envios: prev.envios || 0, ultimo_envio: prev.ultimo_envio || null, ultima_campana: prev.ultima_campana || null, ...campos };
+  const { error } = await sb.from('wa_contactos').upsert(fila, { onConflict: 'empresa_id,telefono' });
+  if(error){ $('cp-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return false; }
+  cpContactos[tel] = { ...prev, ...fila }; return true;
+}
+async function cpEnviar(tel){
+  const c = cpClientes.find(x=>x.tel === tel); if(!c) return;
+  const txt = $('cp-mensaje').value.replace(/\{nombre\}/gi, (c.nombre||'').split(' ')[0] || 'amigo(a)');
+  try{ localStorage.setItem('cp-mensaje', $('cp-mensaje').value); }catch(e){}
+  window.open('https://wa.me/52' + tel + '?text=' + encodeURIComponent(txt), '_blank');
+  await cpMarcar(tel, { ultimo_envio: new Date().toISOString(), ultima_campana: $('cp-nombre').value.trim(), envios: (cpContactos[tel]?.envios||0) + 1 });
+  cpVer();
+}
+$('cp-ver').addEventListener('click', cpVer);
+['cp-segmento','cp-colonia'].forEach(id=>$(id).addEventListener('change', cpVer));
+$('cp-siguiente').addEventListener('click', ()=>{ if(cpLista[0]) cpEnviar(cpLista[0].tel); });
+$('cp-body').addEventListener('click', async e=>{
+  const b = e.target.closest('.cp-enviar'); if(b){ cpEnviar(b.dataset.tel); return; }
+  const n = e.target.closest('.cp-no'); if(n && confirm('¿Marcar como «No contactar»? Ya no aparecerá en ninguna promoción.')){ await cpMarcar(n.dataset.tel, { no_contactar: true }); cpVer(); }
+});
 
 // ----- Repartidores -----
 async function rpCargarRepartidores(){
@@ -8735,7 +8824,7 @@ async function rpgVer(){
   $('rpg-error').innerHTML = '';
   const desde = $('rpg-desde').value, hasta = $('rpg-hasta').value, repId = $('rpg-rep').value;
   if(!desde || !hasta){ $('rpg-error').innerHTML = '<div class="msg-error">Elige el rango de fechas.</div>'; return; }
-  let q = sb.from('pedidos_reparto').select('id, codigo, estado, total, costo_envio, colonia, repartidor_id, motivo_no_entrega, creado_en, entregado_en').eq('empresa_id', state.empresaId)
+  let q = sb.from('pedidos_reparto').select('id, codigo, estado, total, costo_envio, colonia, repartidor_id, motivo_no_entrega, creado_en, entregado_en, metodo_pago, nombre, telefono').eq('empresa_id', state.empresaId)
     .gte('creado_en', desde + 'T00:00:00-06:00').lte('creado_en', hasta + 'T23:59:59-06:00').order('creado_en', { ascending:false }).limit(5000);
   if(repId) q = q.eq('repartidor_id', repId);
   let qr = sb.from('resenas_reparto').select('pedido_id, repartidor_id, estrellas_repartidor, estrellas_servicio, comentario, cliente_nombre, respondida_en').eq('empresa_id', state.empresaId).eq('respondida', true)
@@ -8744,7 +8833,16 @@ async function rpgVer(){
   const qa = sb.from('resenas_articulos').select('nombre, producto_id, estrellas').eq('empresa_id', state.empresaId).gte('creado_en', desde + 'T00:00:00-06:00').lte('creado_en', hasta + 'T23:59:59-06:00').limit(5000);
   const [{ data: peds, error }, { data: ress }, { data: arts }] = await Promise.all([q, qr, qa]);
   if(error){ $('rpg-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
-  rpgPintar(peds||[], ress||[]); rpgArticulos(arts||[]);
+  rpgPintar(peds||[], ress||[]); rpgArticulos(arts||[]); rpgExtras(peds||[]);
+}
+function rpgExtras(peds){
+  const ent = peds.filter(p=>p.estado === 'entregado'), tot = (a)=>a.reduce((s,x)=>s+(Number(x.total)||0),0);
+  const meses = {}; ent.forEach(p=>{ const m = String(p.entregado_en || p.creado_en).slice(0,7); (meses[m] = meses[m] || []).push(p); });
+  $('rpg-mes-body').innerHTML = Object.keys(meses).sort().reverse().map(m=>`<tr><td>${m}</td><td class="num">${meses[m].length}</td><td class="num">${money(tot(meses[m]))}</td><td class="num">${money(tot(meses[m])/meses[m].length)}</td></tr>`).join('') || '<tr><td colspan="4" class="nota">Sin entregas en el rango.</td></tr>';
+  const pagos = {}; ent.forEach(p=>{ const k = p.metodo_pago === 'transferencia' ? 'Transferencia' : 'Efectivo'; (pagos[k] = pagos[k] || []).push(p); });
+  $('rpg-pago-body').innerHTML = Object.entries(pagos).map(([k,l])=>`<tr><td>${k}</td><td class="num">${l.length}</td><td class="num">${money(tot(l))}</td></tr>`).join('') || '<tr><td colspan="3" class="nota">Sin entregas en el rango.</td></tr>';
+  const cli = {}; ent.forEach(p=>{ const k = (p.telefono||'').replace(/\D/g,'').slice(-10) || p.nombre; (cli[k] = cli[k] || { n:p.nombre, t:p.telefono, l:[] }).l.push(p); });
+  $('rpg-cli-body').innerHTML = Object.values(cli).sort((a,b)=>tot(b.l)-tot(a.l)).slice(0,15).map(c=>`<tr><td>${rpEsc(c.n)}</td><td>${rpEsc(c.t||'')}</td><td class="num">${c.l.length}</td><td class="num">${money(tot(c.l))}</td></tr>`).join('') || '<tr><td colspan="4" class="nota">Sin entregas en el rango.</td></tr>';
 }
 function rpgArticulos(arts){
   const g = {}; arts.forEach(a=>{ const k = a.producto_id || a.nombre; (g[k] = g[k] || { nombre:a.nombre, e:[] }).e.push(a.estrellas); });
@@ -8799,6 +8897,10 @@ function rppAbrir(id){
   $('rpp-reasignar').style.display = conVenta ? '' : 'none';
   $('rpp-quitar').style.display = p.solicitud ? '' : 'none';
   $('rpp-cancelar').textContent = conVenta ? 'Solicitar cancelación' : 'Cancelar pedido';
+  const ent = p.estado === 'entregado';
+  if(ent){ $('rpp-bloque-venta').style.display = 'none'; $('rpp-reasignar').style.display = 'none'; $('rpp-quitar').style.display = 'none'; }
+  $('rpp-cancelar').style.display = ent ? 'none' : ''; $('rpp-revertir').style.display = ent ? '' : 'none'; $('rpp-nota-revertir').style.display = ent ? 'block' : 'none';
+  $('rpp-motivo-label').textContent = ent ? 'Motivo de la reversión (obligatorio)' : 'Motivo (opcional)';
   $('rpp-rep').innerHTML = (state.rpRepartidores||[]).filter(r=>r.estado === 'activo' || r.id === p.repartidor_id).map(r=>`<option value="${r.id}" ${r.id === (p.solicitud?.repartidor_id || p.repartidor_id) ? 'selected' : ''}>${rpEsc(r.nombre)}</option>`).join('');
   $('modal-rp-ped').classList.add('activo');
 }
@@ -8811,6 +8913,10 @@ async function rppAccion(accion){
 }
 $('rpp-cancelar').addEventListener('click', ()=>rppAccion(rppActual?.venta_id ? 'solicitar_cancelar' : 'cancelar'));
 $('rpp-reasignar').addEventListener('click', ()=>rppAccion('solicitar_reasignar'));
+$('rpp-revertir').addEventListener('click', ()=>{
+  if(!$('rpp-motivo').value.trim()){ $('rpp-error').innerHTML = '<div class="msg-error">Captura el motivo de la reversión.</div>'; return; }
+  if(confirm('¿Regresar el pedido ' + rppActual.codigo + ' a «Con repartidor»?')) rppAccion('revertir_entregado');
+});
 $('rpp-quitar').addEventListener('click', ()=>rppAccion('quitar_solicitud'));
 $('rpp-cerrar').addEventListener('click', ()=>{ $('modal-rp-ped').classList.remove('activo'); });
 $('rp-ped-estado').addEventListener('change', rpRenderPedidos);
