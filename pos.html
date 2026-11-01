@@ -269,6 +269,12 @@
     <div id="rep-error"></div>
     <div class="totales" id="rep-resumen" style="margin-top:14px;"></div>
   </div>
+  <div class="card" style="margin-top:14px;">
+    <h2 style="margin-top:0;">Resumen rápido (usa el mismo rango de fechas)</h2>
+    <button class="btn-secundario" id="rep-mini-ver">Ver ventas por categoría, línea y descuentos</button>
+    <div id="rep-mini-error"></div>
+    <div id="rep-mini" style="margin-top:12px;"></div>
+  </div>
 </div>
 
 <!-- BLOQUE B (Ronda 17): dashboard de ventas del día -->
@@ -690,7 +696,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.007';
+const APP_VERSION = '1.9.008';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -4971,6 +4977,24 @@ $('btn-reportes').addEventListener('click', ()=>{
   mostrarPantalla('pantalla-reportes');
 });
 $('rep-volver').addEventListener('click', ()=>{ mostrarPantalla('pantalla-pos'); });
+function miniTabla(titulo, cols, filas, nota){
+  if(!filas.length) return `<h3 style="margin:14px 0 4px;">${titulo}</h3><p class="nota">${nota || 'Sin datos en el rango.'}</p>`;
+  return `<h3 style="margin:14px 0 4px;">${titulo}</h3><div class="tabla-scroll"><table><thead><tr>${cols.map((c,i)=>`<th${i ? ' class="num"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>${filas.map(f=>`<tr>${f.map((v,i)=>`<td${i ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+$('rep-mini-ver').addEventListener('click', async ()=>{
+  $('rep-mini-error').innerHTML = ''; $('rep-mini').innerHTML = '<p class="nota">Calculando…</p>';
+  const desde = $('rep-fecha-desde').value, hasta = $('rep-fecha-hasta').value;
+  if(!desde || !hasta || desde > hasta){ $('rep-mini').innerHTML = ''; $('rep-mini-error').innerHTML = '<div class="msg-error">Revisa el rango de fechas.</div>'; return; }
+  const { data, error } = await sb.rpc('minireportes_pos', { p_fecha_desde: desde, p_fecha_hasta: hasta, p_sucursal_id: state.sucursalId });
+  if(error){ $('rep-mini').innerHTML = ''; $('rep-mini-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
+  const tot = (data.por_categoria||[]).reduce((s,x)=>s+Number(x.venta||0),0);
+  $('rep-mini').innerHTML =
+    miniTabla('Por categoría', ['Categoría','Piezas','Venta','% del total'], (data.por_categoria||[]).map(x=>[x.nombre, x.piezas, money(x.venta), tot ? Math.round(x.venta/tot*100) + '%' : '—']))
+    + miniTabla('Por línea de artículo', ['Línea','Piezas','Venta'], (data.por_linea||[]).map(x=>[`${x.nombre} <small style="color:#6b7280;">(${x.categoria})</small>`, x.piezas, money(x.venta)]))
+    + miniTabla('Descuentos aplicados', ['Descuento','Renglones','Monto descontado'], (data.descuentos||[]).map(x=>[x.nombre, x.renglones, money(x.monto)]), 'No se aplicaron descuentos en el rango.')
+    + miniTabla('Los 10 más vendidos', ['Artículo','Piezas','Venta'], (data.top_productos||[]).map(x=>[x.nombre, x.piezas, money(x.venta)]))
+    + '<p class="nota">Venta neta de descuentos y sin contar tickets cancelados. Los servicios (ej. envío a domicilio) aparecen como su propia categoría.</p>';
+});
 
 // Texto legible de los filtros de categoría/línea activos en la pestaña Reportes (ej. "Categoría:
 // Botanas · Línea: Fritura"), o null si no hay ninguno — se usa para dejar constancia en el

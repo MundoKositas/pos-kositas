@@ -777,6 +777,24 @@
       <button type="button" class="tab-btn activo" data-invtab="inv-panel-almacenes">Almacenes</button>
       <button type="button" class="tab-btn" data-invtab="inv-panel-ajustes">Salidas por ajuste</button>
       <button type="button" class="tab-btn" data-invtab="inv-panel-traspasos">Traspasos</button>
+      <button type="button" class="tab-btn" data-invtab="inv-panel-lotes">Lotes <span id="lot-badge" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:0 6px;font-size:.72rem;"></span></button>
+    </div>
+
+    <div id="inv-panel-lotes" style="display:none;">
+      <div class="card">
+        <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <h2 style="margin:0;flex:1;">Lotes y caducidades</h2>
+          <div class="campo"><label>Almacén</label><select id="lot-almacen"></select></div>
+          <div class="campo"><label>Mostrar</label><select id="lot-filtro"><option value="todos">Todos los lotes</option><option value="alerta">Por caducar (30 días) y vencidos</option><option value="vencidos">Solo vencidos</option></select></div>
+        </div>
+        <div id="lot-error"></div>
+        <h3>Existencia sin lote</h3>
+        <p class="nota">Artículos que controlan lote y tienen piezas todavía sin asignar (por ejemplo, tras una compra). Asígnalas a un lote con su fecha de caducidad.</p>
+        <div class="tabla-scroll"><table><thead><tr><th>Artículo</th><th class="num">Existencia</th><th class="num">En lotes</th><th class="num">Sin lote</th><th></th></tr></thead><tbody id="lot-sinlote-body"></tbody></table></div>
+        <h3>Lotes</h3>
+        <div class="tabla-scroll"><table><thead><tr><th>Artículo</th><th>Lote</th><th>Caduca</th><th>Estado</th><th class="num">Quedan</th><th></th></tr></thead><tbody id="lot-body"></tbody></table></div>
+        <p class="nota" id="lot-vacio" style="display:none;">No hay lotes con ese filtro.</p>
+      </div>
     </div>
 
     <div id="inv-panel-almacenes">
@@ -1070,6 +1088,19 @@
 </div>
 
 <!-- MODAL: alta/edición de rol, con matriz de permisos (Ronda 32) -->
+<div class="modal-fondo" id="modal-lote">
+  <div class="modal" style="max-width:460px;">
+    <h2 id="lote-titulo">Lote</h2>
+    <p class="nota" id="lote-info"></p>
+    <div id="lote-error"></div>
+    <div class="campo"><label>Código o nombre del lote</label><input type="text" id="lote-codigo" maxlength="60"></div>
+    <div class="campo"><label>Fecha de caducidad (opcional)</label><input type="date" id="lote-caducidad"></div>
+    <div class="campo" id="lote-cant-campo"><label>Cantidad de piezas</label><input type="number" id="lote-cantidad" min="1" step="1"></div>
+    <div class="campo" id="lote-motivo-campo" style="display:none;"><label>Motivo (opcional)</label><input type="text" id="lote-motivo" maxlength="120" placeholder="Ej. caducado, dañado"></div>
+    <div class="acciones"><button class="btn-gris" id="lote-cancelar">Cancelar</button><button class="btn-primario" id="lote-guardar">Guardar</button></div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-rp-ped">
   <div class="modal" style="max-width:520px;">
     <h2 id="rpp-titulo">Pedido</h2>
@@ -1569,6 +1600,12 @@
           </div>
         </div>
       </div>
+      <div class="campo" id="prod-extra-bloque">
+        <label>Imágenes adicionales para el catálogo (hasta 4)</label>
+        <div id="prod-extra-lista" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;"></div>
+        <input type="file" accept="image/*" id="prod-extra-archivo">
+        <p class="nota" id="prod-extra-estado" style="margin:4px 0 0;">Se agregan o quitan al momento. Guarda primero el producto para poder agregarlas.</p>
+      </div>
       <div class="grid-2">
         <div class="campo"><label>Nombre</label><input type="text" id="prod-nombre"></div>
         <div class="campo">
@@ -1633,6 +1670,8 @@
       </div>
       <div class="campo">
         <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo-reparto" checked style="width:auto;"> Activo en el catálogo del servicio a domicilio</label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="prod-controla-lote" style="width:auto;"> Controla lote y caducidad (dulcería, botanas…)</label>
+        <p class="nota" style="margin:2px 0 0 26px;">Se vende primero el lote que caduca antes. Los lotes se asignan en Inventario → Lotes.</p>
       </div>
     </div>
 
@@ -1861,7 +1900,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.32.003';
+const APP_VERSION = '1.33.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2739,7 +2778,7 @@ async function cargarProductos(){
   const { data, error } = await sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id,
     producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
-      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable,
+      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
     stock:existencias(cantidad, minimo, maximo, almacen_id),
@@ -2760,7 +2799,7 @@ async function cargarProductos(){
       imagenUrl: v.producto.imagen_url || null,
       costo: v.producto.costo_ultima_compra,
       lineaArticuloId: v.producto.linea_articulo_id, unidadMedidaId: v.producto.unidad_medida_id,
-      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable,
+      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote,
       impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
         impuestoId: pi.impuesto_id, nombre: pi.impuestos?.nombre || 'Impuesto', tasa: Number(pi.impuestos?.tasa)||0,
       })),
@@ -3893,6 +3932,37 @@ $('cat-exportar-resurtido').addEventListener('click', async ()=>{
   }
 });
 
+// ---------- Imágenes adicionales del producto (producto_imagenes → carrusel del catálogo) ----------
+async function extraCargar(){
+  const pid = state.productoEditId;
+  $('prod-extra-archivo').disabled = !pid;
+  if(!pid){ $('prod-extra-lista').innerHTML = ''; return; }
+  const { data } = await sb.from('producto_imagenes').select('id, url, orden').eq('producto_id', pid).order('orden');
+  state.extraImgs = data || [];
+  $('prod-extra-lista').innerHTML = state.extraImgs.map(i=>`<div style="position:relative;"><img src="${i.url}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--borde);"><button type="button" class="btn-peligro prod-extra-quitar" data-id="${i.id}" style="position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:50%;">✕</button></div>`).join('');
+  $('prod-extra-archivo').disabled = state.extraImgs.length >= 4;
+}
+$('prod-extra-lista').addEventListener('click', async e=>{
+  const b = e.target.closest('.prod-extra-quitar'); if(!b) return;
+  const { error } = await sb.from('producto_imagenes').delete().eq('id', b.dataset.id);
+  if(error){ $('prod-extra-estado').textContent = 'Error: ' + error.message; return; }
+  await extraCargar();
+});
+$('prod-extra-archivo').addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file || !state.productoEditId) return;
+  if((state.extraImgs||[]).length >= 4){ $('prod-extra-estado').textContent = 'Máximo 4 imágenes adicionales.'; return; }
+  $('prod-extra-estado').textContent = 'Subiendo…';
+  const nombre = `extra-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const up = await sb.storage.from('productos').upload(nombre, file, { upsert:true });
+  if(up.error){ $('prod-extra-estado').textContent = 'Error al subir: ' + up.error.message; return; }
+  const { data: pub } = sb.storage.from('productos').getPublicUrl(nombre);
+  const orden = (state.extraImgs||[]).reduce((m,i)=>Math.max(m, i.orden||0), 0) + 1;
+  const { error } = await sb.from('producto_imagenes').insert({ empresa_id: state.empresaId, producto_id: state.productoEditId, url: pub.publicUrl, orden });
+  e.target.value = '';
+  $('prod-extra-estado').textContent = error ? 'Error: ' + error.message : 'Imagen agregada (ya se ve en el catálogo).';
+  await extraCargar();
+});
+
 // ---------- MODAL PRODUCTO ----------
 $('btn-nuevo-producto').addEventListener('click', ()=>abrirProducto(null));
 
@@ -4008,6 +4078,7 @@ function abrirProducto(varianteId){
   $('prod-inventariable').checked = p ? !!p.inventariable : true;
   $('prod-activo').checked = p ? !!p.activo : true;
   $('prod-activo-reparto').checked = p ? !!p.activoReparto : true;
+  $('prod-controla-lote').checked = p ? !!p.controlaLote : false;
   $('prod-cant-inicial-campo').style.display = p ? 'none' : 'block';
   $('prod-cant-inicial').value = 0;
 
@@ -4019,6 +4090,7 @@ function abrirProducto(varianteId){
     $('prod-imagen-preview').style.display = 'none';
   }
   $('prod-imagen-estado').textContent = '';
+  $('prod-extra-archivo').value = ''; extraCargar();
 
   renderCodigosBarra(p?.codigos && p.codigos.length ? p.codigos : [{codigo:'', tipo:'individual', factor:1}]);
 
@@ -4445,6 +4517,8 @@ async function guardarProducto(){
     return false;
   }
   state.varianteEditId = data; // variante recién creada/editada — usado por el flujo de altas pendientes de XML
+  { const { data: vv } = await sb.from('variantes').select('producto_id').eq('id', data).maybeSingle();
+    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
   await cargarProductos();
   // El snapshot se actualiza para que formTieneCambios() ya no detecte estos cambios como pendientes
   // (relevante para el flujo de "Guardar y continuar" desde el modal de cambios sin guardar).
@@ -5884,7 +5958,7 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#inv-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
     btn.classList.add('activo');
-    ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos'].forEach(id=>{
+    ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos','inv-panel-lotes'].forEach(id=>{
       $(id).style.display = (id === btn.dataset.invtab) ? 'block' : 'none';
     });
     // Ronda 28: a diferencia de "Compras registradas" (que recuerda el rango que se haya
@@ -5896,6 +5970,7 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
       $('ajustes-lista-hasta').value = fechaLocalISO();
       cargarAjustesLista();
     }
+    if(btn.dataset.invtab === 'inv-panel-lotes') lotPreparar();
     if(btn.dataset.invtab === 'inv-panel-traspasos'){
       $('trasp-lista-desde').value = fechaLocalISO();
       $('trasp-lista-hasta').value = fechaLocalISO();
@@ -5903,6 +5978,83 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
     }
   });
 });
+
+// ---- Lotes y caducidades ----
+const lotNombre = v => (v?.producto?.nombre || '—') + (v?.nombre_variante && v.nombre_variante !== 'Único' ? ' · ' + v.nombre_variante : '');
+const lotDias = f => f ? Math.round((new Date(f + 'T00:00:00') - new Date(fechaLocalISO() + 'T00:00:00')) / 86400000) : null;
+function lotPreparar(){
+  const sel = $('lot-almacen'), previo = sel.value;
+  sel.innerHTML = state.almacenes.filter(a=>a.activo).map(a=>`<option value="${a.id}">${rpEsc(a.nombre)}</option>`).join('');
+  sel.value = previo || state.almacenId || sel.options[0]?.value || '';
+  lotCargar();
+}
+$('lot-almacen').addEventListener('change', lotCargar);
+$('lot-filtro').addEventListener('change', lotPintar);
+async function lotCargar(){
+  $('lot-error').innerHTML = '';
+  const alm = $('lot-almacen').value; if(!alm) return;
+  const [{ data: lotes, error }, { data: vars }] = await Promise.all([
+    sb.from('lotes').select('id, variante_id, codigo, fecha_caducidad, cantidad, cantidad_inicial, variante:variantes(nombre_variante, producto:productos(nombre))').eq('almacen_id', alm).eq('activo', true).gt('cantidad', 0).order('fecha_caducidad', { nullsFirst:false }),
+    sb.from('variantes').select('id, nombre_variante, producto:productos!inner(nombre, controla_lote), stock:existencias(cantidad, almacen_id)').eq('producto.controla_lote', true),
+  ]);
+  if(error){ $('lot-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  state.lotes = lotes || [];
+  state.lotSinLote = (vars||[]).map(v=>{
+    const ex = Number((v.stock||[]).find(s=>s.almacen_id === alm)?.cantidad) || 0;
+    const en = state.lotes.filter(l=>l.variante_id === v.id).reduce((s,l)=>s+Number(l.cantidad),0);
+    return { id:v.id, nombre: lotNombre(v), existencia: ex, enLotes: en, sin: Math.max(0, ex - en) };
+  }).filter(x=>x.sin > 0 || x.existencia > 0 && x.enLotes === 0).filter(x=>x.sin > 0);
+  lotPintar(); lotAviso();
+}
+function lotPintar(){
+  const f = $('lot-filtro').value;
+  const est = l => { const d = lotDias(l.fecha_caducidad); return d == null ? ['Sin caducidad', '#6b7280'] : d < 0 ? ['Vencido hace ' + (-d) + ' d', '#dc2626'] : d <= 30 ? ['Caduca en ' + d + ' d', '#b45309'] : ['Vigente (' + d + ' d)', '#15803d']; };
+  const filas = (state.lotes||[]).filter(l=>{ const d = lotDias(l.fecha_caducidad); return f === 'todos' || (f === 'alerta' && d != null && d <= 30) || (f === 'vencidos' && d != null && d < 0); });
+  $('lot-vacio').style.display = filas.length ? 'none' : 'block';
+  $('lot-body').innerHTML = filas.map(l=>{ const [t,c] = est(l); const d = lotDias(l.fecha_caducidad);
+    return `<tr><td>${rpEsc(lotNombre(l.variante))}</td><td>${rpEsc(l.codigo)}</td><td>${l.fecha_caducidad || '—'}</td><td style="color:${c};font-weight:700;">${t}</td><td class="num">${Number(l.cantidad)}</td>
+      <td style="white-space:nowrap;"><button class="btn-gris lot-editar" data-id="${l.id}">Editar</button> <button class="${d != null && d < 0 ? 'btn-peligro' : 'btn-gris'} lot-merma" data-id="${l.id}">Dar de baja</button></td></tr>`; }).join('');
+  $('lot-sinlote-body').innerHTML = (state.lotSinLote||[]).map(x=>`<tr><td>${rpEsc(x.nombre)}</td><td class="num">${x.existencia}</td><td class="num">${x.enLotes}</td><td class="num"><strong>${x.sin}</strong></td><td><button class="btn-primario lot-asignar" data-id="${x.id}">Asignar a lote</button></td></tr>`).join('') || '<tr><td colspan="5" class="nota">Todo el inventario de artículos con lote ya está asignado. ✅</td></tr>';
+}
+async function lotAviso(){
+  const { data } = await sb.from('lotes').select('fecha_caducidad').eq('activo', true).gt('cantidad', 0).not('fecha_caducidad', 'is', null).lte('fecha_caducidad', new Date(Date.now() + 30*86400000).toISOString().slice(0,10));
+  const n = (data||[]).length, b = $('lot-badge'); b.style.display = n ? 'inline' : 'none'; b.textContent = n;
+}
+let lotModo = null, lotSel = null;
+document.addEventListener('click', e=>{
+  const a = e.target.closest('.lot-asignar'), ed = e.target.closest('.lot-editar'), m = e.target.closest('.lot-merma');
+  if(a){ const x = state.lotSinLote.find(v=>v.id === a.dataset.id); lotSel = { varianteId:x.id, max:x.sin }; lotModo = 'asignar';
+    $('lote-titulo').textContent = 'Asignar a lote'; $('lote-info').textContent = `${x.nombre} · hasta ${x.sin} pieza(s) sin lote.`; $('lote-codigo').value = ''; $('lote-caducidad').value = ''; $('lote-cantidad').value = x.sin;
+    $('lote-cant-campo').style.display = ''; $('lote-motivo-campo').style.display = 'none'; $('lote-codigo').disabled = false; $('lote-caducidad').disabled = false; $('lote-error').innerHTML = ''; $('modal-lote').classList.add('activo'); }
+  if(ed){ const l = state.lotes.find(v=>v.id === ed.dataset.id); lotSel = { id:l.id }; lotModo = 'editar';
+    $('lote-titulo').textContent = 'Editar lote'; $('lote-info').textContent = lotNombre(l.variante); $('lote-codigo').value = l.codigo; $('lote-caducidad').value = l.fecha_caducidad || '';
+    $('lote-cant-campo').style.display = 'none'; $('lote-motivo-campo').style.display = 'none'; $('lote-codigo').disabled = false; $('lote-caducidad').disabled = false; $('lote-error').innerHTML = ''; $('modal-lote').classList.add('activo'); }
+  if(m){ const l = state.lotes.find(v=>v.id === m.dataset.id); lotSel = { id:l.id, max:Number(l.cantidad) }; lotModo = 'merma';
+    $('lote-titulo').textContent = 'Dar de baja (merma por caducidad)'; $('lote-info').textContent = `${lotNombre(l.variante)} · lote ${l.codigo} · quedan ${l.cantidad}. Se descuenta de la existencia.`; $('lote-codigo').value = l.codigo; $('lote-caducidad').value = l.fecha_caducidad || '';
+    $('lote-codigo').disabled = true; $('lote-caducidad').disabled = true; $('lote-cantidad').value = l.cantidad; $('lote-motivo').value = Number(lotDias(l.fecha_caducidad)) < 0 ? 'caducado' : '';
+    $('lote-cant-campo').style.display = ''; $('lote-motivo-campo').style.display = ''; $('lote-error').innerHTML = ''; $('modal-lote').classList.add('activo'); }
+});
+$('lote-cancelar').addEventListener('click', ()=>$('modal-lote').classList.remove('activo'));
+$('lote-guardar').addEventListener('click', async ()=>{
+  const fallo = msg => { $('lote-error').innerHTML = `<div class="msg-error">${rpEsc(msg)}</div>`; };
+  let r;
+  if(lotModo === 'asignar'){
+    const cant = Number($('lote-cantidad').value);
+    if(!$('lote-codigo').value.trim()) return fallo('Captura el código o nombre del lote.');
+    if(!(cant > 0) || cant > lotSel.max) return fallo('La cantidad debe estar entre 1 y ' + lotSel.max + '.');
+    r = await sb.rpc('lote_asignar', { p_variante_id: lotSel.varianteId, p_almacen_id: $('lot-almacen').value, p_codigo: $('lote-codigo').value, p_caducidad: $('lote-caducidad').value || null, p_cantidad: cant });
+  } else if(lotModo === 'editar'){
+    if(!$('lote-codigo').value.trim()) return fallo('Captura el código del lote.');
+    r = await sb.from('lotes').update({ codigo: $('lote-codigo').value.trim(), fecha_caducidad: $('lote-caducidad').value || null }).eq('id', lotSel.id);
+  } else {
+    const cant = Number($('lote-cantidad').value);
+    if(!(cant > 0) || cant > lotSel.max) return fallo('La cantidad debe estar entre 1 y ' + lotSel.max + '.');
+    r = await sb.rpc('lote_merma', { p_lote_id: lotSel.id, p_cantidad: cant, p_motivo: $('lote-motivo').value });
+  }
+  if(r.error) return fallo(r.error.message);
+  $('modal-lote').classList.remove('activo'); await lotCargar();
+});
+setTimeout(()=>{ if(state.empresaId) lotAviso().catch(()=>{}); }, 6000);
 
 // ---- Almacenes ----
 function renderAlmacenesTabla(){
