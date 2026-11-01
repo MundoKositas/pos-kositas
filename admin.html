@@ -777,7 +777,20 @@
       <button type="button" class="tab-btn activo" data-invtab="inv-panel-almacenes">Almacenes</button>
       <button type="button" class="tab-btn" data-invtab="inv-panel-ajustes">Salidas por ajuste</button>
       <button type="button" class="tab-btn" data-invtab="inv-panel-traspasos">Traspasos</button>
+      <button type="button" class="tab-btn" data-invtab="inv-panel-series">Series</button>
       <button type="button" class="tab-btn" data-invtab="inv-panel-lotes">Lotes <span id="lot-badge" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:0 6px;font-size:.72rem;"></span></button>
+    </div>
+
+    <div id="inv-panel-series" style="display:none;">
+      <div class="card">
+        <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <h2 style="margin:0;flex:1;">Números de serie</h2>
+          <div class="campo"><label>Buscar</label><input type="text" id="ser-buscar" placeholder="Serie o producto"></div>
+          <div class="campo"><label>Estado</label><select id="ser-estado"><option value="disponible">Disponibles</option><option value="vendida">Vendidas</option><option value="baja">De baja</option><option value="">Todas</option></select></div>
+        </div>
+        <div id="ser-msg"></div>
+        <div style="overflow:auto;"><table><thead><tr><th>Número de serie</th><th>Producto</th><th>Estado</th><th>Fecha</th><th></th></tr></thead><tbody id="ser-body"></tbody></table></div>
+      </div>
     </div>
 
     <div id="inv-panel-lotes" style="display:none;">
@@ -1088,6 +1101,30 @@
 </div>
 
 <!-- MODAL: alta/edición de rol, con matriz de permisos (Ronda 32) -->
+<div class="modal-fondo" id="modal-clote">
+  <div class="modal" style="max-width:440px;">
+    <h2>Lote y caducidad de lo comprado</h2>
+    <p class="nota" id="clote-info"></p>
+    <div id="clote-error"></div>
+    <div class="campo"><label>Lote (opcional)</label><input type="text" id="clote-codigo" maxlength="60"></div>
+    <div class="campo"><label>Fecha de caducidad (opcional)</label><input type="date" id="clote-caducidad"></div>
+    <p class="nota" id="clote-ultima"></p>
+    <p class="nota">Captura al menos uno de los dos: el lote o la fecha de caducidad.</p>
+    <div class="acciones"><button class="btn-gris" id="clote-cancelar">Cancelar</button><button class="btn-primario" id="clote-guardar">Guardar</button></div>
+  </div>
+</div>
+
+<div class="modal-fondo" id="modal-cseries">
+  <div class="modal" style="max-width:460px;">
+    <h2>Números de serie</h2>
+    <p class="nota" id="cser-info"></p>
+    <div id="cser-error"></div>
+    <div class="campo"><label>Un número de serie por renglón (también puedes escanearlos uno tras otro)</label><textarea id="cser-texto" rows="8" style="width:100%;font-family:monospace;"></textarea></div>
+    <p class="nota" id="cser-cuenta"></p>
+    <div class="acciones"><button class="btn-gris" id="cser-cancelar">Cancelar</button><button class="btn-primario" id="cser-guardar">Guardar</button></div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-lote">
   <div class="modal" style="max-width:460px;">
     <h2 id="lote-titulo">Lote</h2>
@@ -1671,7 +1708,9 @@
       <div class="campo">
         <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-activo-reparto" checked style="width:auto;"> Activo en el catálogo del servicio a domicilio</label>
         <label style="display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="prod-controla-lote" style="width:auto;"> Controla lote y caducidad (dulcería, botanas…)</label>
-        <p class="nota" style="margin:2px 0 0 26px;">Se vende primero el lote que caduca antes. Los lotes se asignan en Inventario → Lotes.</p>
+        <p class="nota" style="margin:2px 0 0 26px;">Se vende primero el lote que caduca antes. Al comprar se captura el lote y/o la caducidad.</p>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="prod-lleva-serie" style="width:auto;"> Lleva número de serie (electrónica)</label>
+        <p class="nota" style="margin:2px 0 0 26px;">Al comprar se captura un número de serie por pieza; al vender, la caja elige cuál sale.</p>
       </div>
     </div>
 
@@ -1900,7 +1939,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.33.001';
+const APP_VERSION = '1.33.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2778,7 +2817,7 @@ async function cargarProductos(){
   const { data, error } = await sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id,
     producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
-      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote,
+      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
     stock:existencias(cantidad, minimo, maximo, almacen_id),
@@ -2799,7 +2838,7 @@ async function cargarProductos(){
       imagenUrl: v.producto.imagen_url || null,
       costo: v.producto.costo_ultima_compra,
       lineaArticuloId: v.producto.linea_articulo_id, unidadMedidaId: v.producto.unidad_medida_id,
-      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote,
+      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote, llevaSerie: !!v.producto.lleva_serie,
       impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
         impuestoId: pi.impuesto_id, nombre: pi.impuestos?.nombre || 'Impuesto', tasa: Number(pi.impuestos?.tasa)||0,
       })),
@@ -4079,6 +4118,7 @@ function abrirProducto(varianteId){
   $('prod-activo').checked = p ? !!p.activo : true;
   $('prod-activo-reparto').checked = p ? !!p.activoReparto : true;
   $('prod-controla-lote').checked = p ? !!p.controlaLote : false;
+  $('prod-lleva-serie').checked = p ? !!p.llevaSerie : false;
   $('prod-cant-inicial-campo').style.display = p ? 'none' : 'block';
   $('prod-cant-inicial').value = 0;
 
@@ -4518,7 +4558,7 @@ async function guardarProducto(){
   }
   state.varianteEditId = data; // variante recién creada/editada — usado por el flujo de altas pendientes de XML
   { const { data: vv } = await sb.from('variantes').select('producto_id').eq('id', data).maybeSingle();
-    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
+    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked, lleva_serie: $('prod-lleva-serie').checked }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
   await cargarProductos();
   // El snapshot se actualiza para que formTieneCambios() ya no detecte estos cambios como pendientes
   // (relevante para el flujo de "Guardar y continuar" desde el modal de cambios sin guardar).
@@ -5364,6 +5404,68 @@ $('compra-abrir-producto-nuevo').addEventListener('click', ()=>{ abrirProducto(n
 // costoUnitario y precioPublico se guardan SIEMPRE sin impuestos (misma convención que
 // variante_precios/costo_ultima_compra en toda la app) — el checkbox "con impuestos" solo
 // cambia cómo se muestran/capturan en pantalla; la conversión usa la tasa propia del producto.
+// ---- Lote / caducidad / números de serie al comprar ----
+let cloteIdx = null, cserIdx = null;
+async function cloteAbrir(i){
+  cloteIdx = i; const l = state.compraLineas[i]; $('clote-error').innerHTML = '';
+  $('clote-info').textContent = `${l.nombre} · ${l.cantidad} pieza(s) en esta compra.`;
+  $('clote-codigo').value = l.lote?.codigo || ''; $('clote-caducidad').value = l.lote?.caducidad || '';
+  $('clote-ultima').textContent = 'Buscando la última compra…'; $('modal-clote').classList.add('activo');
+  const { data } = await sb.from('lotes').select('codigo, fecha_caducidad, creado_en').eq('variante_id', l.varianteId).order('creado_en', { ascending:false }).limit(1);
+  const u = data?.[0];
+  if(u){ $('clote-ultima').textContent = `Última compra de este artículo: lote ${u.codigo}${u.fecha_caducidad ? ', caducidad ' + u.fecha_caducidad : ' (sin caducidad)'}.`; if(!l.lote && u.fecha_caducidad && !$('clote-caducidad').value) $('clote-caducidad').value = u.fecha_caducidad; }
+  else $('clote-ultima').textContent = 'Es la primera compra de este artículo con lote.';
+}
+$('clote-cancelar').addEventListener('click', ()=>$('modal-clote').classList.remove('activo'));
+$('clote-guardar').addEventListener('click', ()=>{
+  const cod = $('clote-codigo').value.trim(), cad = $('clote-caducidad').value;
+  if(!cod && !cad){ $('clote-error').innerHTML = '<div class="msg-error">Captura el lote o la fecha de caducidad (al menos uno).</div>'; return; }
+  state.compraLineas[cloteIdx].lote = { codigo: cod, caducidad: cad || null };
+  $('modal-clote').classList.remove('activo'); renderLineasCompra();
+});
+function cserAbrir(i){
+  cserIdx = i; const l = state.compraLineas[i]; $('cser-error').innerHTML = '';
+  $('cser-info').textContent = `${l.nombre} · se necesitan ${l.cantidad} número(s) de serie (uno por pieza).`;
+  $('cser-texto').value = (l.series||[]).join('\n'); cserCuenta(); $('modal-cseries').classList.add('activo'); $('cser-texto').focus();
+}
+const cserLista = () => $('cser-texto').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+function cserCuenta(){ const n = cserLista().length, N = Number(state.compraLineas[cserIdx]?.cantidad) || 0; $('cser-cuenta').textContent = `Llevas ${n} de ${N}.`; $('cser-cuenta').style.color = n === N ? '#15803d' : '#b45309'; }
+$('cser-texto').addEventListener('input', cserCuenta);
+$('cser-cancelar').addEventListener('click', ()=>$('modal-cseries').classList.remove('activo'));
+$('cser-guardar').addEventListener('click', ()=>{
+  const lista = cserLista(), N = Number(state.compraLineas[cserIdx].cantidad) || 0;
+  if(lista.length !== N){ $('cser-error').innerHTML = `<div class="msg-error">Se necesitan exactamente ${N} número(s) de serie y llevas ${lista.length}.</div>`; return; }
+  const dup = lista.find((x,k)=>lista.indexOf(x) !== k);
+  if(dup){ $('cser-error').innerHTML = `<div class="msg-error">El número de serie ${rpEsc(dup)} está repetido.</div>`; return; }
+  state.compraLineas[cserIdx].series = lista; $('modal-cseries').classList.remove('activo'); renderLineasCompra();
+});
+function validarLotesSeriesCompra(){
+  for(const l of state.compraLineas){
+    const pr = state.productos.find(p=>p.varianteId === l.varianteId); const cant = Number(l.cantidad) || 0;
+    if(pr?.controlaLote && !(l.lote && (l.lote.codigo || l.lote.caducidad))) return `Falta el lote o la caducidad de «${l.nombre}».`;
+    if(pr?.llevaSerie){
+      if(cant !== Math.floor(cant)) return `«${l.nombre}» lleva número de serie: la cantidad debe ser un número entero.`;
+      if((l.series||[]).length !== cant) return `Faltan números de serie de «${l.nombre}» (llevas ${(l.series||[]).length} de ${cant}).`;
+    }
+  }
+  return null;
+}
+async function asignarLotesSeriesCompra(lineas, almacenId){
+  const fallas = [];
+  for(const l of lineas){
+    const pr = state.productos.find(p=>p.varianteId === l.varianteId);
+    if(pr?.controlaLote && l.lote){
+      const { error } = await sb.rpc('lote_asignar', { p_variante_id: l.varianteId, p_almacen_id: almacenId, p_codigo: l.lote.codigo || ('S/L ' + (l.lote.caducidad || '')), p_caducidad: l.lote.caducidad || null, p_cantidad: Number(l.cantidad) });
+      if(error) fallas.push(`Lote de «${l.nombre}»: ${error.message}`);
+    }
+    if(pr?.llevaSerie && (l.series||[]).length){
+      const { error } = await sb.rpc('series_registrar', { p_variante_id: l.varianteId, p_almacen_id: almacenId, p_series: l.series });
+      if(error) fallas.push(`Series de «${l.nombre}»: ${error.message}`);
+    }
+  }
+  return fallas;
+}
+
 function agregarLineaCompra(producto, cantidad){
   cantidad = cantidad || 1;
   const existente = state.compraLineas.find(l=>l.varianteId===producto.varianteId);
@@ -5392,8 +5494,12 @@ function renderLineasCompra(scrollAlFinal){
     const costoMostrado = conImp ? redondear2((Number(l.costoUnitario)||0) * factor) : (Number(l.costoUnitario)||0);
     const precioMostrado = l.precioPublico != null ? (conImp ? redondear2(Number(l.precioPublico) * factor) : Number(l.precioPublico)) : '';
     const ultimoCostoMostrado = l.ultimoCosto != null ? (conImp ? redondear2(Number(l.ultimoCosto) * factor) : Number(l.ultimoCosto)) : null;
+    const pr = state.productos.find(p=>p.varianteId === l.varianteId);
+    const cant = Number(l.cantidad) || 0;
+    const btnLote = pr?.controlaLote ? `<div><button type="button" class="btn-gris compra-lote-btn" data-idx="${i}" style="font-size:.78rem;padding:2px 8px;">📅 ${l.lote ? 'Lote: ' + rpEsc(l.lote.codigo || '—') + ' · caduca ' + (l.lote.caducidad || '—') : 'Lote / caducidad (falta)'}</button></div>` : '';
+    const btnSer = pr?.llevaSerie ? `<div><button type="button" class="btn-gris compra-ser-btn" data-idx="${i}" style="font-size:.78rem;padding:2px 8px;">🔢 Series: ${(l.series||[]).length} de ${cant}${(l.series||[]).length === cant && cant > 0 ? ' ✔' : ' (falta)'}</button></div>` : '';
     return `<tr>
-      <td>${l.nombre}</td>
+      <td>${l.nombre}${btnLote}${btnSer}</td>
       <td class="num">${ultimoCostoMostrado!=null?money(ultimoCostoMostrado):'—'}</td>
       <td class="num"><input type="text" inputmode="decimal" class="cant-input compra-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.unidadMedidaId)}" value="${l.cantidad}"></td>
       <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-costo num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${costoMostrado}"></span></td>
@@ -5432,6 +5538,8 @@ function renderLineasCompra(scrollAlFinal){
     });
   });
   $('compra-lineas-body').querySelectorAll('.quitar').forEach(btn=>btn.addEventListener('click', ()=>{ state.compraLineas.splice(Number(btn.dataset.idx),1); renderLineasCompra(); }));
+  $('compra-lineas-body').querySelectorAll('.compra-lote-btn').forEach(b=>b.addEventListener('click', ()=>cloteAbrir(Number(b.dataset.idx))));
+  $('compra-lineas-body').querySelectorAll('.compra-ser-btn').forEach(b=>b.addEventListener('click', ()=>cserAbrir(Number(b.dataset.idx))));
   $('compra-total').textContent = money(totalCompraLineas());
   if($('compra-tipo').value === 'mixto') renderMixtoLineas();
   if(scrollAlFinal){ const cont = $('compra-lineas-scroll'); cont.scrollTop = cont.scrollHeight; }
@@ -5484,6 +5592,8 @@ $('compra-registrar').addEventListener('click', async ()=>{
       return;
     }
   }
+  const errLS = validarLotesSeriesCompra();
+  if(errLS){ $('compra-error').innerHTML = `<div class="msg-error">${rpEsc(errLS)}</div>`; return; }
   const listaPublica = obtenerListaPublica();
   const payload = {
     empresa_id: state.empresaId,
@@ -5516,6 +5626,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   const { error } = await sb.rpc('registrar_compra', { p: payload });
   $('compra-registrar').disabled = false;
   if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
+  const fallasLS = await asignarLotesSeriesCompra(state.compraLineas, $('compra-almacen').value);
   state.compraLineas = [];
   state.compraMixtoLineas = [];
   state.xmlCfdiUuid = null;
@@ -5525,6 +5636,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   renderLineasCompra();
   await cargarProductos();
   await cargarComprasLista();
+  if(fallasLS.length) $('compra-error').innerHTML = `<div class="msg-error">La compra se registró, pero no se pudo asignar: ${fallasLS.map(rpEsc).join(' · ')}. Asígnalo en Inventario → Lotes.</div>`;
   if(tipoCompra === 'credito' || tipoCompra === 'anticipo' || tipoCompra === 'mixto'){
     const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
     state.proveedores = proveedores || [];
@@ -5958,7 +6070,7 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#inv-tabs .tab-btn').forEach(b=>b.classList.remove('activo'));
     btn.classList.add('activo');
-    ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos','inv-panel-lotes'].forEach(id=>{
+    ['inv-panel-almacenes','inv-panel-ajustes','inv-panel-traspasos','inv-panel-lotes','inv-panel-series'].forEach(id=>{
       $(id).style.display = (id === btn.dataset.invtab) ? 'block' : 'none';
     });
     // Ronda 28: a diferencia de "Compras registradas" (que recuerda el rango que se haya
@@ -5971,6 +6083,7 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
       cargarAjustesLista();
     }
     if(btn.dataset.invtab === 'inv-panel-lotes') lotPreparar();
+    if(btn.dataset.invtab === 'inv-panel-series') serCargar();
     if(btn.dataset.invtab === 'inv-panel-traspasos'){
       $('trasp-lista-desde').value = fechaLocalISO();
       $('trasp-lista-hasta').value = fechaLocalISO();
@@ -5982,6 +6095,29 @@ document.querySelectorAll('#inv-tabs .tab-btn').forEach(btn=>{
 // ---- Lotes y caducidades ----
 const lotNombre = v => (v?.producto?.nombre || '—') + (v?.nombre_variante && v.nombre_variante !== 'Único' ? ' · ' + v.nombre_variante : '');
 const lotDias = f => f ? Math.round((new Date(f + 'T00:00:00') - new Date(fechaLocalISO() + 'T00:00:00')) / 86400000) : null;
+// ---- Panel de números de serie ----
+let serFilas = [];
+async function serCargar(){
+  $('ser-msg').innerHTML = '';
+  const { data, error } = await sb.from('series').select('id, numero, estado, creado_en, vendida_en, venta_id, variante:variantes(id, nombre_variante, producto:productos(nombre))').order('creado_en', { ascending:false }).limit(1000);
+  if(error){ $('ser-msg').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  serFilas = data || []; serPintar();
+}
+function serPintar(){
+  const q = $('ser-buscar').value.trim().toLowerCase(), est = $('ser-estado').value;
+  const f = serFilas.filter(x=>(!est || x.estado === est) && (!q || x.numero.toLowerCase().includes(q) || (x.variante?.producto?.nombre||'').toLowerCase().includes(q)));
+  $('ser-body').innerHTML = f.map(x=>`<tr><td style="font-family:monospace;">${rpEsc(x.numero)}</td><td>${rpEsc(x.variante?.producto?.nombre||'')}</td><td>${x.estado}</td><td>${(x.vendida_en||x.creado_en||'').slice(0,10)}</td><td>
+    ${x.estado==='disponible' ? `<button class="btn-gris ser-acc" data-id="${x.id}" data-a="baja">Dar de baja</button>` : ''}
+    ${x.estado!=='disponible' ? `<button class="btn-gris ser-acc" data-id="${x.id}" data-a="disponible">Reactivar</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="nota">Sin resultados.</td></tr>';
+  $('ser-body').querySelectorAll('.ser-acc').forEach(b=>b.addEventListener('click', async ()=>{
+    const nuevo = b.dataset.a;
+    const { error } = await sb.from('series').update(nuevo==='disponible' ? { estado:'disponible', venta_id:null, vendida_en:null } : { estado:'baja' }).eq('id', b.dataset.id);
+    if(error){ $('ser-msg').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+    serCargar();
+  }));
+}
+$('ser-buscar').addEventListener('input', serPintar); $('ser-estado').addEventListener('change', serPintar);
+
 function lotPreparar(){
   const sel = $('lot-almacen'), previo = sel.value;
   sel.innerHTML = state.almacenes.filter(a=>a.activo).map(a=>`<option value="${a.id}">${rpEsc(a.nombre)}</option>`).join('');

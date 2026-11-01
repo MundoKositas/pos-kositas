@@ -361,6 +361,18 @@
      con un mínimo de costo/0.90 (10% de utilidad), y queda registrado como incidente para el
      reporte de cierre de caja. -->
 <!-- Ronda 62: VENTA A DOMICILIO -->
+<div class="modal-fondo" id="modal-series">
+  <div class="modal" style="max-width:460px;">
+    <h2>Números de serie</h2>
+    <p class="nota" id="ser-info"></p>
+    <div id="ser-error"></div>
+    <input type="text" id="ser-filtro" placeholder="Buscar o escanear número de serie…" autocomplete="off">
+    <div id="ser-lista" style="max-height:260px;overflow:auto;margin-top:8px;"></div>
+    <p class="nota" id="ser-cuenta"></p>
+    <div class="acciones"><button class="btn-gris" id="ser-cancelar">Cancelar</button><button class="btn-primario" id="ser-ok">Continuar</button></div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-resolver">
   <div class="modal" style="max-width:640px;max-height:92vh;overflow:auto;">
     <h2>📋 Pedidos por resolver</h2>
@@ -696,7 +708,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.008';
+const APP_VERSION = '1.9.009';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2089,7 +2101,7 @@ async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
     consultaConRespaldo('catalogo_variantes', () => sb.from('variantes').select(`
       id, nombre_variante, activo,
-      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, lleva_serie, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
@@ -2146,6 +2158,7 @@ async function cargarCatalogo(){
         precio: preciosPorLista[state.listaPrecioId] ?? null,
         // Costo de referencia (siempre sin impuestos, igual que en admin.html) — se usa para el
         // mínimo permitido al capturar un precio de emergencia (Ronda 56): costo entre 0.90.
+        llevaSerie: !!v.producto.lleva_serie,
         costo: v.producto.costo_ultima_compra != null ? Number(v.producto.costo_ultima_compra) : null,
         // Para un combo este valor se sobreescribe enseguida en recalcularStockCombos(); mientras
         // tanto queda en 0 porque un combo no tiene fila propia en "existencias".
@@ -3212,7 +3225,55 @@ function construirDetalleYVentaBase(tipoVenta){
   return { subtotal, impuesto, desglose, total, payloadDetalle, payloadVenta };
 }
 
+// ---- Números de serie (electrónica): al vender se elige cuáles salen ----
+let serRes = null;
+function escSer(t){ return String(t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+async function asegurarSeries(){
+  state.seriesPend = [];
+  const lineas = state.carrito.filter(l=>!l.esEnvio && state.catalogo.find(p=>p.varianteId===l.varianteId)?.llevaSerie);
+  if(!lineas.length) return [];
+  const todas = [];
+  for(const l of lineas){
+    const cant = Number(l.cantidad) || 0;
+    if(cant !== Math.floor(cant)){ $('cobro-error').innerHTML = `<div class="msg-error">«${escSer(l.nombre)}» lleva número de serie: la cantidad debe ser entera.</div>`; return null; }
+    const { data, error } = await sb.from('series').select('id, numero').eq('variante_id', l.varianteId).eq('almacen_id', state.almacenId).eq('estado','disponible').order('numero');
+    if(error){ $('cobro-error').innerHTML = `<div class="msg-error">No se pudieron consultar los números de serie: ${escSer(error.message)}</div>`; return null; }
+    if((data||[]).length < cant){ $('cobro-error').innerHTML = `<div class="msg-error">«${escSer(l.nombre)}»: hay ${(data||[]).length} número(s) de serie disponibles y vendes ${cant}. Regístralos en Admin → Compras.</div>`; return null; }
+    const ids = await elegirSeries(l.nombre, cant, data);
+    if(!ids) return null;
+    todas.push(...ids);
+  }
+  state.seriesPend = todas;
+  return todas;
+}
+function elegirSeries(nombre, cant, disp){
+  return new Promise(res=>{
+    const sel = new Set(); $('ser-error').innerHTML = ''; $('ser-filtro').value = '';
+    $('ser-info').textContent = `${nombre} · elige ${cant} número(s) de serie.`;
+    const pintar = ()=>{
+      const f = $('ser-filtro').value.trim().toLowerCase();
+      $('ser-lista').innerHTML = disp.filter(x=>!f || x.numero.toLowerCase().includes(f)).map(x=>`<label style="display:flex;gap:8px;padding:4px 0;"><input type="checkbox" data-id="${x.id}" ${sel.has(x.id)?'checked':''} style="width:auto;"> <span style="font-family:monospace;">${escSer(x.numero)}</span></label>`).join('') || '<p class="nota">Sin coincidencias.</p>';
+      $('ser-lista').querySelectorAll('input').forEach(ch=>ch.addEventListener('change', ()=>{
+        if(ch.checked){ if(sel.size >= cant){ ch.checked = false; return; } sel.add(ch.dataset.id); } else sel.delete(ch.dataset.id);
+        cuenta();
+      }));
+      cuenta();
+    };
+    const cuenta = ()=>{ $('ser-cuenta').textContent = `Elegidos ${sel.size} de ${cant}.`; };
+    $('ser-filtro').oninput = pintar;
+    $('ser-filtro').onkeydown = e=>{ if(e.key==='Enter'){ e.preventDefault(); const f = $('ser-filtro').value.trim().toLowerCase(); const ex = disp.find(x=>x.numero.toLowerCase()===f); if(ex && sel.size < cant){ sel.add(ex.id); $('ser-filtro').value=''; pintar(); } } };
+    $('ser-cancelar').onclick = ()=>{ $('modal-series').classList.remove('activo'); res(null); };
+    $('ser-ok').onclick = ()=>{ if(sel.size !== cant){ $('ser-error').innerHTML = `<div class="msg-error">Elige exactamente ${cant}.</div>`; return; } $('modal-series').classList.remove('activo'); res([...sel]); };
+    pintar(); $('modal-series').classList.add('activo'); $('ser-filtro').focus();
+  });
+}
+
 async function finalizarVentaRegistrada(ventaId, payloadVenta, desglose){
+  if(state.seriesPend && state.seriesPend.length){
+    const { error: eS } = await sb.rpc('series_vender', { p_venta_id: ventaId, p_series: state.seriesPend });
+    if(eS) alert('La venta se registró, pero no se pudieron marcar los números de serie como vendidos: ' + eS.message + '. Corrígelo en Admin → Inventario → Series.');
+    state.seriesPend = [];
+  }
   const cambios = resumenCambiosVenta();
   if(cambios.length){
     try{
@@ -3229,7 +3290,11 @@ async function finalizarVentaRegistrada(ventaId, payloadVenta, desglose){
 
 $('btn-cobrar').addEventListener('click', async ()=>{
   $('cobro-error').innerHTML = '';
-  if(state.modoSinConexion){ $('btn-cobrar').disabled = true; await cobrarSinConexion(); return; }
+  if(state.modoSinConexion){
+    if(state.carrito.some(l=>state.catalogo.find(p=>p.varianteId===l.varianteId)?.llevaSerie)){ $('cobro-error').innerHTML = '<div class="msg-error">Hay artículos con número de serie: no se pueden vender sin conexión. Espera a que regrese el internet.</div>'; return; }
+    $('btn-cobrar').disabled = true; await cobrarSinConexion(); return;
+  }
+  if((await asegurarSeries()) === null) return;
   $('btn-cobrar').disabled = true;
   const { desglose, payloadDetalle, payloadVenta } = construirDetalleYVentaBase('contado');
   const payloadPagos = state.pagos.map(p=>({ forma_pago_id: p.formaPagoId, monto: parseMoney(p.monto)||0, referencia: p.referencia||'' }));
@@ -3280,6 +3345,7 @@ $('btn-credito-cliente').addEventListener('click', async ()=>{
     autorizadoPor = resultado.usuarioId;
   }
 
+  if((await asegurarSeries()) === null) return;
   $('btn-credito-cliente').disabled = true;
   const { data: ventaId, error } = await sb.rpc('registrar_venta', {
     p_venta: payloadVenta, p_detalle: payloadDetalle, p_pagos: [], p_autorizado_por: autorizadoPor,
@@ -3622,6 +3688,7 @@ async function ventaDomicilio(){
     const etiqueta = excede ? `este pedido excede el crédito disponible de ${cliente.nombre} (disponible: ${money(creditoDisponibleCliente(cliente))}, pedido: ${money(total)})` : 'vender a crédito';
     const r = await pedirAutorizacionSupervisor('pos.vender_credito', etiqueta); if(!r) return; autorizadoPor = r.usuarioId;
   }
+  if((await asegurarSeries()) === null) return;
   $('btn-credito-cliente').disabled = true;
   const pedido = { pedido_id: d.pedidoId, cliente_final_id: d.clienteFinalId, repartidor_id: d.repartidorId, nombre: d.nombre, telefono: d.telefono, domicilio: d.domicilio, colonia: d.colonia,
     costo_envio: d.envio, fecha_entrega: d.fecha, hora_desde: d.horaDesde, hora_hasta: d.horaHasta, metodo_pago: d.metodoPago, paga_con: d.pagaCon, notas: d.notas,
