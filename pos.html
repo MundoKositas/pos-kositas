@@ -708,7 +708,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.009';
+const APP_VERSION = '1.9.010';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3229,7 +3229,7 @@ function construirDetalleYVentaBase(tipoVenta){
 let serRes = null;
 function escSer(t){ return String(t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 async function asegurarSeries(){
-  state.seriesPend = [];
+  state.seriesPend = []; state.seriesTicket = {};
   const lineas = state.carrito.filter(l=>!l.esEnvio && state.catalogo.find(p=>p.varianteId===l.varianteId)?.llevaSerie);
   if(!lineas.length) return [];
   const todas = [];
@@ -3242,6 +3242,7 @@ async function asegurarSeries(){
     const ids = await elegirSeries(l.nombre, cant, data);
     if(!ids) return null;
     todas.push(...ids);
+    state.seriesTicket[l.varianteId] = data.filter(x=>ids.includes(x.id)).map(x=>x.numero);
   }
   state.seriesPend = todas;
   return todas;
@@ -3377,6 +3378,7 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
     ` : '';
     return `
     <tr><td>${l.nombre} x${l.cantidad}</td><td class="num">${money(precioMostrar(l)*l.cantidad)}</td></tr>
+    ${(state.seriesTicket && state.seriesTicket[l.varianteId]) ? `<tr><td colspan="2" class="nota" style="padding-top:0;">Serie(s): ${state.seriesTicket[l.varianteId].map(escSer).join(', ')}</td></tr>` : ''}
     ${filaDescuento}`;
   }).join('');
   descuentoTotalTicket = redondear2(descuentoTotalTicket);
@@ -4064,7 +4066,8 @@ function htmlTicketDesdeDatos(datos, deltasPorVariante){
   const filasItems = (datos.lineas||[]).map(l=>{
     const delta = deltasPorVariante[l.variante_id];
     const notaModificado = delta ? `<br><span class="nota" style="color:#b45309;">${delta > 0 ? '+' : ''}${delta} (Modificado)</span>` : '';
-    return `<tr><td>${l.producto} x${l.cantidad}${notaModificado}</td><td class="num">${money((l.precio_unitario - l.descuento_unitario) * l.cantidad * (1 + (l.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0),0)))}</td></tr>`;
+    const serTxt = (l.series||[]).length ? `<br><span class="nota">Serie(s): ${l.series.map(x=>escSer(x.numero) + (x.devuelta ? ' (devuelta)' : '')).join(', ')}</span>` : '';
+    return `<tr><td>${l.producto} x${l.cantidad}${serTxt}${notaModificado}</td><td class="num">${money((l.precio_unitario - l.descuento_unitario) * l.cantidad * (1 + (l.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0),0)))}</td></tr>`;
   }).join('');
   const filasPagos = (datos.pagos||[]).map(p=>`<div class="linea monto-grande"><span>${p.forma_pago}</span><span>${money(p.monto)}</span></div>`).join('');
   return `
@@ -4421,14 +4424,21 @@ async function abrirDevolverVenta(ventaId){
   $('dv-credito-nota').style.display = credito ? 'block' : 'none';
   $('dv-body').innerHTML = data.lineas.map((l,i)=>{
     const disponible = l.cantidad - (l.cantidad_devuelta||0);
+    const sers = (l.series||[]).filter(x=>!x.devuelta);
+    const serHtml = sers.length ? `<div class="nota" style="margin-top:4px;">Marca las series que regresan:${sers.map(x=>`<label style="display:block;"><input type="checkbox" class="dv-ser" data-idx="${i}" data-id="${x.id}" style="width:auto;"> <span style="font-family:monospace;">${escSer(x.numero)}</span></label>`).join('')}</div>` : '';
     return `<tr>
-      <td>${l.producto}</td>
+      <td>${l.producto}${serHtml}</td>
       <td class="num">${l.cantidad_devuelta||0}</td>
       <td class="num">${l.cantidad}</td>
-      <td class="num"><input type="number" class="cant-input dv-cant" min="0" max="${disponible}" step="1" value="0" data-idx="${i}" ${disponible<=0?'disabled':''}></td>
+      <td class="num"><input type="number" class="cant-input dv-cant" min="0" max="${disponible}" step="1" value="0" data-idx="${i}" ${disponible<=0?'disabled':''} ${sers.length?'readonly title="Se calcula con las series marcadas"':''}></td>
     </tr>`;
   }).join('');
   $('dv-body').querySelectorAll('.dv-cant').forEach(inp=>inp.addEventListener('input', renderDevolverTotal));
+  $('dv-body').querySelectorAll('.dv-ser').forEach(ch=>ch.addEventListener('change', ()=>{
+    const inp = $('dv-body').querySelector(`.dv-cant[data-idx="${ch.dataset.idx}"]`);
+    inp.value = $('dv-body').querySelectorAll(`.dv-ser[data-idx="${ch.dataset.idx}"]:checked`).length;
+    renderDevolverTotal();
+  }));
   renderDevolverTotal();
   $('modal-devolver-venta').classList.add('activo');
 }
@@ -4546,7 +4556,10 @@ $('dv-confirmar').addEventListener('click', async ()=>{
   const lineas = [];
   $('dv-body').querySelectorAll('.dv-cant').forEach((inp,i)=>{
     const cant = Number(inp.value)||0;
-    if(cant > 0) lineas.push({ venta_detalle_id: dvDatos.lineas[i].venta_detalle_id, cantidad: cant });
+    if(cant > 0){
+      const series = [...$('dv-body').querySelectorAll(`.dv-ser[data-idx="${i}"]:checked`)].map(c=>c.dataset.id);
+      lineas.push({ venta_detalle_id: dvDatos.lineas[i].venta_detalle_id, cantidad: cant, ...(series.length ? { series } : {}) });
+    }
   });
   if(!lineas.length){ $('dv-error').innerHTML = '<div class="msg-error">Captura al menos una cantidad a devolver.</div>'; return; }
   const totalDevolver = renderDevolverTotal();

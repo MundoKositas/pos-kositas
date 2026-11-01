@@ -1939,7 +1939,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.33.003';
+const APP_VERSION = '1.33.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -6107,14 +6107,23 @@ function serPintar(){
   const q = $('ser-buscar').value.trim().toLowerCase(), est = $('ser-estado').value;
   const f = serFilas.filter(x=>(!est || x.estado === est) && (!q || x.numero.toLowerCase().includes(q) || (x.variante?.producto?.nombre||'').toLowerCase().includes(q)));
   $('ser-body').innerHTML = f.map(x=>`<tr><td style="font-family:monospace;">${rpEsc(x.numero)}</td><td>${rpEsc(x.variante?.producto?.nombre||'')}</td><td>${x.estado}</td><td>${(x.vendida_en||x.creado_en||'').slice(0,10)}</td><td>
+    <button class="btn-gris ser-hist" data-id="${x.id}">Historial</button>
     ${x.estado==='disponible' ? `<button class="btn-gris ser-acc" data-id="${x.id}" data-a="baja">Dar de baja</button>` : ''}
     ${x.estado!=='disponible' ? `<button class="btn-gris ser-acc" data-id="${x.id}" data-a="disponible">Reactivar</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="nota">Sin resultados.</td></tr>';
+  $('ser-body').querySelectorAll('.ser-hist').forEach(b=>b.addEventListener('click', ()=>serHistorial(b.dataset.id)));
   $('ser-body').querySelectorAll('.ser-acc').forEach(b=>b.addEventListener('click', async ()=>{
     const nuevo = b.dataset.a;
-    const { error } = await sb.from('series').update(nuevo==='disponible' ? { estado:'disponible', venta_id:null, vendida_en:null } : { estado:'baja' }).eq('id', b.dataset.id);
+    const motivo = (prompt(nuevo==='baja' ? 'Motivo de la baja (robo, daño, garantía…):' : 'Motivo de la reactivación (ej. devolución):') || '').trim();
+    if(!motivo){ $('ser-msg').innerHTML = '<div class="msg-error">El motivo es obligatorio.</div>'; return; }
+    const { error } = await sb.from('series').update(nuevo==='disponible' ? { estado:'disponible', venta_id:null, vendida_en:null, motivo } : { estado:'baja', motivo }).eq('id', b.dataset.id);
     if(error){ $('ser-msg').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
     serCargar();
   }));
+}
+async function serHistorial(id){
+  const { data, error } = await sb.from('auditoria').select('creado_en, accion, datos_anteriores, datos_nuevos, usuarios(nombre)').eq('tabla','series').eq('registro_id', id).order('creado_en');
+  if(error){ $('ser-msg').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  $('ser-msg').innerHTML = '<div class="nota" style="margin:8px 0;"><strong>Historial:</strong><br>' + ((data||[]).map(a=>`${new Date(a.creado_en).toLocaleString('es-MX')} · ${rpEsc(a.usuarios?.nombre||'—')} · ${a.accion==='crear' ? 'Alta' : rpEsc((a.datos_anteriores?.estado||'')+' → '+(a.datos_nuevos?.estado||''))}${a.datos_nuevos?.motivo ? ' · ' + rpEsc(a.datos_nuevos.motivo) : ''}`).join('<br>') || 'Sin movimientos.') + '</div>';
 }
 $('ser-buscar').addEventListener('input', serPintar); $('ser-estado').addEventListener('change', serPintar);
 
