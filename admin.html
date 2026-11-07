@@ -1972,7 +1972,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.002';
+const APP_VERSION = '1.35.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5956,7 +5956,7 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
     let mensaje = `<p class="nota">XML leído: ${agregados} de ${conceptos.length} producto(s) se identificaron y se agregaron a la compra.</p>`;
     if(state.xmlPendientes.length){
       mensaje += `<div class="msg-error">${state.xmlPendientes.length} producto(s) de este XML no emparejaron automáticamente:<br>` +
-        state.xmlPendientes.map(p=>`• ${p.descripcion || p.noId || '(sin descripción)'} (cant. ${p.cantidad}, $${p.valorUnitario})`).join('<br>') +
+        state.xmlPendientes.map(p=>`• ${p.descripcion || p.noId || '(sin descripción)'} (cant. ${p.cantidad}, ${money(p.valorUnitario)})`).join('<br>') +
         `<br><button type="button" class="btn-primario" id="btn-completar-pendientes-xml" style="margin-top:8px;">Asociar o dar de alta (${state.xmlPendientes.length})</button></div>`;
     }
     $('compra-xml-estado').innerHTML = mensaje;
@@ -5993,7 +5993,7 @@ function procesarPendienteXmlActual(){
   const total = state.xmlPendientesTotalLote || state.xmlPendientes.length;
   $('xml-asociar-progreso').textContent = `Quedan ${state.xmlPendientes.length} de ${total} por resolver.`;
   $('xml-asociar-descripcion').textContent = pend.descripcion || pend.noId || '(sin descripción)';
-  $('xml-asociar-cantidad-costo').textContent = `Cantidad ${pend.cantidad} — $${pend.valorUnitario} c/u`;
+  $('xml-asociar-cantidad-costo').textContent = `Cantidad ${pend.cantidad} — ${money(pend.valorUnitario)} c/u`;
   $('xml-asociar-error').innerHTML = '';
   $('xml-asociar-buscar').value = '';
   $('xml-asociar-resultados').innerHTML = '';
