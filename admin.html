@@ -1328,7 +1328,7 @@
     <h2 id="cliente-titulo">Nuevo cliente</h2>
     <div class="campo"><label>Nombre</label><input type="text" id="cliente-nombre"></div>
     <div class="grid-2">
-      <div class="campo"><label>Teléfono</label><input type="text" id="cliente-telefono"></div>
+      <div class="campo"><label>Teléfono (10 dígitos, sin espacios)</label><input type="tel" id="cliente-telefono" inputmode="numeric" maxlength="10" placeholder="6181234567"></div>
       <div class="campo"><label>RFC</label><input type="text" id="cliente-rfc"></div>
     </div>
     <div class="grid-2">
@@ -1972,7 +1972,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.001';
+const APP_VERSION = '1.35.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -6713,12 +6713,13 @@ $('cliente-nip-gen').addEventListener('click', ()=>{
 });
 $('cliente-nip-quitar').addEventListener('click', ()=>{ if(confirm('Sin NIP el cliente verá precios de público en el catálogo. ¿Quitarlo?')) cliNipGuardar(null); });
 
+$('cliente-telefono').addEventListener('input', e=>{ e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
 function abrirCliente(id){
   const c = id ? state.clientes.find(x=>x.id===id) : null;
   $('cliente-titulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
   $('cliente-error').innerHTML = '';
   $('cliente-nombre').value = c?.nombre || '';
-  $('cliente-telefono').value = c?.telefono || '';
+  $('cliente-telefono').value = (c?.telefono || '').replace(/\D/g, '').slice(-10);
   $('cliente-rfc').value = c?.rfc || '';
   $('cliente-limite-credito').value = c ? c.limite_credito : 0;
   $('cliente-lista-precio').value = c?.lista_precio_default_id || '';
@@ -6795,10 +6796,11 @@ $('cliente-guardar').addEventListener('click', async ()=>{
   const nombre = $('cliente-nombre').value.trim();
   if(!nombre){ $('cliente-error').innerHTML = '<div class="msg-error">El nombre es obligatorio.</div>'; return; }
   const limite = Number($('cliente-limite-credito').value);
+  { const t = $('cliente-telefono').value.replace(/\D/g, ''); if(t && t.length !== 10){ $('cliente-error').innerHTML = '<div class="msg-error">El teléfono debe tener 10 dígitos, sin espacios ni guiones.</div>'; return; } }
   if(isNaN(limite) || limite < 0){ $('cliente-error').innerHTML = '<div class="msg-error">El límite de crédito debe ser un número mayor o igual a cero.</div>'; return; }
   const payload = {
     id: state.clienteEditId, empresa_id: state.empresaId, nombre,
-    telefono: $('cliente-telefono').value.trim(), rfc: $('cliente-rfc').value.trim(),
+    telefono: $('cliente-telefono').value.replace(/\D/g, ''), rfc: $('cliente-rfc').value.trim(),
     limite_credito: limite, lista_precio_default_id: $('cliente-lista-precio').value || null,
     condicion_pago_id: $('cliente-condicion-pago').value || null,
     activo: $('cliente-activo').checked,
