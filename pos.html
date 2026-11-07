@@ -708,7 +708,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.010';
+const APP_VERSION = '1.9.011';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -3560,7 +3560,15 @@ $('dom-confirmar').addEventListener('click', ()=>{
     }
     if(faltan.length) return fallo('Estos artículos del pedido no están en el catálogo del POS (actualiza el catálogo): ' + faltan.join(', '));
     state.carrito = []; state.pagos = [];
-    for(const n of nuevas){ if(!agregarAlCarrito(n.p, null, n.cant)){ return fallo('No se pudo cargar «' + n.p.nombre + '» (sin precio). Corrige su precio y vuelve a capturar el pedido.'); } }
+    for(const n of nuevas){
+      if(!agregarAlCarrito(n.p, null, n.cant)){ return fallo('No se pudo cargar «' + n.p.nombre + '» (sin precio). Corrige su precio y vuelve a capturar el pedido.'); }
+      // El precio que vio y aceptó el cliente en el catálogo (p. ej. lista de mayoreo) manda sobre la lista del ticket
+      const it = (ped.items||[]).find(x=>x.variante_id === n.p.varianteId), l = state.carrito[state.carrito.length - 1];
+      if(it && l && l.varianteId === n.p.varianteId && Number(it.precio) > 0){
+        const t = tasaTotal(l), actualConImp = redondear2(precioBaseEfectivo(l) * (1 + t)), pedConImp = redondear2(Number(it.precio));
+        if(Math.abs(actualConImp - pedConImp) > 0.005){ l.precioManual = pedConImp / (1 + t); l.precioDelPedido = true; }
+      }
+    }
   }
   if(!state.carrito.some(l=>!l.esEnvio)) return fallo('Agrega artículos al carrito (o captura el código del pedido).');
   actualizarPagaConSugerido();
