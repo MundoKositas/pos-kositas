@@ -1972,7 +1972,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.003';
+const APP_VERSION = '1.35.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -8803,7 +8803,7 @@ $('rp-cfg-guardar').addEventListener('click', async ()=>{
 
 
 // ----- Link personal del repartidor (pantalla repartidor2.html) -----
-const RP_BASE_URL = 'https://mundokositas.github.io/mundo-kositas/';
+const RP_BASE_URL = 'https://www.mundokositas.com/';
 async function rpGenerarLink(id){
   const r = state.rpRepartidores.find(x=>x.id===id); if(!r) return;
   if(!confirm('Se genera un link nuevo para ' + r.nombre + ' y el anterior deja de servir. ¿Continuar?')) return;
