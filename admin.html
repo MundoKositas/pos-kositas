@@ -1338,6 +1338,11 @@
     <p class="nota" id="cliente-condicion-pago-nota">Es el plazo MÁXIMO que este cliente puede usar al comprar a crédito — al cobrar, el cajero puede elegir esta condición o una más corta, pero nunca una más larga. Si es "Contado", no puede tener línea de crédito (el límite se guarda en $0).</p>
     <div class="campo"><label>Lista de precio default</label><select id="cliente-lista-precio"><option value="">(usar la de la sucursal)</option></select></div>
     <p class="nota">El cajero puede seguir cambiando la lista de precio del ticket manualmente al cobrar — esta es solo la que se propone automáticamente al seleccionar a este cliente.</p>
+    <div class="campo" id="cli-nip-bloque" style="display:none;">
+      <label>NIP del catálogo (para ver sus precios especiales)</label>
+      <div class="fila" style="gap:8px;align-items:center;"><input type="text" id="cliente-nip" readonly style="width:110px;font-family:monospace;font-size:1.1rem;text-align:center;"><button type="button" class="btn-gris" id="cliente-nip-gen">Generar NIP nuevo</button><button type="button" class="btn-gris" id="cliente-nip-quitar">Quitar</button></div>
+      <p class="nota" id="cliente-nip-nota"></p>
+    </div>
     <div id="cli-dom-bloque" style="border-top:1px solid #e5e7eb;margin-top:10px;padding-top:8px;">
       <strong>🏠 Domicilios de entrega</strong>
       <div id="cli-dom-lista" style="margin:6px 0;"></div>
@@ -1967,7 +1972,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.34.001';
+const APP_VERSION = '1.35.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -6686,6 +6691,28 @@ function renderClientesTabla(){
 }
 $('cli-buscar').addEventListener('input', renderClientesTabla);
 
+// ---- NIP de catálogo (precios especiales visibles solo con NIP) ----
+function cliNipPintar(c){
+  const especial = !!c?.lista_precio_default_id && (state.listasPrecio||[]).find(l=>l.id===c.lista_precio_default_id && !/blico/i.test(l.nombre));
+  $('cli-nip-bloque').style.display = c && especial ? 'block' : 'none';
+  $('cliente-nip').value = c?.nip_catalogo || '';
+  $('cliente-nip-nota').textContent = c?.nip_catalogo
+    ? 'Entrégaselo al cliente (por WhatsApp o en persona). Lo escribe una vez en el catálogo junto con su teléfono; sin el NIP verá precios de público.'
+    : 'Sin NIP: este cliente verá precios de público en el catálogo. Genera uno y se lo compartes.';
+}
+async function cliNipGuardar(nip){
+  const id = state.clienteEditId; if(!id) return;
+  const { error } = await sb.from('clientes').update({ nip_catalogo: nip }).eq('id', id);
+  if(error){ $('cliente-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  const c = state.clientes.find(x=>x.id===id); if(c) c.nip_catalogo = nip;
+  cliNipPintar(c);
+}
+$('cliente-nip-gen').addEventListener('click', ()=>{
+  const a = new Uint32Array(1); crypto.getRandomValues(a);
+  if(!$('cliente-nip').value || confirm('El NIP anterior dejará de funcionar. ¿Generar uno nuevo?')) cliNipGuardar(String(a[0] % 10000).padStart(4, '0'));
+});
+$('cliente-nip-quitar').addEventListener('click', ()=>{ if(confirm('Sin NIP el cliente verá precios de público en el catálogo. ¿Quitarlo?')) cliNipGuardar(null); });
+
 function abrirCliente(id){
   const c = id ? state.clientes.find(x=>x.id===id) : null;
   $('cliente-titulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
@@ -6698,6 +6725,7 @@ function abrirCliente(id){
   $('cliente-condicion-pago').value = c?.condicion_pago_id || '';
   $('cliente-activo').checked = c ? c.activo : true;
   state.clienteEditId = c?.id || null;
+  cliNipPintar(c);
   cdomIniciar(c);
   actualizarBloqueoLimiteCreditoCliente();
   // Ronda 35: consulta-only en "Clientes" — se puede ver la ficha, no guardar.
@@ -8883,7 +8911,7 @@ function rpRenderPedidos(){
   $('rp-ped-vacio').style.display = filas.length ? 'none' : 'block';
   $('rp-ped-body').innerHTML = filas.map(p=>{
     const r = state.rpRepartidores.find(x=>x.id === p.repartidor_id);
-    return `<tr><td><strong>${rpEsc(p.codigo)}</strong></td><td>${rpEsc(p.fecha_entrega || String(p.creado_en||'').slice(0,10))}</td><td>${rpEsc(p.nombre)}<br><small>${rpEsc(p.telefono||'')}</small></td><td>${rpEsc(p.colonia||'—')}</td><td>${rpEsc(r ? r.nombre : '—')}</td><td>${RP_ESTADOS[p.estado] || rpEsc(p.estado)}</td><td class="num">${money(p.total)}</td><td>${rpEsc(p.motivo_no_entrega||'')}${p.solicitud ? `<br><small style="color:#b45309;">📣 Solicitud: ${p.solicitud.tipo === 'cancelar' ? 'cancelar' : 'reasignar a ' + rpEsc(p.solicitud.repartidor||'')} (pendiente en caja)</small>` : ''}</td><td>${['entregado','cancelado'].includes(p.estado) ? '' : `<button class="btn-gris rpp-editar" data-id="${p.id}">✎ Editar</button>`}</td></tr>`;
+    return `<tr><td><strong>${rpEsc(p.codigo)}</strong></td><td>${rpEsc(p.fecha_entrega || String(p.creado_en||'').slice(0,10))}</td><td>${rpEsc(p.nombre)}<br><small>${rpEsc(p.telefono||'')}</small></td><td>${rpEsc(p.colonia||'—')}</td><td>${rpEsc(r ? r.nombre : '—')}</td><td>${RP_ESTADOS[p.estado] || rpEsc(p.estado)}</td><td class="num">${money(p.total)}</td><td>${rpEsc(p.motivo_no_entrega||'')}${p.solicitud ? `<br><small style="color:#b45309;">📣 Solicitud: ${p.solicitud.tipo === 'cancelar' ? 'cancelar' : 'reasignar a ' + rpEsc(p.solicitud.repartidor||'')} (pendiente en caja)</small>` : ''}</td><td>${p.estado === 'cancelado' ? '' : `<button class="btn-gris rpp-editar" data-id="${p.id}">${p.estado === 'entregado' ? '↩️ Revertir' : '✎ Editar'}</button>`}</td></tr>`;
   }).join('');
 }
 $('rp-ped-body').addEventListener('click', e=>{ const b = e.target.closest('.rpp-editar'); if(b) rppAbrir(b.dataset.id); });
