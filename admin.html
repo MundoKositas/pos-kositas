@@ -1731,6 +1731,7 @@
         <div class="campo"><label>Mínimo (punto de reorden)</label><input type="number" step="1" min="0" id="prod-minimo" value="0"></div>
         <div class="campo"><label>Máximo</label><input type="number" step="1" min="0" id="prod-maximo" value="0"></div>
       </div>
+      <div class="campo"><label>Días de entrega «sobre pedido» (catálogo a domicilio, cuando no hay existencia)</label><input type="number" step="1" min="0" id="prod-dias-pedido" value="3"></div>
       <div class="campo" id="prod-cant-inicial-campo"><label>Existencia inicial</label><input type="number" step="1" min="0" id="prod-cant-inicial" value="0"></div>
       <div class="campo">
         <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-inventariable" checked style="width:auto;"> Es inventariable (controla stock)</label>
@@ -1972,7 +1973,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.004';
+const APP_VERSION = '1.35.006';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2846,16 +2847,27 @@ function esVarianteUnica(nombreVariante){
 function nombreConColor(nombreProducto, nombreVariante){
   return esVarianteUnica(nombreVariante) ? nombreProducto : `${nombreProducto} — ${String(nombreVariante).trim()}`;
 }
+// PostgREST devuelve máximo 1,000 filas por consulta: se pide por páginas para traer TODO el catálogo.
+async function leerTodo(armar){
+  const TAM = 1000; let todo = [];
+  for(let desde = 0; ; desde += TAM){
+    const { data, error } = await armar().order('id').range(desde, desde + TAM - 1);
+    if(error) return { data: null, error };
+    const filas = data || []; todo = todo.concat(filas);
+    if(filas.length < TAM) break;
+  }
+  return { data: todo, error: null };
+}
 async function cargarProductos(){
-  const { data, error } = await sb.from('variantes').select(`
+  const { data, error } = await leerTodo(()=> sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id,
     producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
-      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie,
+      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
     stock:existencias(cantidad, minimo, maximo, almacen_id),
     codigos:codigos_barra(codigo, tipo, factor_unidades_base)
-  `);
+  `));
   if(error){ console.error(error); return; }
   state.productos = (data||[]).map(v=>{
     const existenciaAlmacen = (v.stock||[]).find(s=>s.almacen_id===state.almacenId) || v.stock?.[0];
@@ -2871,7 +2883,7 @@ async function cargarProductos(){
       imagenUrl: v.producto.imagen_url || null,
       costo: v.producto.costo_ultima_compra,
       lineaArticuloId: v.producto.linea_articulo_id, unidadMedidaId: v.producto.unidad_medida_id,
-      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote, llevaSerie: !!v.producto.lleva_serie,
+      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote, llevaSerie: !!v.producto.lleva_serie, diasSobrePedido: v.producto.dias_entrega_sobre_pedido ?? 3,
       impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
         impuestoId: pi.impuesto_id, nombre: pi.impuestos?.nombre || 'Impuesto', tasa: Number(pi.impuestos?.tasa)||0,
       })),
@@ -4146,6 +4158,7 @@ function abrirProducto(varianteId){
   llenarSelectMarcas(p?.marca || '');
   $('prod-clave-sat').value = p?.claveSat || '';
   $('prod-minimo').value = p?.minimo ?? 0;
+  $('prod-dias-pedido').value = p?.diasSobrePedido ?? 3;
   $('prod-maximo').value = p?.maximo ?? 0;
   $('prod-inventariable').checked = p ? !!p.inventariable : true;
   $('prod-activo').checked = p ? !!p.activo : true;
@@ -4300,7 +4313,7 @@ function capturarEstadoFormulario(){
     claveSat: $('prod-clave-sat').value.trim(),
     impuestos: Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(c=>c.value).sort(),
     codigos: leerCodigosBarra(),
-    minimo: $('prod-minimo').value, maximo: $('prod-maximo').value,
+    minimo: $('prod-minimo').value, maximo: $('prod-maximo').value, diasPedido: $('prod-dias-pedido').value,
     cantidadInicial: $('prod-cant-inicial').value,
     inventariable: $('prod-inventariable').checked, activo: $('prod-activo').checked, activoReparto: $('prod-activo-reparto').checked,
     preciosDirectos: Array.from(document.querySelectorAll('#prod-precios .precio-sin')).map(el=>({ lista: el.dataset.lista, valor: el.value })),
@@ -4591,7 +4604,7 @@ async function guardarProducto(){
   }
   state.varianteEditId = data; // variante recién creada/editada — usado por el flujo de altas pendientes de XML
   { const { data: vv } = await sb.from('variantes').select('producto_id').eq('id', data).maybeSingle();
-    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked, lleva_serie: $('prod-lleva-serie').checked }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
+    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked, lleva_serie: $('prod-lleva-serie').checked, dias_entrega_sobre_pedido: Math.max(0, parseInt($('prod-dias-pedido').value,10)||0) }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
   await cargarProductos();
   // El snapshot se actualiza para que formTieneCambios() ya no detecte estos cambios como pendientes
   // (relevante para el flujo de "Guardar y continuar" desde el modal de cambios sin guardar).
@@ -7425,10 +7438,11 @@ const CATALOGOS_SIMPLES = {
     tabla: 'categorias', tituloPlural: 'Categorías', tituloSingular: 'categoría',
     campos: [
       { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'orden', label:'Orden en el catálogo en línea (1 = primero; vacío = al final, alfabético)', tipo:'numero' },
       { id:'imagen_url', label:'Imagen en el catálogo en línea (opcional; si no hay, se usa la de un artículo)', tipo:'imagen' },
     ],
-    tieneActivo: true, orden: 'nombre',
-    columnas: [{ label:'Nombre', valor:r=>r.nombre }, { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' }],
+    tieneActivo: true, orden: 'orden',
+    columnas: [{ label:'Orden', valor:r=>r.orden ?? '—' }, { label:'Nombre', valor:r=>r.nombre }, { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' }],
   },
   lineas: {
     tabla: 'lineas_articulo', tituloPlural: 'Líneas de artículo', tituloSingular: 'línea de artículo',
@@ -7436,11 +7450,13 @@ const CATALOGOS_SIMPLES = {
     campos: [
       { id:'categoria_id', label:'Categoría', tipo:'select', fuente:'categorias', requerido:true },
       { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
+      { id:'orden', label:'Orden dentro de su categoría en el catálogo en línea (1 = primero; vacío = al final, alfabético)', tipo:'numero' },
       { id:'imagen_url', label:'Imagen en el catálogo en línea (opcional; si no hay, se usa la de un artículo)', tipo:'imagen' },
     ],
-    tieneActivo: true, orden: 'nombre',
+    tieneActivo: true, orden: 'orden',
     columnas: [
       { label:'Categoría', valor:r=>state.categorias.find(c=>c.id===r.categoria_id)?.nombre || '—' },
+      { label:'Orden', valor:r=>r.orden ?? '—' },
       { label:'Nombre', valor:r=>r.nombre },
       { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' },
     ],
@@ -7622,7 +7638,9 @@ function mostrarSubpanelCatalogosBase(key){
 
 async function cargarYRenderCatalogoSimple(key){
   const cfg = CATALOGOS_SIMPLES[key];
-  const { data, error } = await sb.from(cfg.tabla).select('*').order(cfg.orden);
+  let q = sb.from(cfg.tabla).select('*');
+  q = (cfg.orden === 'orden') ? q.order('orden', { ascending: true, nullsFirst: false }).order('nombre') : q.order(cfg.orden);
+  const { data, error } = await q;
   if(!error) state.cfgCache[key] = data || [];
   if(key === 'categorias') state.categorias = state.cfgCache.categorias || state.categorias; // para el select de Líneas
   renderCatalogoSimple(key);
