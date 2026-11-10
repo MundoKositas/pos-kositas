@@ -708,7 +708,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.011';
+const APP_VERSION = '1.9.012';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2097,15 +2097,30 @@ $('mi-pin-guardar').addEventListener('click', async ()=>{
   $('modal-mi-pin').classList.remove('activo');
 });
 
+// v1.9.012: Supabase devuelve como máximo 1,000 renglones por consulta. Con más de 1,000 artículos el
+// catálogo llegaba incompleto (faltaban, por ejemplo, copias y tiempo aire). Se lee por páginas de
+// 1,000 hasta traer todo; se ordena por id para que las páginas no se repitan ni se salten renglones.
+async function leerTodo(armar){
+  const TAM = 1000;
+  let todo = [];
+  for(let desde = 0; ; desde += TAM){
+    const { data, error } = await armar().order('id').range(desde, desde + TAM - 1);
+    if(error) return { data: null, error };
+    const filas = data || [];
+    todo = todo.concat(filas);
+    if(filas.length < TAM) break;
+  }
+  return { data: todo, error: null };
+}
 async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
-    consultaConRespaldo('catalogo_variantes', () => sb.from('variantes').select(`
+    consultaConRespaldo('catalogo_variantes', () => leerTodo(() => sb.from('variantes').select(`
       id, nombre_variante, activo,
-      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, lleva_serie, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
-    `)),
+    `))),
     // Ronda 55: combos/paquetes — un combo es una variante más (ya viene en la consulta de arriba con
     // su propio nombre/precio/código de barras), pero NO tiene existencia propia: su "stock" se calcula
     // a partir de sus componentes (recalcularStockCombos, más abajo) y su venta se filtra por vigencia
@@ -2162,7 +2177,9 @@ async function cargarCatalogo(){
         costo: v.producto.costo_ultima_compra != null ? Number(v.producto.costo_ultima_compra) : null,
         // Para un combo este valor se sobreescribe enseguida en recalcularStockCombos(); mientras
         // tanto queda en 0 porque un combo no tiene fila propia en "existencias".
-        stock: stockRow ? Number(stockRow.cantidad) : 0,
+        // v1.9.012: un servicio (copias, tiempo aire…) no maneja inventario — siempre se puede vender.
+        esServicio: v.producto.inventariable === false,
+        stock: v.producto.inventariable === false ? 9999 : (stockRow ? Number(stockRow.cantidad) : 0),
         // Un código tipo "empaque" representa una caja/paquete con varias piezas — al escanearlo
         // hay que agregar factor_unidades_base piezas, no 1 (ej. una caja de 12). "individual" (o
         // sin factor capturado) siempre agrega 1 pieza por escaneo, igual que antes.
@@ -2375,12 +2392,24 @@ function renderResultados(q){
   const cont = $('resultados-busqueda');
   if(!q){ cont.innerHTML=''; return; }
   const qLower = q.toLowerCase();
-  const resultados = state.catalogo.filter(p=>(p.nombre.toLowerCase().includes(qLower) || p.codigos.some(c=>c.codigo===q)) && comboDisponibleEnPos(p)).slice(0,15);
-  cont.innerHTML = resultados.map((p,i)=>`
+  // v1.9.012: dos bloques, cada uno en orden alfabético — arriba lo que se puede vender (con existencia
+  // y servicios), abajo lo que no tiene existencia.
+  const alfa = (a,b)=> a.nombre.localeCompare(b.nombre, 'es', { sensitivity:'base' });
+  const coincidencias = state.catalogo.filter(p=>(p.nombre.toLowerCase().includes(qLower) || p.codigos.some(c=>c.codigo===q)) && comboDisponibleEnPos(p));
+  const conExistencia = coincidencias.filter(p=>p.esServicio || p.stock>0).sort(alfa);
+  const sinExistencia = coincidencias.filter(p=>!p.esServicio && p.stock<=0).sort(alfa);
+  const resultados = conExistencia.concat(sinExistencia).slice(0,80);
+  const hayDosBloques = conExistencia.length>0 && sinExistencia.length>0;
+  const fila = (p,i)=>`
     <div class="resultado-item" data-idx="${i}">
       <span>${p.nombre}</span>
-      <span style="white-space:nowrap;">${p.precio===null ? '<span class="stock-bajo">Sin precio en esta lista</span>' : money(precioMostrar(p))} · <span class="${p.stock<=0?'stock-bajo':''}">stock: ${p.stock}</span></span>
-    </div>`).join('') || '<div class="resultado-item">Sin resultados</div>';
+      <span style="white-space:nowrap;">${p.precio===null ? '<span class="stock-bajo">Sin precio en esta lista</span>' : money(precioMostrar(p))} · ${p.esServicio ? 'servicio' : `<span class="${p.stock<=0?'stock-bajo':''}">stock: ${p.stock}</span>`}</span>
+    </div>`;
+  const titulo = t=>`<div style="padding:4px 10px;font-size:.78rem;font-weight:700;color:#6b7280;background:#f3f4f6;text-transform:uppercase;letter-spacing:.03em;">${t}</div>`;
+  cont.innerHTML = resultados.length ? resultados.map((p,i)=>
+      (hayDosBloques && i===0 ? titulo('Con existencia') : '') +
+      (hayDosBloques && i===conExistencia.length ? titulo('Sin existencia') : '') +
+      fila(p,i)).join('') : '<div class="resultado-item">Sin resultados</div>';
   cont.querySelectorAll('.resultado-item[data-idx]').forEach(el=>{
     el.addEventListener('click', ()=>{
       if(agregarAlCarrito(resultados[Number(el.dataset.idx)])){ buscarInput.value=''; renderResultados(''); }
