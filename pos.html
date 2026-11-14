@@ -71,10 +71,25 @@
   .modal{background:#fff;border-radius:10px;padding:22px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto;}
   .quitar{color:var(--rojo);cursor:pointer;font-size:.85rem;background:none;border:none;padding:4px;}
   #ticket-imprimible{display:none;}
+  @page{size:auto;margin:0;}
   @media print{
-    body *{visibility:hidden;}
-    #ticket-imprimible, #ticket-imprimible *{visibility:visible;}
-    #ticket-imprimible{display:block;position:absolute;top:0;left:0;width:100%;padding:10px;font-size:12px;}
+    /* v1.9.016: ticket térmico — solo se imprime el ticket (el resto de la pantalla se quita del flujo, así la
+       impresora ya no avanza papel de más entre un ticket y el siguiente), letra negra y más firme, logo grande. */
+    html,body{margin:0 !important;padding:0 !important;height:auto !important;min-height:0 !important;background:#fff !important;}
+    body > *:not(#ticket-imprimible){display:none !important;}
+    #ticket-imprimible{display:block !important;position:static !important;width:100% !important;box-sizing:border-box;padding:1mm 3mm 5mm;
+      font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.25;font-weight:600;color:#000 !important;break-inside:avoid;page-break-after:avoid;}
+    #ticket-imprimible *{color:#000 !important;}
+    #ticket-imprimible img{display:block;margin:0 auto 4px;max-width:78% !important;max-height:30mm !important;width:auto;height:auto !important;object-fit:contain;filter:grayscale(1) brightness(.55) contrast(4);}
+    #ticket-imprimible p{margin:4px 0;}
+    #ticket-imprimible table{width:100%;font-size:13px;}
+    #ticket-imprimible td,#ticket-imprimible th{padding:3px 0;border-bottom:none;vertical-align:top;}
+    #ticket-imprimible td.num{white-space:nowrap;padding-left:8px;text-align:right;}
+    #ticket-imprimible .nota{font-size:12px;font-weight:600;margin:2px 0;}
+    #ticket-imprimible .totales{margin-top:6px;}
+    #ticket-imprimible .totales .linea{padding:2px 0;font-size:14px;}
+    #ticket-imprimible .total-final{font-size:18px;font-weight:800;border-top:2px solid #000;margin-top:6px;padding-top:6px;}
+    #ticket-imprimible .monto-grande{font-size:16px;font-weight:700;}
   }
   /* v1.9.013: en pantalla de venta (escritorio/tablet horizontal) el encabezado y los menús quedan fijos,
      la columna de Cobro no se mueve y solo se desplaza la lista de artículos del carrito. */
@@ -731,7 +746,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.015';
+const APP_VERSION = '1.9.016';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
