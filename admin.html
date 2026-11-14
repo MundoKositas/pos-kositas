@@ -711,8 +711,8 @@
       <div class="tabla-scroll" id="compra-lineas-scroll" style="margin-top:10px;max-height:280px;overflow-y:auto;">
         <table>
           <thead><tr>
-            <th>Producto</th><th class="num">Último costo</th><th class="num">Cantidad</th>
-            <th class="num" id="compra-th-costo">Costo unitario</th><th class="num" id="compra-th-precio">Precio público</th><th class="num">Importe</th><th></th>
+            <th>Producto</th><th class="num">Existencia<br>actual</th><th class="num">Último<br>costo</th><th class="num">Cantidad</th>
+            <th class="num" id="compra-th-costo">Costo<br>unitario</th><th class="num" id="compra-th-precio">Precio<br>público</th><th class="num">Importe</th><th></th>
           </tr></thead>
           <tbody id="compra-lineas-body"></tbody>
         </table>
@@ -1973,7 +1973,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.007';
+const APP_VERSION = '1.35.008';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5155,17 +5155,33 @@ function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados,
     const v = formatoCosto ? formatoCosto(p) : p.costo;
     return v!=null ? money(v) : '—';
   };
+  // Búsqueda tipo POS: cada palabra puede ir en cualquier orden y posición, en nombre, marca o código
+  // (completo o parcial). Existencia: del almacén de la pantalla (Compras/Ajustes/Traspasos) o el activo.
+  const normB = t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const selAlm = {'compra-buscar-producto':'compra-almacen','ajuste-buscar-producto':'ajuste-almacen'}[inputId];
+  const almacenDe = ()=> (selAlm && $(selAlm) && $(selAlm).value) || state.almacenId;
+  const buscar = (q)=>{
+    const palabras = normB(q).split(/\s+/).filter(Boolean);
+    if(!palabras.length) return [];
+    const qn = normB(q).trim();
+    return state.productos.filter(p=>{
+      if(!p.activo) return false;
+      const pajar = normB(p.nombre+' '+p.marca+' '+p.codigos.map(c=>c.codigo).join(' '));
+      return palabras.every(w=>pajar.includes(w));
+    }).sort((x,y)=>{
+      const ex = p=>p.codigos.some(c=>normB(c.codigo)===qn)?0:1;
+      return ex(x)-ex(y);
+    });
+  };
   const render = (q)=>{
     const cont = $(resultadosId);
     if(!q){ cont.innerHTML=''; return; }
-    const qLower = q.toLowerCase();
-    const resultados = state.productos.filter(p=>p.activo &&
-      (p.nombre.toLowerCase().includes(qLower) || p.marca.toLowerCase().includes(qLower) || p.codigos.some(c=>c.codigo===q))
-    ).slice(0,15);
+    const resultados = buscar(q).slice(0,15);
+    const alm = almacenDe();
     cont.innerHTML = resultados.map((p,i)=>`
       <div class="resultado-item" data-idx="${i}">
         <span>${p.nombre}${p.marca?' — '+p.marca:''}</span>
-        <span style="white-space:nowrap;">Último costo: ${costoTexto(p)}</span>
+        <span style="white-space:nowrap;text-align:right;">Existencia: <strong>${existenciaEnAlmacen(p, alm)}</strong> · Último costo: ${costoTexto(p)}</span>
       </div>`).join('') || '<div class="resultado-item">Sin resultados</div>';
     cont.querySelectorAll('.resultado-item[data-idx]').forEach(el=>{
       el.addEventListener('click', ()=>{
@@ -5187,7 +5203,7 @@ function buscadorProducto(inputId, resultadosId, onSeleccionar, onSinResultados,
       const cantidad = (codigoUsado && codigoUsado.tipo==='empaque' && codigoUsado.factor>0) ? codigoUsado.factor : 1;
       onSeleccionar(porCodigo, cantidad); input.value=''; $(resultadosId).innerHTML=''; return;
     }
-    const coincidencias = state.productos.filter(p=>p.activo && p.nombre.toLowerCase().includes(q.toLowerCase()));
+    const coincidencias = buscar(q);
     if(coincidencias.length === 1){ onSeleccionar(coincidencias[0], 1); input.value=''; $(resultadosId).innerHTML=''; return; }
     if(coincidencias.length === 0 && onSinResultados) onSinResultados(q);
   });
@@ -5530,13 +5546,14 @@ function agregarLineaCompra(producto, cantidad){
   renderLineasCompra(true);
 }
 $('compra-con-impuestos').addEventListener('change', renderLineasCompra);
+$('compra-almacen').addEventListener('change', ()=>renderLineasCompra());
 // scrollAlFinal: true justo después de agregar producto(s) — para que la última línea capturada
 // quede visible sin tener que desplazarse dentro de la lista (pedido de Adrián: ver a la vez el
 // último renglón, el total y el buscador, en un ticket con muchos productos).
 function renderLineasCompra(scrollAlFinal){
   const conImp = $('compra-con-impuestos').checked;
-  $('compra-th-costo').textContent = conImp ? 'Costo unitario (con imp.)' : 'Costo unitario (sin imp.)';
-  $('compra-th-precio').textContent = conImp ? 'Precio público (con imp.)' : 'Precio público (sin imp.)';
+  $('compra-th-costo').innerHTML = conImp ? 'Costo unitario<br>(con imp.)' : 'Costo unitario<br>(sin imp.)';
+  $('compra-th-precio').innerHTML = conImp ? 'Precio público<br>(con imp.)' : 'Precio público<br>(sin imp.)';
   $('compra-lineas-vacio').style.display = state.compraLineas.length ? 'none' : 'block';
   $('compra-lineas-body').innerHTML = state.compraLineas.map((l,i)=>{
     const factor = 1 + (Number(l.tasa)||0);
@@ -5549,6 +5566,7 @@ function renderLineasCompra(scrollAlFinal){
     const btnSer = pr?.llevaSerie ? `<div><button type="button" class="btn-gris compra-ser-btn" data-idx="${i}" style="font-size:.78rem;padding:2px 8px;">🔢 Series: ${(l.series||[]).length} de ${cant}${(l.series||[]).length === cant && cant > 0 ? ' ✔' : ' (falta)'}</button></div>` : '';
     return `<tr>
       <td>${l.nombre}${btnLote}${btnSer}</td>
+      <td class="num"><strong>${pr ? existenciaEnAlmacen(pr, $('compra-almacen').value) : '—'}</strong></td>
       <td class="num">${ultimoCostoMostrado!=null?money(ultimoCostoMostrado):'—'}</td>
       <td class="num"><input type="text" inputmode="decimal" class="cant-input compra-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.unidadMedidaId)}" value="${l.cantidad}"></td>
       <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-costo num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${costoMostrado}"></span></td>
