@@ -1973,7 +1973,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.006';
+const APP_VERSION = '1.35.007';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3663,13 +3663,16 @@ function tasaTotalProducto(p){
 // Filtro compartido del Catálogo (buscador + categoría + línea) — usado tanto para pintar la tabla
 // en pantalla como para generar los reportes de existencias/resurtido, así siempre coinciden.
 function itemsFiltradosCatalogo(){
-  const filtro = $('cat-buscar').value.trim().toLowerCase();
+  // v1.35.007: búsqueda por palabras en cualquier posición y sin acentos (igual que el catálogo en línea y el POS).
+  // Cada palabra debe aparecer en el nombre, la marca o algún código.
+  const norm = t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const palabras = norm($('cat-buscar').value).split(/\s+/).filter(Boolean);
   const filtroCategoria = $('cat-filtro-categoria').value;
   const filtroLinea = $('cat-filtro-linea').value;
   return state.productos.filter(p=>{
-    if(filtro){
-      const codigosTxt = p.codigos.map(c=>c.codigo).join(' ').toLowerCase();
-      if(!(p.nombre.toLowerCase().includes(filtro) || p.marca.toLowerCase().includes(filtro) || codigosTxt.includes(filtro))) return false;
+    if(palabras.length){
+      const txt = norm(p.nombre) + ' ' + norm(p.marca) + ' ' + p.codigos.map(c=>norm(c.codigo)).join(' ');
+      if(!palabras.every(w=>txt.includes(w))) return false;
     }
     if(filtroLinea){
       if(p.lineaArticuloId !== filtroLinea) return false;
