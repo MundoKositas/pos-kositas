@@ -1804,6 +1804,11 @@
       <div class="campo"><label>RFC (opcional)</label><input type="text" id="empresa-rfc"></div>
       <div class="campo"><label>Régimen fiscal SAT (opcional)</label><select id="empresa-regimen-fiscal"><option value="">(sin especificar)</option></select></div>
     </div>
+    <div class="grid-2">
+      <div class="campo"><label>Domicilio (se imprime en el ticket)</label><input type="text" id="empresa-domicilio" placeholder="Calle, número, colonia"></div>
+      <div class="campo"><label>Teléfono (se imprime en el ticket)</label><input type="text" id="empresa-telefono" placeholder="(618) 000 00 00"></div>
+    </div>
+    <div class="campo"><label>Liga del catálogo en línea (se imprime al pie del ticket)</label><input type="text" id="empresa-url-catalogo" placeholder="https://www.minegocio.com/"></div>
     <button type="button" class="btn-secundario" id="empresa-datos-generales-guardar">Guardar datos generales</button>
     <div id="empresa-datos-generales-estado"></div>
 
@@ -1973,7 +1978,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.008';
+const APP_VERSION = '1.35.009';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2282,6 +2287,9 @@ $('btn-config-empresa').addEventListener('click', ()=>{
   $('empresa-nombre-comercial').value = state.empresaNombre || '';
   $('empresa-razon-social').value = state.empresaRazonSocial || '';
   $('empresa-rfc').value = state.empresaRfc || '';
+  $('empresa-domicilio').value = state.empresaDomicilio || '';
+  $('empresa-telefono').value = state.empresaTelefono || '';
+  $('empresa-url-catalogo').value = state.empresaUrlCatalogo || '';
   $('empresa-regimen-fiscal').innerHTML = '<option value="">(sin especificar)</option>' +
     state.regimenesFiscales.map(r=>`<option value="${r.clave}">${r.clave} - ${r.descripcion}</option>`).join('');
   $('empresa-regimen-fiscal').value = state.empresaRegimenFiscal || '';
@@ -2314,6 +2322,9 @@ $('empresa-datos-generales-guardar').addEventListener('click', async ()=>{
     razon_social: $('empresa-razon-social').value.trim() || null,
     rfc: $('empresa-rfc').value.trim() || null,
     regimen_fiscal_sat: $('empresa-regimen-fiscal').value.trim() || null,
+    domicilio: $('empresa-domicilio').value.trim() || null,
+    telefono: $('empresa-telefono').value.trim() || null,
+    url_catalogo: $('empresa-url-catalogo').value.trim() || null,
   }).eq('id', state.empresaId);
   if(error){
     $('empresa-datos-generales-estado').innerHTML = `<div class="msg-error">${error.message}</div>`;
@@ -2322,6 +2333,9 @@ $('empresa-datos-generales-guardar').addEventListener('click', async ()=>{
   state.empresaNombre = nombreComercial;
   state.empresaRazonSocial = $('empresa-razon-social').value.trim();
   state.empresaRfc = $('empresa-rfc').value.trim();
+  state.empresaDomicilio = $('empresa-domicilio').value.trim();
+  state.empresaTelefono = $('empresa-telefono').value.trim();
+  state.empresaUrlCatalogo = $('empresa-url-catalogo').value.trim();
   state.empresaRegimenFiscal = $('empresa-regimen-fiscal').value.trim();
   $('hdr-empresa').textContent = state.empresaNombre;
   $('empresa-datos-generales-estado').innerHTML = '<p class="nota">Guardado.</p>';
@@ -2451,6 +2465,9 @@ async function iniciarSesionApp(){
   state.empresaNombre = empresa.nombre_comercial;
   state.empresaRazonSocial = empresa.razon_social || '';
   state.empresaRfc = empresa.rfc || '';
+  state.empresaDomicilio = empresa.domicilio || '';
+  state.empresaTelefono = empresa.telefono || '';
+  state.empresaUrlCatalogo = empresa.url_catalogo || '';
   state.empresaRegimenFiscal = empresa.regimen_fiscal_sat || '';
   state.logoUrl = empresa.logo_url || '';
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
