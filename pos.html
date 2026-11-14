@@ -54,6 +54,8 @@
   .resultado-item:last-child{border-bottom:none;}
   .stock-bajo{color:var(--rojo);font-weight:600;}
   .cant-input{width:60px;text-align:center;}
+  .cant-input.cant-frac{width:104px;}
+  #pantalla-pos .quitar{white-space:nowrap;}
   .totales{margin-top:14px;font-size:.95rem;}
   .totales .linea{display:flex;justify-content:space-between;padding:4px 0;gap:12px;}
   .totales .total-final{font-size:1.3rem;font-weight:700;border-top:1px solid var(--borde);margin-top:6px;padding-top:8px;}
@@ -77,6 +79,12 @@
   /* v1.9.013: en pantalla de venta (escritorio/tablet horizontal) el encabezado y los menús quedan fijos,
      la columna de Cobro no se mueve y solo se desplaza la lista de artículos del carrito. */
   @media (min-width:900px){
+    /* v1.9.015: aprovechar todo el ancho de pantalla: carrito ancho, columna de cobro fija a la derecha. */
+    #pantalla-pos{max-width:none;padding:10px 14px;}
+    #pantalla-pos > .fila{gap:14px;}
+    #pantalla-pos > .fila > .col:first-child{flex:1 1 0;min-width:0;}
+    #pantalla-pos > .fila > .col:last-child{flex:0 0 clamp(360px,26vw,480px);min-width:0;}
+    #pantalla-pos .tabla-scroll td:first-child{min-width:260px;}
     #pantalla-pos.activa{display:flex;flex-direction:column;height:calc(100vh - var(--hdr-h,70px));overflow:hidden;}
     #pantalla-pos > .fila{flex:1 1 auto;min-height:0;flex-wrap:nowrap;align-items:stretch;}
     #pantalla-pos > .fila > .col{min-height:0;overflow-y:auto;}
@@ -195,10 +203,12 @@
         </div>
         <p id="carrito-vacio" style="color:var(--gris);">Aún no hay productos en el carrito.</p>
         <div id="domicilio-banner" style="display:none;background:#eef6ff;border:1px solid #b9d6f5;border-radius:8px;padding:10px;margin:8px 0;font-size:.88rem;"></div>
-        <button class="btn-secundario" id="btn-domicilio" style="width:100%;margin-top:10px;">🛵 Venta a domicilio (con repartidor / código de pedido)</button>
-        <button class="btn-secundario" id="btn-por-resolver" style="width:100%;margin-top:6px;">📋 Pedidos por resolver <span id="por-resolver-n" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:0 7px;font-size:.78rem;margin-left:4px;"></span></button>
-        <input type="text" id="espera-nota" placeholder="Nota para identificar este ticket en espera (opcional) — ej. &quot;señor de la gorra&quot;, &quot;mostrador&quot;" style="margin-top:10px;">
-        <button class="btn-secundario" id="btn-poner-en-espera" style="width:100%;margin-top:6px;">🕓 Poner esta venta en espera (atender a otro cliente)</button>
+        <div id="carrito-acciones" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;flex:0 0 auto;">
+          <button class="btn-secundario" id="btn-domicilio" style="flex:1 1 220px;">🛵 Venta a domicilio</button>
+          <button class="btn-secundario" id="btn-por-resolver" style="flex:1 1 180px;">📋 Pedidos por resolver <span id="por-resolver-n" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:0 7px;font-size:.78rem;margin-left:4px;"></span></button>
+          <input type="text" id="espera-nota" placeholder="Nota del ticket en espera (opcional)" style="flex:2 1 220px;">
+          <button class="btn-secundario" id="btn-poner-en-espera" style="flex:1 1 200px;">🕓 Poner en espera</button>
+        </div>
       </div>
     </div>
     <div class="col" style="flex:1;">
@@ -721,7 +731,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.014';
+const APP_VERSION = '1.9.015';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2129,7 +2139,7 @@ async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
     consultaConRespaldo('catalogo_variantes', () => leerTodo(() => sb.from('variantes').select(`
       id, nombre_variante, activo,
-      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, unidad:unidades_medida(clave), producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
@@ -2192,6 +2202,8 @@ async function cargarCatalogo(){
         // tanto queda en 0 porque un combo no tiene fila propia en "existencias".
         // v1.9.012: un servicio (copias, tiempo aire…) no maneja inventario — siempre se puede vender.
         esServicio: v.producto.inventariable === false,
+        // v1.9.015: solo los artículos vendidos por kilo aceptan cantidad fraccionada (ej. 0.100 kg).
+        fraccionable: FRACCIONABLES.includes(String((v.producto.unidad && v.producto.unidad.clave) || '').toUpperCase()),
         stock: v.producto.inventariable === false ? 9999 : (stockRow ? Number(stockRow.cantidad) : 0),
         // Un código tipo "empaque" representa una caja/paquete con varias piezas — al escanearlo
         // hay que agregar factor_unidades_base piezas, no 1 (ej. una caja de 12). "individual" (o
@@ -2390,6 +2402,7 @@ function intentarAgregarPorCodigoExacto(q){
 }
 // v1.9.013: búsqueda por palabras en cualquier posición y sin acentos (igual que el catálogo en línea).
 // "azul lapiz" encuentra "LAPIZ BIC AZUL". Cada palabra puede coincidir con el nombre o con un código.
+const FRACCIONABLES = ['KG'];
 function normBusq(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function coincideBusqueda(p, palabras){
   if(!p._bn) p._bn = normBusq(p.nombre);
@@ -2497,7 +2510,7 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar, precioEmer
     $('resultados-busqueda').innerHTML = `<div class="resultado-item">${producto.nombre} no está disponible en este momento (vigencia o lista de precios).</div>`;
     return false;
   }
-  const cantidad = (Number(cantidadAgregar) > 1) ? Number(cantidadAgregar) : 1;
+  const cantidad = (Number(cantidadAgregar) > 0) ? Number(cantidadAgregar) : 1;
   // Ronda 55: máximo por ticket de un combo — no acumulado entre visitas, se valida solo contra lo
   // que ya lleva ESTE carrito (el respaldo real, que nunca se puede evadir, es el de registrar_venta
   // en el servidor; esto es solo para avisarle al cajero antes de llegar a cobrar).
@@ -2510,7 +2523,7 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar, precioEmer
     }
   }
   const existente = state.carrito.find(l=>l.varianteId===producto.varianteId);
-  if(existente){ existente.cantidad += cantidad; }
+  if(existente){ existente.cantidad = Math.round((existente.cantidad + cantidad)*1000)/1000; }
   else {
     state.carrito.push({
       varianteId: producto.varianteId, nombre: producto.nombre,
@@ -2519,7 +2532,7 @@ function agregarAlCarrito(producto, codigoEscaneado, cantidadAgregar, precioEmer
       // lista de precios de ESTA línea sola, distinta a la del resto del ticket — ver renderCarrito.
       // usarListaPublicaEnEstaLinea fija esta línea a "Público general" (precio de respaldo, Ronda 56).
       preciosPorLista: producto.preciosPorLista, listaPrecioId: usarListaPublicaEnEstaLinea ? state.listaPublicaId : null,
-      cantidad, impuestos: producto.impuestos,
+      cantidad, impuestos: producto.impuestos, fraccionable: !!producto.fraccionable,
       stock: producto.stock, codigo: codigoEscaneado || null,
       // Descuento/precio manual de esta línea (null = no aplica) y quién autorizó cada uno de los 3
       // cambios (null = el propio cajero ya tenía el privilegio, no necesitó autorización) — ver
@@ -2661,7 +2674,7 @@ function renderCarrito(){
     return `
     <tr>
       <td>${l.nombre}${linkEditarProducto}${l.cantidad>l.stock?' <span class="stock-bajo">(stock insuficiente)</span>':''}${notaLineaEditada(l)}</td>
-      <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"${l.esEnvio?' disabled':''}></td>
+      <td class="num">${l.fraccionable ? `<input type="number" class="cant-input cant-frac" min="0.001" step="0.001" value="${Number(l.cantidad).toFixed(3)}" data-idx="${i}" data-frac="1">` : `<input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"${l.esEnvio?' disabled':''}>`}</td>
       <td class="num">${sinPrecio || normalUnitario===null ? '—' : money(normalUnitario)}</td>
       <td class="num">${descUnitario>0 ? money(descUnitario) : '—'}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
@@ -2678,8 +2691,13 @@ function renderCarrito(){
   body.querySelectorAll('.cant-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       const i = Number(inp.dataset.idx);
-      const val = parseInt(inp.value,10);
-      state.carrito[i].cantidad = (isNaN(val) || val < 1) ? 1 : val;
+      if(inp.dataset.frac){
+        const v = Math.round(parseFloat(inp.value)*1000)/1000;
+        state.carrito[i].cantidad = (isNaN(v) || v < 0.001) ? 1 : v;
+      } else {
+        const val = parseInt(inp.value,10);
+        state.carrito[i].cantidad = (isNaN(val) || val < 1) ? 1 : val;
+      }
       renderCarrito();
     });
   });
@@ -4319,6 +4337,8 @@ function mvImpuestoLinea(l){
   const baseLinea = (l.precioUnitario - l.descuentoUnitario) * l.cantidad;
   return (l.impuestos||[]).reduce((s,i)=>s + redondear2(baseLinea * (Number(i.tasa)||0)), 0);
 }
+// v1.9.015: línea por kilo (o con cantidad ya fraccionada) acepta decimales.
+function mvFrac(l){ const p = state.catalogo.find(x=>x.varianteId===l.varianteId); return !!(p && p.fraccionable) || (Number(l.cantidad)%1 !== 0); }
 function renderModificarVenta(){
   $('mv-body').innerHTML = mvLineas.map((l,i)=>{
     const baseUnit = (l.precioUnitario - l.descuentoUnitario);
@@ -4326,7 +4346,7 @@ function renderModificarVenta(){
     const importe = redondear2(baseUnit * l.cantidad + impLinea);
     return `<tr>
       <td>${l.nombre}</td>
-      <td class="num"><input type="number" class="cant-input" min="1" step="1" value="${l.cantidad}" data-idx="${i}"></td>
+      <td class="num"><input type="number" class="cant-input${mvFrac(l)?' cant-frac':''}" min="${mvFrac(l)?'0.001':'1'}" step="${mvFrac(l)?'0.001':'1'}" value="${mvFrac(l)?Number(l.cantidad).toFixed(3):l.cantidad}" data-idx="${i}"></td>
       <td class="num">${money(importe / (l.cantidad||1))}</td>
       <td class="num">${money(importe)}</td>
       <td><button class="quitar" data-idx="${i}">Quitar</button></td>
@@ -4335,8 +4355,8 @@ function renderModificarVenta(){
   $('mv-body').querySelectorAll('.cant-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       const i = Number(inp.dataset.idx);
-      const val = parseInt(inp.value,10);
-      mvLineas[i].cantidad = (isNaN(val)||val<1) ? 1 : val;
+      if(mvFrac(mvLineas[i])){ const v = Math.round(parseFloat(inp.value)*1000)/1000; mvLineas[i].cantidad = (isNaN(v)||v<0.001) ? 1 : v; }
+      else { const val = parseInt(inp.value,10); mvLineas[i].cantidad = (isNaN(val)||val<1) ? 1 : val; }
       renderModificarVenta();
     });
   });
@@ -4542,7 +4562,7 @@ async function abrirDevolverVenta(ventaId){
       <td>${l.producto}${serHtml}</td>
       <td class="num">${l.cantidad_devuelta||0}</td>
       <td class="num">${l.cantidad}</td>
-      <td class="num"><input type="number" class="cant-input dv-cant" min="0" max="${disponible}" step="1" value="0" data-idx="${i}" ${disponible<=0?'disabled':''} ${sers.length?'readonly title="Se calcula con las series marcadas"':''}></td>
+      <td class="num"><input type="number" class="cant-input cant-frac dv-cant" min="0" max="${disponible}" step="any" value="0" data-idx="${i}" ${disponible<=0?'disabled':''} ${sers.length?'readonly title="Se calcula con las series marcadas"':''}></td>
     </tr>`;
   }).join('');
   $('dv-body').querySelectorAll('.dv-cant').forEach(inp=>inp.addEventListener('input', renderDevolverTotal));
