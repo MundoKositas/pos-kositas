@@ -16,7 +16,7 @@
   *{box-sizing:border-box;}
   .editar-producto-link{font-size:.78rem;color:var(--verde-osc);text-decoration:underline;white-space:nowrap;}
   body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--texto);}
-  header{background:var(--verde);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+  header{position:sticky;top:0;z-index:40;background:var(--verde);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
   header .marca{font-weight:700;font-size:1.1rem;}
   header .info{font-size:.85rem;opacity:.95;}
   header .acciones{display:flex;gap:8px;flex-wrap:wrap;}
@@ -73,6 +73,19 @@
     body *{visibility:hidden;}
     #ticket-imprimible, #ticket-imprimible *{visibility:visible;}
     #ticket-imprimible{display:block;position:absolute;top:0;left:0;width:100%;padding:10px;font-size:12px;}
+  }
+  /* v1.9.013: en pantalla de venta (escritorio/tablet horizontal) el encabezado y los menús quedan fijos,
+     la columna de Cobro no se mueve y solo se desplaza la lista de artículos del carrito. */
+  @media (min-width:900px){
+    #pantalla-pos.activa{display:flex;flex-direction:column;height:calc(100vh - var(--hdr-h,70px));overflow:hidden;}
+    #pantalla-pos > .fila{flex:1 1 auto;min-height:0;flex-wrap:nowrap;align-items:stretch;}
+    #pantalla-pos > .fila > .col{min-height:0;overflow-y:auto;}
+    #pantalla-pos > .fila > .col:first-child{display:flex;flex-direction:column;overflow:hidden;}
+    #pantalla-pos > .fila > .col:first-child > .card:first-child{flex:0 0 auto;}
+    #pantalla-pos > .fila > .col:first-child > .card:last-child{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}
+    #pantalla-pos > .fila > .col:first-child > .card:last-child > .tabla-scroll{flex:1 1 auto;min-height:90px;overflow:auto;}
+    #pantalla-pos .tabla-scroll thead th{position:sticky;top:0;background:#fff;z-index:2;}
+    #pantalla-pos .resultados{max-height:min(260px,32vh);}
   }
   @media (max-width:480px){
     header{padding:10px 12px;}
@@ -708,7 +721,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.012';
+const APP_VERSION = '1.9.014';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2357,6 +2370,13 @@ $('rep-filtro-categoria').addEventListener('change', ()=>{
 
 // ---------- BÚSQUEDA / CARRITO ----------
 const buscarInput = $('buscar-input');
+// v1.9.013: altura real del encabezado (puede ocupar 1 o 2 renglones) para fijar el layout de venta.
+(function(){
+  const h = $('header-app');
+  const f = ()=> document.documentElement.style.setProperty('--hdr-h', (h.offsetHeight||70)+'px');
+  if(window.ResizeObserver) new ResizeObserver(f).observe(h);
+  window.addEventListener('resize', f); f();
+})();
 // Ronda 56: si el texto actual coincide EXACTO con un código de barras, se agrega de una vez — se usa
 // tanto en cada tecleo (para que un lector físico que no manda Enter también funcione solo, sin que
 // el cajero tenga que hacer nada más) como en Enter (compatibilidad con lectores que sí lo mandan, o
@@ -2368,17 +2388,43 @@ function intentarAgregarPorCodigoExacto(q){
   if(agregarAlCarrito(porCodigo, q, codigoInfo.factor)){ buscarInput.value=''; renderResultados(''); return true; }
   return false;
 }
+// v1.9.013: búsqueda por palabras en cualquier posición y sin acentos (igual que el catálogo en línea).
+// "azul lapiz" encuentra "LAPIZ BIC AZUL". Cada palabra puede coincidir con el nombre o con un código.
+function normBusq(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function coincideBusqueda(p, palabras){
+  if(!p._bn) p._bn = normBusq(p.nombre);
+  return palabras.every(w => p._bn.includes(w) || p.codigos.some(c=>normBusq(c.codigo).includes(w)));
+}
+function buscarProductos(q){
+  const palabras = normBusq(q).split(/\s+/).filter(Boolean);
+  if(!palabras.length) return [];
+  return state.catalogo.filter(p=>comboDisponibleEnPos(p) && coincideBusqueda(p, palabras));
+}
+// v1.9.013: el código exacto ya NO se agrega al ir tecleando (al escribir "BG" se agregaba el código corto
+// "BG" y no se podía llegar a "BGRANDE"). Se agrega con Enter, o solo si el texto entró como ráfaga de
+// lector (teclas con menos de 50 ms entre sí) y se quedó quieto — para lectores que no mandan Enter.
+let _busqTeclas = [];
+let _busqTimer = null;
 buscarInput.addEventListener('input', ()=>{
   const q = buscarInput.value.trim();
-  if(q && intentarAgregarPorCodigoExacto(q)) return;
+  const ahora = Date.now();
+  if(!q){ _busqTeclas = []; }
+  else { _busqTeclas.push(ahora); if(_busqTeclas.length > 40) _busqTeclas.shift(); }
+  clearTimeout(_busqTimer);
   renderResultados(q);
+  if(q.length >= 4 && _busqTeclas.length >= q.length){
+    const gaps = _busqTeclas.slice(-q.length).map((t,i,a)=>i ? t-a[i-1] : 0).slice(1);
+    const rafaga = gaps.length && gaps.every(g=>g < 50);
+    if(rafaga) _busqTimer = setTimeout(()=>{ const q2 = buscarInput.value.trim(); if(q2 === q) intentarAgregarPorCodigoExacto(q2); }, 120);
+  }
 });
 buscarInput.addEventListener('keydown', e=>{
   if(e.key !== 'Enter') return;
   const q = buscarInput.value.trim();
   if(!q) return;
+  clearTimeout(_busqTimer);
   if(intentarAgregarPorCodigoExacto(q)) return;
-  const coincidencias = state.catalogo.filter(p=>p.nombre.toLowerCase().includes(q.toLowerCase()) && comboDisponibleEnPos(p));
+  const coincidencias = buscarProductos(q);
   if(coincidencias.length === 1){
     if(agregarAlCarrito(coincidencias[0])){ buscarInput.value=''; renderResultados(''); }
   }
@@ -2391,11 +2437,12 @@ function nombreLista(listaId){
 function renderResultados(q){
   const cont = $('resultados-busqueda');
   if(!q){ cont.innerHTML=''; return; }
-  const qLower = q.toLowerCase();
   // v1.9.012: dos bloques, cada uno en orden alfabético — arriba lo que se puede vender (con existencia
   // y servicios), abajo lo que no tiene existencia.
-  const alfa = (a,b)=> a.nombre.localeCompare(b.nombre, 'es', { sensitivity:'base' });
-  const coincidencias = state.catalogo.filter(p=>(p.nombre.toLowerCase().includes(qLower) || p.codigos.some(c=>c.codigo===q)) && comboDisponibleEnPos(p));
+  const alfa = (a,b)=> (exacto(a)-exacto(b)) || a.nombre.localeCompare(b.nombre, 'es', { sensitivity:'base' });
+  const coincidencias = buscarProductos(q);
+  // un código exacto se muestra primero
+  const exacto = p => p.codigos.some(c=>c.codigo===q) ? 0 : 1;
   const conExistencia = coincidencias.filter(p=>p.esServicio || p.stock>0).sort(alfa);
   const sinExistencia = coincidencias.filter(p=>!p.esServicio && p.stock<=0).sort(alfa);
   const resultados = conExistencia.concat(sinExistencia).slice(0,80);
@@ -2596,8 +2643,10 @@ function notaLineaEditada(l){
   else if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== '') partes.push('precio manual');
   return partes.length ? `<div class="nota" style="margin:2px 0 0;">${partes.join(' · ')}</div>` : '';
 }
+let _carritoLenPrev = 0;
 function renderCarrito(){
   const body = $('carrito-body');
+  const _crecio = state.carrito.length > _carritoLenPrev; _carritoLenPrev = state.carrito.length;
   $('carrito-vacio').style.display = state.carrito.length ? 'none' : 'block';
   body.innerHTML = state.carrito.map((l,i)=>{
     // Se recalcula siempre al pintar, por si cambió la lista del ticket (y esta línea la sigue) o
@@ -2640,6 +2689,7 @@ function renderCarrito(){
   body.querySelectorAll('.quitar').forEach(btn=>{
     btn.addEventListener('click', ()=>{ state.carrito.splice(Number(btn.dataset.idx),1); renderCarrito(); });
   });
+  if(_crecio){ const ts = body.closest('.tabla-scroll'); if(ts) ts.scrollTop = ts.scrollHeight; }
   recalcularTotales();
 }
 
@@ -3740,7 +3790,15 @@ async function ventaDomicilio(){
 }
 
 $('ticket-nueva-venta').addEventListener('click', ()=>{ $('modal-ticket').classList.remove('activo'); reiniciarVenta(); });
-$('ticket-imprimir').addEventListener('click', ()=> window.print());
+// v1.9.014: al imprimir (cuadro de impresión del navegador) el foco no regresaba a la pantalla del ticket y
+// F8/F7 no respondían hasta dar clic. Al terminar la impresión se recupera el foco de la ventana y del botón.
+function recuperarFocoTicket(){
+  try{ window.focus(); }catch(_){}
+  const m = $('modal-ticket');
+  if(m && m.classList.contains('activo')){ const b = $('ticket-nueva-venta'); if(b) b.focus(); }
+}
+window.addEventListener('afterprint', ()=>{ setTimeout(recuperarFocoTicket, 50); setTimeout(recuperarFocoTicket, 400); });
+$('ticket-imprimir').addEventListener('click', ()=>{ window.print(); setTimeout(recuperarFocoTicket, 200); });
 
 function reiniciarVenta(){
   state.carrito = [];
@@ -3768,8 +3826,25 @@ function reiniciarVenta(){
   $('buscar-input').value='';
   renderResultados('');
   $('cobro-error').innerHTML='';
-  $('buscar-input').focus();
+  enfocarBuscar();
 }
+// v1.9.014: el cursor siempre queda en el campo de código/búsqueda al volver a la venta.
+function enfocarBuscar(){
+  const f = ()=>{ try{ window.focus(); }catch(_){} const b = $('buscar-input'); if(b && $('pantalla-pos').classList.contains('activa') && !document.querySelector('.modal-fondo.activo')) b.focus(); };
+  f(); setTimeout(f, 60); setTimeout(f, 300);
+}
+// Si la pantalla de venta queda activa sin ningún modal y el foco se perdió (cerrar un modal, volver del cuadro de
+// impresión, cambiar de ventana), se regresa al campo de captura.
+(function(){
+  let t = null;
+  const revisar = ()=>{ clearTimeout(t); t = setTimeout(()=>{
+    const ae = document.activeElement;
+    if($('pantalla-pos').classList.contains('activa') && !document.querySelector('.modal-fondo.activo') && (!ae || ae===document.body)) $('buscar-input').focus();
+  }, 80); };
+  new MutationObserver(revisar).observe(document.body, { attributes:true, attributeFilter:['class'], subtree:true });
+  window.addEventListener('focus', revisar);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) revisar(); });
+})();
 
 // ---------- RONDA 28: Tickets en espera ----------
 // Adrián preguntó cómo atender a más de un cliente a la vez (por ejemplo, alguien que va por más
@@ -4150,7 +4225,7 @@ async function abrirReimprimirTicket(ventaId){
   $('modal-reimprimir').classList.add('activo');
 }
 $('reimprimir-cerrar').addEventListener('click', ()=>{ $('modal-reimprimir').classList.remove('activo'); $('ticket-imprimible').innerHTML=''; });
-$('reimprimir-imprimir').addEventListener('click', ()=>window.print());
+$('reimprimir-imprimir').addEventListener('click', ()=>{ window.print(); setTimeout(()=>{ try{ window.focus(); }catch(_){} const b=$('reimprimir-imprimir'); if(b) b.focus(); }, 200); });
 
 // Ronda 28: Adrián pidió una forma rápida de volver a cobrar una venta repetitiva, al mismo cliente o
 // a otro. Se copian los mismos artículos y cantidades, pero SIEMPRE se vuelven a cotizar con precio y
