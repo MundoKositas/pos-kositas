@@ -274,7 +274,6 @@
 <div class="pantalla" id="pantalla-reportes">
   <div class="fila" style="justify-content:space-between;align-items:center;">
     <h1 style="margin:0;">Reportes</h1>
-    <button class="btn-gris" id="rep-volver">‹ Volver a vender</button>
   </div>
   <div class="card" style="margin-top:14px;">
     <h2 style="margin-top:0;">Reporte de ventas</h2>
@@ -320,7 +319,6 @@
 <div class="pantalla" id="pantalla-ventas-dia">
   <div class="fila" style="justify-content:space-between;align-items:center;">
     <h1 style="margin:0;">Ventas del día</h1>
-    <button class="btn-gris" id="vd-volver">‹ Volver a vender</button>
   </div>
   <div class="card" style="margin-top:14px;">
     <div class="fila" style="align-items:flex-end;flex-wrap:wrap;">
@@ -747,7 +745,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.017';
+const APP_VERSION = '1.9.018';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -4050,7 +4048,6 @@ $('btn-ventas-dia').addEventListener('click', ()=>{
   $('vd-fecha-hasta').value = hoy;
   cargarVentasDia();
 });
-$('vd-volver').addEventListener('click', ()=>mostrarPantalla('pantalla-pos'));
 $('vd-buscar').addEventListener('click', ()=>cargarVentasDia());
 $('vd-filtro-folio').addEventListener('change', renderVentasDiaFiltradas);
 $('vd-filtro-cliente').addEventListener('change', renderVentasDiaFiltradas);
@@ -5218,7 +5215,6 @@ $('btn-reportes').addEventListener('click', ()=>{
   $('rep-error').innerHTML = '';
   mostrarPantalla('pantalla-reportes');
 });
-$('rep-volver').addEventListener('click', ()=>{ mostrarPantalla('pantalla-pos'); });
 function miniTabla(titulo, cols, filas, nota){
   if(!filas.length) return `<h3 style="margin:14px 0 4px;">${titulo}</h3><p class="nota">${nota || 'Sin datos en el rango.'}</p>`;
   return `<h3 style="margin:14px 0 4px;">${titulo}</h3><div class="tabla-scroll"><table><thead><tr>${cols.map((c,i)=>`<th${i ? ' class="num"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>${filas.map(f=>`<tr>${f.map((v,i)=>`<td${i ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
