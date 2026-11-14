@@ -77,11 +77,12 @@
        impresora ya no avanza papel de más entre un ticket y el siguiente), letra negra y más firme, logo grande. */
     html,body{margin:0 !important;padding:0 !important;height:auto !important;min-height:0 !important;background:#fff !important;}
     body > *:not(#ticket-imprimible){display:none !important;}
-    #ticket-imprimible{display:block !important;position:static !important;width:100% !important;box-sizing:border-box;padding:1mm 3mm 5mm;
+    #ticket-imprimible{display:block !important;position:static !important;width:100% !important;box-sizing:border-box;padding:0 3mm 5mm;
       font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.25;font-weight:600;color:#000 !important;break-inside:avoid;page-break-after:avoid;}
     #ticket-imprimible *{color:#000 !important;}
     #ticket-imprimible img{display:block;margin:0 auto 4px;max-width:78% !important;max-height:30mm !important;width:auto;height:auto !important;object-fit:contain;filter:grayscale(1) brightness(.55) contrast(4);}
     #ticket-imprimible p{margin:4px 0;}
+    #ticket-imprimible > :first-child{margin-top:0 !important;padding-top:0 !important;}
     #ticket-imprimible table{width:100%;font-size:13px;}
     #ticket-imprimible td,#ticket-imprimible th{padding:3px 0;border-bottom:none;vertical-align:top;}
     #ticket-imprimible td.num{white-space:nowrap;padding-left:8px;text-align:right;}
@@ -745,7 +746,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.020';
+const APP_VERSION = '1.9.021';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
