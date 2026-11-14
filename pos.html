@@ -132,6 +132,7 @@
     </div>
   </div>
   <div class="acciones">
+    <button class="btn-primario" id="btn-volver-vender" style="display:none;">‹ Volver a vender</button>
     <button class="btn-secundario" id="btn-movimiento-caja">Movimiento de caja</button>
     <button class="btn-secundario" id="btn-abono-cliente">Abono de cliente</button>
     <button class="btn-secundario" id="btn-actualizar-catalogo">Actualizar catálogo</button>
@@ -746,7 +747,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.016';
+const APP_VERSION = '1.9.017';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1407,7 +1408,12 @@ function descuentoMostrarLinea(l){
 function mostrarPantalla(id){
   document.querySelectorAll('.pantalla').forEach(p=>p.classList.remove('activa'));
   $(id).classList.add('activa');
+  // v1.9.017: el botón «Volver a vender» vive en el encabezado fijo y solo se ve fuera de la pantalla de venta.
+  const bv = $('btn-volver-vender');
+  if(bv) bv.style.display = (id === 'pantalla-reportes' || id === 'pantalla-ventas-dia') ? '' : 'none';
+  if(id === 'pantalla-pos' && typeof enfocarBuscar === 'function') enfocarBuscar();
 }
+$('btn-volver-vender').addEventListener('click', ()=>mostrarPantalla('pantalla-pos'));
 $('version-tag').textContent = 'v' + APP_VERSION;
 
 // Ronda 51: Adrián reportó que, cuando la sesión caduca (el token de refresco deja de ser válido),
@@ -3875,6 +3881,15 @@ function enfocarBuscar(){
     if($('pantalla-pos').classList.contains('activa') && !document.querySelector('.modal-fondo.activo') && (!ae || ae===document.body)) $('buscar-input').focus();
   }, 80); };
   new MutationObserver(revisar).observe(document.body, { attributes:true, attributeFilter:['class'], subtree:true });
+  // v1.9.017: tras cualquier botón/enlace de la pantalla de venta (Quitar, ✎, Descuento, Poner en espera…) el cursor
+  // regresa al campo de búsqueda. Si la acción abre una ventana, el foco lo toma esa ventana y no se interfiere.
+  const vuelve = ()=>setTimeout(()=>{
+    if(!$('pantalla-pos').classList.contains('activa') || document.querySelector('.modal-fondo.activo')) return;
+    const ae = document.activeElement;
+    if(!ae || ae===document.body || ae.tagName==='BUTTON' || ae.tagName==='A') $('buscar-input').focus();
+  }, 120);
+  $('pantalla-pos').addEventListener('click', e=>{ if(e.target.closest('button, a')) vuelve(); });
+  const cb = $('carrito-body'); if(cb) new MutationObserver(vuelve).observe(cb, { childList:true });
   window.addEventListener('focus', revisar);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) revisar(); });
 })();
