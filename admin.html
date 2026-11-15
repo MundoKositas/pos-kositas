@@ -696,9 +696,10 @@
         <div id="compra-mixto-error"></div>
       </div>
 
+      <div id="compra-borrador-aviso" class="nota" style="display:none;background:#fff8e1;border:1px solid #f0d58a;border-radius:8px;padding:8px 12px;margin:10px 0;"></div>
       <h3 class="seccion">Productos de la compra</h3>
       <div class="campo" style="position:relative;">
-        <label>Buscar producto (código o nombre)</label>
+        <label>Buscar producto (código o nombre) <button type="button" class="btn-gris" id="compra-refrescar-catalogo" style="font-size:.75rem;padding:2px 8px;margin-left:8px;" title="Trae los productos nuevos o cambiados por otros usuarios, sin perder lo capturado">↻ Actualizar catálogo</button></label>
         <input type="text" id="compra-buscar-producto" autocomplete="off" placeholder="Escanea o escribe el código, o teclea el nombre…">
         <div class="resultados" id="compra-resultados-busqueda"></div>
       </div>
@@ -1978,7 +1979,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.009';
+const APP_VERSION = '1.35.010';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2633,6 +2634,7 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     // Compras e Inventario solo se "preparaban" una vez al iniciar sesión, así que si el usuario
     // salía y volvía a entrar veía la ficha (y el estado del XML) de la última vez. Ahora cada vez
     // que se entra a la pestaña se reinicia limpio.
+    if(['tab-compras','tab-catalogo','tab-inventario'].includes(btn.dataset.tab)) actualizarCatalogosVivo('tab');
     if(btn.dataset.tab === 'tab-compras') prepararPantallaCompras();
     if(btn.dataset.tab === 'tab-inventario') prepararPantallaInventario();
     // Ronda 22, ajuste: Clientes se cargaba solo una vez al iniciar sesión — si se registraba una
@@ -2788,22 +2790,40 @@ function llenarSelectConTodas(id, items, valFn, textFn){
 }
 
 // ---------- CATÁLOGO DE MARCAS (select en el formulario de producto, con alta rápida) ----------
-// productos.marca sigue siendo texto libre en la base de datos (lo usan búsqueda, catálogo, reportes
-// y el POS sin cambios); este select solo controla de dónde vienen los valores permitidos para
-// evitar duplicados por error de dedo ("Aqualike" vs "AquaLike"). Si el producto ya tiene guardado
-// un valor que no está en el catálogo (dato capturado antes de este cambio), se agrega como opción
-// aparte para no perderlo.
-function llenarSelectMarcas(valorSeleccionado){
-  const opciones = state.marcas.map(m=>`<option value="${m.nombre}">${m.nombre}</option>`).join('');
+// v1.35.010: la marca del producto se asocia por ID (productos.marca_id). El usuario siempre ve el
+// NOMBRE actual del catálogo; si la marca se renombra, todos sus productos muestran el nombre nuevo.
+// (productos.marca sigue guardando el nombre como copia para búsqueda/POS/catálogo; la base de datos
+// la mantiene sincronizada sola.) El valor de cada opción es el ID. Un producto con una marca antigua
+// que no esté en el catálogo se muestra aparte como "(fuera del catálogo)" con valor "txt:Nombre".
+function llenarSelectMarcas(marcaId, marcaTexto){
+  const opciones = state.marcas.map(m=>`<option value="${m.id}">${rpEsc(m.nombre)}</option>`).join('');
   let html = `<option value="">— Sin marca —</option>${opciones}<option value="__nueva__">+ Agregar nueva marca…</option>`;
-  if(valorSeleccionado && !state.marcas.some(m=>m.nombre===valorSeleccionado)){
-    html = `<option value="${valorSeleccionado}">${valorSeleccionado} (fuera del catálogo)</option>` + html;
+  let valor = marcaId || '';
+  if(marcaId && !state.marcas.some(m=>m.id===marcaId)){
+    // La marca existe en el producto pero no en la lista cargada (la creó otro usuario): se pide al servidor.
+    valor = '';
+  }
+  if(!valor && marcaTexto){
+    const igual = state.marcas.find(m=>normalizarTexto(m.nombre)===normalizarTexto(marcaTexto));
+    if(igual) valor = igual.id;
+    else { html = `<option value="txt:${rpEsc(marcaTexto)}">${rpEsc(marcaTexto)} (fuera del catálogo)</option>` + html; valor = 'txt:' + marcaTexto; }
   }
   $('prod-marca').innerHTML = html;
-  $('prod-marca').value = valorSeleccionado || '';
+  $('prod-marca').value = valor;
   habilitarComboBuscable('prod-marca');
   $('prod-marca-nueva').style.display = 'none';
   $('prod-marca-nueva-error').innerHTML = '';
+}
+// Devuelve { id, nombre } de la marca elegida en el formulario (id vacío si es "Sin marca" o texto antiguo).
+function marcaSeleccionada(){
+  const v = $('prod-marca').value || '';
+  if(v.startsWith('txt:')) return { id: '', nombre: v.slice(4) };
+  const m = state.marcas.find(x=>x.id===v);
+  return m ? { id: m.id, nombre: m.nombre } : { id: '', nombre: '' };
+}
+async function recargarMarcas(){
+  const { data } = await sb.from('marcas').select('*').eq('activo', true).order('nombre');
+  if(data) state.marcas = data;
 }
 $('prod-marca').addEventListener('change', ()=>{
   if($('prod-marca').value === '__nueva__'){
@@ -2832,7 +2852,7 @@ $('prod-marca-nueva-guardar').addEventListener('click', async ()=>{
     state.marcas.push({ id: marcaNueva.id, nombre: marcaNueva.nombre, activo: true, empresa_id: state.empresaId });
     state.marcas.sort((a,b)=>a.nombre.localeCompare(b.nombre));
   }
-  llenarSelectMarcas(marcaNueva.nombre);
+  llenarSelectMarcas(marcaNueva.id, marcaNueva.nombre);
 });
 $('cat-filtro-categoria').addEventListener('change', ()=>{
   const catId = $('cat-filtro-categoria').value;
@@ -2878,7 +2898,7 @@ async function leerTodo(armar){
 async function cargarProductos(){
   const { data, error } = await leerTodo(()=> sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id,
-    producto:productos(id, nombre, marca, activo, activo_reparto, imagen_url, costo_ultima_compra,
+    producto:productos(id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
       linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
@@ -2895,7 +2915,7 @@ async function cargarProductos(){
       // Colores: "nombre" es lo que se ve en listas/búsquedas (Producto — Color); "nombreBase" es el
       // nombre real del artículo, el que se edita en el formulario.
       productoId: v.producto.id, nombreBase: v.producto.nombre,
-      nombre: nombreConColor(v.producto.nombre, v.nombre_variante), marca: v.producto.marca || '',
+      nombre: nombreConColor(v.producto.nombre, v.nombre_variante), marca: v.producto.marca || '', marcaId: v.producto.marca_id || null,
       activo: v.producto.activo, activoReparto: v.producto.activo_reparto,
       imagenUrl: v.producto.imagen_url || null,
       costo: v.producto.costo_ultima_compra,
@@ -4175,7 +4195,14 @@ function abrirProducto(varianteId){
   $('prod-precio-propio').checked = !!p?.precioPropio;
   renderColoresProducto(p);
   actualizarTituloProducto();
-  llenarSelectMarcas(p?.marca || '');
+  llenarSelectMarcas(p?.marcaId || '', p?.marca || '');
+  // Por si otro usuario agregó o renombró marcas mientras tanto: se vuelve a leer el catálogo y se
+  // repinta la lista conservando lo que esté elegido.
+  recargarMarcas().then(()=>{
+    if(!$('modal-producto').classList.contains('activo') || $('prod-marca').value === '__nueva__') return;
+    const sel = marcaSeleccionada();
+    llenarSelectMarcas(sel.id || p?.marcaId || '', sel.nombre || p?.marca || '');
+  });
   $('prod-clave-sat').value = p?.claveSat || '';
   $('prod-minimo').value = p?.minimo ?? 0;
   $('prod-dias-pedido').value = p?.diasSobrePedido ?? 3;
@@ -4326,7 +4353,7 @@ function capturarEstadoFormulario(){
     imagen: state.imagenUrlNueva || state.imagenUrlActual || null,
     nombre: $('prod-nombre').value.trim(),
     colorId: $('prod-nombre-variante').value, precioPropio: $('prod-precio-propio').checked,
-    marca: $('prod-marca').value.trim(),
+    marca: $('prod-marca').value,
     categoria: $('prod-categoria').value,
     linea: $('prod-linea').value,
     unidad: $('prod-unidad').value,
@@ -4604,7 +4631,7 @@ async function guardarProducto(){
 
   const payload = {
     producto_id: state.productoEditId, variante_id: state.varianteEditId,
-    empresa_id: state.empresaId, nombre, marca: $('prod-marca').value.trim(),
+    empresa_id: state.empresaId, nombre, marca: marcaSeleccionada().nombre, marca_id: marcaSeleccionada().id,
     linea_articulo_id: $('prod-linea').value, unidad_medida_id: $('prod-unidad').value,
     inventariable: $('prod-inventariable').checked, clave_prod_serv_sat: $('prod-clave-sat').value.trim(),
     activo: $('prod-activo').checked, activo_reparto: $('prod-activo-reparto').checked,
@@ -5236,27 +5263,132 @@ function llenarSelectAlmacenes(id, incluirVacio){
   if(valorPrevio && Array.from($(id).options).some(o=>o.value===valorPrevio)) $(id).value = valorPrevio;
 }
 
+// ---------- Borrador de compra (v1.35.010) ----------
+// Una compra manual es larga y la persona atiende clientes a la vez: lo capturado se guarda solo en este
+// equipo (por usuario) cada vez que cambia. Si se recarga la página o caduca la sesión, al volver a
+// entrar a Compras se recupera. Se borra al registrar la compra o al descartarla.
+const compraBorradorLlave = ()=> state.usuario?.id ? 'mk-compra-borrador:' + state.usuario.id : null;
+let _borradorTimer = null;
+function compraBorradorGuardar(){
+  clearTimeout(_borradorTimer);
+  if(state.usuario && (state.compraLineas||[]).length) state.compraLineasUsuario = state.usuario.id;
+  _borradorTimer = setTimeout(()=>{
+    const llave = compraBorradorLlave(); if(!llave) return;
+    try{
+      if(!(state.compraLineas||[]).length){ localStorage.removeItem(llave); return; }
+      state.compraLineasUsuario = state.usuario.id;
+      localStorage.setItem(llave, JSON.stringify({
+        ts: Date.now(), lineas: state.compraLineas, mixto: state.compraMixtoLineas || [],
+        proveedor: $('compra-proveedor').value, almacen: $('compra-almacen').value, fecha: $('compra-fecha').value,
+        folio: $('compra-folio').value, tipo: $('compra-tipo').value, condicion: $('compra-condicion-pago').value,
+        conImp: $('compra-con-impuestos').checked, xmlUuid: state.xmlCfdiUuid || null,
+      }));
+    }catch(e){}
+  }, 400);
+}
+function compraBorradorBorrar(){
+  clearTimeout(_borradorTimer);
+  const llave = compraBorradorLlave();
+  try{ if(llave) localStorage.removeItem(llave); }catch(e){}
+  state.compraRecuperada = false;
+  if($('compra-borrador-aviso')) $('compra-borrador-aviso').style.display = 'none';
+}
+function compraBorradorRecuperar(){
+  state.compraRecuperada = false;
+  const llave = compraBorradorLlave(); if(!llave) return;
+  let d = null;
+  try{ d = JSON.parse(localStorage.getItem(llave) || 'null'); }catch(e){}
+  if(!d || !Array.isArray(d.lineas) || !d.lineas.length) return;
+  const lineas = d.lineas.filter(l=>state.productos.some(p=>p.varianteId===l.varianteId));
+  if(!lineas.length) return;
+  state.compraLineas = lineas; state.compraLineasUsuario = state.usuario.id;
+  state.compraMixtoLineas = d.mixto || [];
+  state.xmlCfdiUuid = d.xmlUuid || null;
+  if(d.proveedor && state.proveedores.some(p=>p.id===d.proveedor)) $('compra-proveedor').value = d.proveedor;
+  if(d.almacen && Array.from($('compra-almacen').options).some(o=>o.value===d.almacen)) $('compra-almacen').value = d.almacen;
+  $('compra-fecha').value = d.fecha || fechaLocalISO();
+  $('compra-folio').value = d.folio || '';
+  $('compra-tipo').value = d.tipo || 'contado';
+  if(d.condicion) $('compra-condicion-pago').value = d.condicion;
+  $('compra-con-impuestos').checked = !!d.conImp;
+  actualizarVisibilidadCreditoCompra();
+  renderLineasCompra();
+  state.compraRecuperada = true;
+  $('compra-borrador-aviso').innerHTML = `📝 Se recuperó la compra que tenías en captura (${lineas.length} producto${lineas.length===1?'':'s'}, guardada ${new Date(d.ts).toLocaleString('es-MX')}). <button type="button" class="btn-gris" id="compra-borrador-descartar" style="margin-left:8px;">Descartar y empezar de nuevo</button>`;
+  $('compra-borrador-aviso').style.display = 'block';
+  $('compra-borrador-descartar').addEventListener('click', ()=>{
+    if(!confirm('¿Descartar la compra en captura? Se perderán los productos capturados.')) return;
+    compraBorradorBorrar();
+    state.compraLineas = []; state.compraMixtoLineas = []; state.xmlCfdiUuid = null;
+    $('compra-folio').value = '';
+    renderLineasCompra();
+  });
+}
+['compra-proveedor','compra-almacen','compra-fecha','compra-folio','compra-tipo','compra-condicion-pago','compra-con-impuestos']
+  .forEach(id=>{ const el = $(id); if(el){ el.addEventListener('change', compraBorradorGuardar); el.addEventListener('input', compraBorradorGuardar); } });
+window.addEventListener('beforeunload', e=>{ if((state.compraLineas||[]).length){ e.preventDefault(); e.returnValue = ''; } });
+
+// ---------- Actualización en vivo del catálogo (v1.35.010) ----------
+// Productos, marcas, etc. que da de alta otro usuario aparecen solos (al volver a la ventana, al
+// cambiar de pestaña y cada 60 s) sin tocar lo que se está capturando.
+let _catUltimo = 0, _catActualizando = false;
+async function actualizarCatalogosVivo(motivo){
+  if(_catActualizando || !state.usuario || !state.empresaId) return;
+  if(motivo !== 'manual' && Date.now() - _catUltimo < 15000) return;
+  if(document.getElementById('modal-producto')?.classList.contains('activo')) return;
+  _catActualizando = true;
+  try{ await cargarProductos(); await recargarMarcas(); _catUltimo = Date.now(); }
+  catch(e){ console.warn('No se pudo actualizar el catálogo', e); }
+  finally{ _catActualizando = false; }
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) actualizarCatalogosVivo('foco'); });
+setInterval(()=>{ if(!document.hidden) actualizarCatalogosVivo('timer'); }, 60000);
+$('compra-refrescar-catalogo').addEventListener('click', async ()=>{
+  const b = $('compra-refrescar-catalogo'); b.disabled = true; b.textContent = 'Actualizando…';
+  await actualizarCatalogosVivo('manual');
+  b.disabled = false; b.textContent = '↻ Actualizar catálogo';
+  const q = $('compra-buscar-producto'); if(q.value.trim()) q.dispatchEvent(new Event('input'));
+});
+
 // ---------------------------------------------------------------------------------------------
 // COMPRAS
 // ---------------------------------------------------------------------------------------------
 function prepararPantallaCompras(){
+  // v1.35.010: ya NO se borra la captura al volver a la pestaña. Si hay una compra en curso (en memoria,
+  // del mismo usuario) se conserva tal cual; si no hay, se intenta recuperar el borrador guardado en
+  // este equipo (por si se recargó la página o caducó la sesión).
+  const enCaptura = (state.compraLineas||[]).length > 0 && state.compraLineasUsuario === state.usuario?.id;
+  const previo = { tipo: $('compra-tipo').value, cond: $('compra-condicion-pago').value, conImp: $('compra-con-impuestos').checked,
+    fecha: $('compra-fecha').value, folio: $('compra-folio').value };
   renderProveedorSelect();
   llenarSelectAlmacenes('compra-almacen', false);
-  $('compra-fecha').value = fechaLocalISO();
-  $('compra-folio').value = '';
-  $('compra-con-impuestos').checked = state.desglosarImpuestos === false;
-  $('compra-xml-estado').innerHTML = '';
-  $('compra-error').innerHTML = '';
-  $('compra-tipo').value = 'contado';
   llenarSelect('compra-condicion-pago', state.condicionesPago || [], c=>c.id, c=>`${c.nombre} (${c.dias} días)`);
-  actualizarVisibilidadCreditoCompra();
-  state.compraLineas = [];
-  state.xmlCfdiUuid = null;
-  state.xmlPendientes = [];
-  state.xmlPendientesTotalLote = 0;
-  state.xmlPendienteActivo = false;
-  state.xmlProveedorId = null;
-  renderLineasCompra();
+  if(enCaptura){
+    $('compra-tipo').value = previo.tipo || 'contado';
+    if(previo.cond) $('compra-condicion-pago').value = previo.cond;
+    $('compra-con-impuestos').checked = previo.conImp;
+    $('compra-fecha').value = previo.fecha || fechaLocalISO();
+    $('compra-folio').value = previo.folio || '';
+    actualizarVisibilidadCreditoCompra();
+    renderLineasCompra();
+  } else {
+    $('compra-fecha').value = fechaLocalISO();
+    $('compra-folio').value = '';
+    $('compra-con-impuestos').checked = state.desglosarImpuestos === false;
+    $('compra-xml-estado').innerHTML = '';
+    $('compra-error').innerHTML = '';
+    $('compra-tipo').value = 'contado';
+    actualizarVisibilidadCreditoCompra();
+    state.compraLineas = [];
+    state.xmlCfdiUuid = null;
+    state.xmlPendientes = [];
+    state.xmlPendientesTotalLote = 0;
+    state.xmlPendienteActivo = false;
+    state.xmlProveedorId = null;
+    renderLineasCompra();
+    compraBorradorRecuperar();
+  }
+  $('compra-borrador-aviso').style.display = (state.compraLineas||[]).length && state.compraRecuperada ? 'block' : 'none';
   buscadorProducto('compra-buscar-producto', 'compra-resultados-busqueda', agregarLineaCompra, (q)=>{
     $('compra-producto-no-encontrado').style.display = 'block';
   }, (p)=> p.costo!=null ? ($('compra-con-impuestos').checked ? redondear2(Number(p.costo)*(1+tasaTotalProducto(p))) : Number(p.costo)) : null);
@@ -5601,6 +5733,7 @@ function renderLineasCompra(scrollAlFinal){
       const i = Number(inp.dataset.idx);
       state.compraLineas[i].cantidad = Number(inp.value)||0;
       actualizarImporteFilaCompra(i);
+      compraBorradorGuardar();
     });
   });
   $('compra-lineas-body').querySelectorAll('.compra-costo').forEach(inp=>{
@@ -5626,6 +5759,7 @@ function renderLineasCompra(scrollAlFinal){
   $('compra-lineas-body').querySelectorAll('.compra-ser-btn').forEach(b=>b.addEventListener('click', ()=>cserAbrir(Number(b.dataset.idx))));
   $('compra-total').textContent = money(totalCompraLineas());
   if($('compra-tipo').value === 'mixto') renderMixtoLineas();
+  compraBorradorGuardar();
   if(scrollAlFinal){ const cont = $('compra-lineas-scroll'); cont.scrollTop = cont.scrollHeight; }
 }
 
@@ -5711,6 +5845,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   $('compra-registrar').disabled = false;
   if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
   const fallasLS = await asignarLotesSeriesCompra(state.compraLineas, $('compra-almacen').value);
+  compraBorradorBorrar();
   state.compraLineas = [];
   state.compraMixtoLineas = [];
   state.xmlCfdiUuid = null;
