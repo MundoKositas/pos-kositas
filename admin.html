@@ -2066,7 +2066,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.36.002';
+const APP_VERSION = '1.36.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2300,7 +2300,28 @@ const state = {
 const LOGO_URL_FIJA = `${SUPABASE_URL}/storage/v1/object/public/empresa/logo.png`;
 $('login-logo').addEventListener('error', ()=>{ $('login-logo').style.display = 'none'; });
 $('login-logo').addEventListener('load', ()=>{ $('login-logo').style.display = 'block'; });
-$('login-logo').src = LOGO_URL_FIJA;
+const EMPRESA_ORIGINAL = '96f14cb8-3068-4f66-a13e-30561c9068c3'; // Mundo Kositas conserva sus colores de siempre
+function aplicarMarcaColores(c, empresaId){
+  c = c || {};
+  if(empresaId === EMPRESA_ORIGINAL || !(c.barra || c.boton || c.acento)) return;
+  const barra = c.barra || c.boton, boton = c.boton || c.barra, ac = c.acento || boton;
+  let st = document.getElementById('marca-empresa');
+  if(!st){ st = document.createElement('style'); st.id = 'marca-empresa'; document.head.appendChild(st); }
+  st.textContent = `:root{--azul:${barra};--verde:${boton};--verde-osc:${ac};} header{color:${c.barra_texto || '#fff'};} .btn-primario{color:${c.boton_texto || '#fff'};}`;
+}
+// Pantalla de acceso: la marca se toma de la dirección (subdominio), porque aún no hay sesión.
+(async function marcaDeLogin(){
+  const lg = $('login-logo');
+  try{
+    const { data } = await sb.rpc('resolver_empresa', { p_host: location.hostname });
+    if(data && data.empresa_id){
+      aplicarMarcaColores(data.colores_pos, data.empresa_id);
+      if(data.logo_url) lg.src = data.logo_url; // sin logo propio: no se muestra ninguno
+      return;
+    }
+  }catch(e){}
+  lg.src = LOGO_URL_FIJA;
+})();
 // Muestra/oculta el logotipo del encabezado (ya autenticado) según haya URL guardada en la empresa.
 function actualizarLogoHeader(){
   if(state.logoUrl){
@@ -2740,14 +2761,7 @@ async function cargarConfiguracionEmpresa(){
     const { data } = await sb.rpc('mi_configuracion', { p_empresa: state.empresaId });
     if(!data) return;
     state.modulos = data.modulos || {};
-    const c = data.colores_pos || {};
-    if(c.barra || c.boton || c.acento){
-      const st = document.createElement('style');
-      st.textContent = `:root{${c.acento ? '--verde-osc:' + c.acento + ';' : ''}}`
-        + (c.barra ? `header,#header-app{background:${c.barra} !important;color:${c.barra_texto || '#fff'} !important;}` : '')
-        + (c.boton ? `.btn-primario{background:${c.boton};color:${c.boton_texto || '#fff'};}` : '');
-      document.head.appendChild(st);
-    }
+    aplicarMarcaColores(data.colores_pos, state.empresaId);
   }catch(e){ /* sin configuración: se usan los valores de siempre */ }
 }
 function aplicarModulosEnMenus(){

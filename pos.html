@@ -746,7 +746,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.10.000';
+const APP_VERSION = '1.10.001';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -841,7 +841,28 @@ const LOGO_URL_FIJA = `${SUPABASE_URL}/storage/v1/object/public/empresa/logo.png
 $('hdr-logo').addEventListener('error', ()=>{ $('hdr-logo-caja').style.display = 'none'; });
 $('login-logo').addEventListener('error', ()=>{ $('login-logo').style.display = 'none'; });
 $('login-logo').addEventListener('load', ()=>{ $('login-logo').style.display = 'block'; });
-$('login-logo').src = LOGO_URL_FIJA;
+const EMPRESA_ORIGINAL = '96f14cb8-3068-4f66-a13e-30561c9068c3'; // Mundo Kositas conserva sus colores de siempre
+function aplicarMarcaColores(c, empresaId){
+  c = c || {};
+  if(empresaId === EMPRESA_ORIGINAL || !(c.barra || c.boton || c.acento)) return;
+  const barra = c.barra || c.boton, boton = c.boton || c.barra, ac = c.acento || boton;
+  let st = document.getElementById('marca-empresa');
+  if(!st){ st = document.createElement('style'); st.id = 'marca-empresa'; document.head.appendChild(st); }
+  st.textContent = `:root{--verde:${boton};--verde-osc:${ac};} header{background:${barra};color:${c.barra_texto || '#fff'};} .btn-primario{color:${c.boton_texto || '#fff'};}`;
+}
+// Pantalla de acceso: la marca se toma de la dirección (subdominio), porque aún no hay sesión.
+(async function marcaDeLogin(){
+  const lg = $('login-logo');
+  try{
+    const { data } = await sb.rpc('resolver_empresa', { p_host: location.hostname });
+    if(data && data.empresa_id){
+      aplicarMarcaColores(data.colores_pos, data.empresa_id);
+      if(data.logo_url) lg.src = data.logo_url; // sin logo propio: no se muestra ninguno
+      return;
+    }
+  }catch(e){}
+  lg.src = LOGO_URL_FIJA;
+})();
 
 // ---------- MODO SIN CONEXIÓN (Ronda 59, entrega 1) ----------
 // Adrián pidió que el POS siga funcionando cuando se cae el internet y se ponga al corriente cuando
@@ -3736,14 +3757,7 @@ async function cargarConfiguracionEmpresa(){
     const { data } = await sb.rpc('mi_configuracion', { p_empresa: state.empresaId });
     if(!data) return;
     state.modulos = data.modulos || {};
-    const c = data.colores_pos || {};
-    if(c.barra || c.boton || c.acento){
-      const st = document.createElement('style');
-      st.textContent = `:root{${c.acento ? '--verde-osc:' + c.acento + ';' : ''}}`
-        + (c.barra ? `header{background:${c.barra} !important;color:${c.barra_texto || '#fff'} !important;}` : '')
-        + (c.boton ? `.btn-primario{background:${c.boton};color:${c.boton_texto || '#fff'};}` : '');
-      document.head.appendChild(st);
-    }
+    aplicarMarcaColores(data.colores_pos, state.empresaId);
     // Sin paquete Catálogo: el POS opera solo como punto de venta (sin servicio a domicilio)
     if(state.modulos.reparto === false){
       const b = document.getElementById('btn-domicilio'); if(b) b.style.display = 'none';
