@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es"><head><script>if(/^(www\.)?(ofertienda|desdecasa)\.mx$/i.test(location.hostname)){location.replace('/plataforma.html');}</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="es"><head><script>(function(){var h=location.hostname;if(/^(www\.)?(ofertienda|desdecasa)\.mx$/i.test(h)){location.replace('/plataforma.html');return;}if(/\.(ofertienda|desdecasa)\.mx$/i.test(h)){var s=document.createElement('style');s.id='ocultar-marca';s.textContent='body{visibility:hidden}';document.head.appendChild(s);setTimeout(function(){var o=document.getElementById('ocultar-marca');if(o)o.remove();},5000);}})();</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mundo Kositas · Acceso</title>
 <style>
 :root{--verde:#2f7d4f;--verde-osc:#245f3c;--barra:#2f7d4f;--barra-texto:#fff;--boton-texto:#fff;--gris:#6b7280;--bg:#f4f6f5;--card:#fff;--borde:#e2e5e3;--texto:#222}
@@ -30,6 +30,7 @@ a{display:block;padding:12px 14px;margin:10px 0;border-radius:6px;text-decoratio
 var SB='https://vsfzkktmdwqkfbecmfcj.supabase.co';
 var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs';
 var l=document.getElementById('logo');
+function mostrar(){var o=document.getElementById('ocultar-marca');if(o)o.remove();}
 l.addEventListener('load',function(){l.style.display='block'});
 l.addEventListener('error',function(){l.style.display='none'});
 function logoPorDefecto(){ l.src=SB+'/storage/v1/object/public/empresa/logo.png'; }
@@ -37,15 +38,8 @@ fetch(SB+'/rest/v1/rpc/resolver_empresa',{method:'POST',headers:{'apikey':KEY,'A
 .then(function(r){return r.ok?r.json():null})
 .then(function(d){
   if(!d||!d.empresa_id){
-    if(/\.ofertienda\.mx$/i.test(location.hostname)){
-      document.getElementById('encabezado').textContent='';
-      document.getElementById('titulo').textContent='Empresa no encontrada';
-      document.getElementById('subtitulo').textContent='Esta dirección no corresponde a ninguna empresa activa. Revisa el enlace que te compartieron.';
-      document.getElementById('enlaces').style.display='none';
-      document.title='Acceso';
-      return;
-    }
-    return logoPorDefecto();
+    if(/\.ofertienda\.mx$/i.test(location.hostname)){ location.replace('/plataforma.html?noencontrada=1'); return; }
+    mostrar(); return logoPorDefecto();
   }
   var c=d.colores_pos||{}, s=document.documentElement.style;
   if(c.barra) s.setProperty('--barra',c.barra);
@@ -56,7 +50,8 @@ fetch(SB+'/rest/v1/rpc/resolver_empresa',{method:'POST',headers:{'apikey':KEY,'A
   document.title=(d.nombre||'')+' · Acceso';
   document.getElementById('encabezado').textContent=d.nombre||'';
   if(d.logo_url) l.src=d.logo_url; // sin logo propio: solo se muestra el nombre
+  mostrar();
 })
-.catch(function(){ logoPorDefecto(); });
+.catch(function(){ mostrar(); logoPorDefecto(); });
 </script>
 </body></html>
