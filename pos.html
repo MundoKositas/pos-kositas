@@ -746,7 +746,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.022';
+const APP_VERSION = '1.10.000';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1670,7 +1670,7 @@ async function iniciarSesionApp(){
   }
   const esSuperAdmin = !asignacion.empresa_id;
 
-  const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true);
+  const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true).order('creado_en');
   const empresa = esSuperAdmin ? empresas[0] : empresas.find(e=>e.id === asignacion.empresa_id);
   if(!empresa){ mostrarError('No se encontró una empresa activa para tu cuenta.'); return; }
   state.empresaId = empresa.id;
@@ -1681,6 +1681,7 @@ async function iniciarSesionApp(){
   state.empresaDomicilio = empresa.domicilio || '';
   state.empresaTelefono = empresa.telefono || '';
   state.empresaUrlCatalogo = empresa.url_catalogo || '';
+  await cargarConfiguracionEmpresa();
 
   registrarAccesoSistema('pos', 'entrada'); // no se espera (await) — no debe bloquear el inicio de sesión si falla
 
@@ -3726,6 +3727,30 @@ $('dom-confirmar').addEventListener('click', ()=>{
   $('modal-domicilio').classList.remove('activo');
 });
 
+
+
+// ---------- v1.10.000: módulos y colores por empresa ----------
+state.modulos = {};
+async function cargarConfiguracionEmpresa(){
+  try{
+    const { data } = await sb.rpc('mi_configuracion', { p_empresa: state.empresaId });
+    if(!data) return;
+    state.modulos = data.modulos || {};
+    const c = data.colores_pos || {};
+    if(c.barra || c.boton || c.acento){
+      const st = document.createElement('style');
+      st.textContent = `:root{${c.acento ? '--verde-osc:' + c.acento + ';' : ''}}`
+        + (c.barra ? `header{background:${c.barra} !important;color:${c.barra_texto || '#fff'} !important;}` : '')
+        + (c.boton ? `.btn-primario{background:${c.boton};color:${c.boton_texto || '#fff'};}` : '');
+      document.head.appendChild(st);
+    }
+    // Sin paquete Catálogo: el POS opera solo como punto de venta (sin servicio a domicilio)
+    if(state.modulos.reparto === false){
+      const b = document.getElementById('btn-domicilio'); if(b) b.style.display = 'none';
+      const bn = document.getElementById('domicilio-banner'); if(bn) bn.style.display = 'none';
+    }
+  }catch(e){ /* sin configuración: se usan los valores de siempre */ }
+}
 
 // ----- Cliente registrado + varios domicilios (Ronda 62b) -----
 function deseleccionarClienteDom(){

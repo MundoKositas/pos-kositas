@@ -174,6 +174,7 @@
     <button class="tab-btn" data-tab="tab-reparto">Reparto</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
+    <button class="tab-btn" data-tab="tab-empresas" id="tabbtn-empresas" style="display:none;">🏢 Empresas</button>
     <button class="tab-btn" data-tab="tab-catalogos-base">Catálogos base</button>
   </div>
 
@@ -380,6 +381,18 @@
       <p class="nota" id="rv-subtitulo-resultado" style="margin:0 0 8px;"></p>
       <div class="tabla-scroll"><table><thead id="rv-thead"></thead><tbody id="rv-tbody"></tbody></table></div>
       <p class="nota" id="rv-vacio" style="display:none;"></p>
+    </div>
+  </div>
+
+  <!-- TAB EMPRESAS (v1.36.000, solo Super Admin) -->
+  <div class="tab-panel" id="tab-empresas" style="display:none;">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <h2 style="margin:0;">Empresas</h2>
+        <button class="btn-primario" id="em-nueva">+ Nueva empresa</button>
+      </div>
+      <p class="nota">Cada empresa tiene su propio POS/Admin y, si contrata el paquete Catálogo, su catálogo con servicio a domicilio. Los usuarios pertenecen a una sola empresa.</p>
+      <div id="em-lista" style="overflow-x:auto;"></div>
     </div>
   </div>
 
@@ -1132,6 +1145,52 @@
 </div>
 
 <!-- MODAL: catálogo simple (Marcas/Categorías/Líneas/Unidades/Impuestos/Formas de pago/Condiciones de pago — Ronda 30) -->
+<div class="modal-fondo" id="modal-empresa">
+  <div class="modal" style="max-width:640px;width:96vw;max-height:92vh;overflow:auto;">
+    <h2 id="em-titulo">Nueva empresa</h2>
+    <input type="hidden" id="em-id">
+    <div class="campo"><label>Nombre comercial *</label><input type="text" id="em-nombre"></div>
+    <div class="campo"><label>Razón social</label><input type="text" id="em-razon"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <div class="campo" style="flex:1 1 160px;"><label>RFC</label><input type="text" id="em-rfc"></div>
+      <div class="campo" style="flex:1 1 160px;"><label>Teléfono</label><input type="text" id="em-tel"></div>
+    </div>
+    <div class="campo"><label>Domicilio</label><input type="text" id="em-dom"></div>
+    <div class="campo" id="em-slug-wrap"><label>Subdominio * <span class="nota">(ej. <b>marca</b> → marca.ofertienda.mx y marca.desdecasa.mx)</span></label><input type="text" id="em-slug" placeholder="mi-tienda"></div>
+    <h3 style="margin:14px 0 6px;">Paquetes y módulos</h3>
+    <label style="display:block;margin:4px 0;"><input type="checkbox" checked disabled> <b>POS + Admin</b> (siempre incluido)</label>
+    <label style="display:block;margin:4px 0;"><input type="checkbox" id="em-catalogo"> <b>Catálogo</b> en línea + servicio a domicilio y repartidores</label>
+    <div style="margin:8px 0 0 18px;">
+      <label style="display:block;margin:4px 0;"><input type="checkbox" id="em-compras" checked> Compras a proveedores</label>
+      <label style="display:block;margin:4px 0;"><input type="checkbox" id="em-creditos"> Crédito a clientes</label>
+      <label style="display:block;margin:4px 0;"><input type="checkbox" id="em-invavz"> Inventario avanzado (lotes, series, traspasos)</label>
+    </div>
+    <h3 style="margin:14px 0 6px;">Imagen y colores</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="campo"><label>POS/Admin: barra</label><input type="color" id="em-c-barra" value="#2f7d4f"></div>
+      <div class="campo"><label>botones</label><input type="color" id="em-c-boton" value="#2f7d4f"></div>
+      <div class="campo"><label>acento</label><input type="color" id="em-c-acento" value="#245f3c"></div>
+    </div>
+    <div id="em-cat-colores" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="campo"><label>Catálogo: barra</label><input type="color" id="em-k-barra" value="#8E24AA"></div>
+      <div class="campo"><label>botones</label><input type="color" id="em-k-boton" value="#8E24AA"></div>
+      <div class="campo"><label>acento</label><input type="color" id="em-k-acento" value="#6A1B9A"></div>
+      <div class="campo"><label>fondo</label><input type="color" id="em-k-fondo" value="#F4F4F4"></div>
+    </div>
+    <div class="campo" id="em-logo-wrap" style="display:none;"><label>Logotipo (PNG/JPG)</label><input type="file" id="em-logo" accept="image/*"><img id="em-logo-prev" style="max-height:60px;display:none;margin-top:6px;"></div>
+    <h3 style="margin:14px 0 6px;" id="em-dueno-h">Dueño de la empresa (Admin de Empresa)</h3>
+    <div id="em-dueno">
+      <div class="campo"><label>Nombre *</label><input type="text" id="em-dueno-nombre"></div>
+      <div class="campo"><label>Correo *</label><input type="email" id="em-dueno-correo"></div>
+    </div>
+    <div id="em-error"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-gris" style="flex:1;" id="em-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="em-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-cfg">
   <div class="modal">
     <h2 id="cfg-modal-titulo">Nuevo</h2>
@@ -2007,7 +2066,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.013';
+const APP_VERSION = '1.36.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2449,9 +2508,9 @@ $('empresa-logo-archivo').addEventListener('change', async (e)=>{
   $('empresa-logo-estado').innerHTML = '<p class="nota">Subiendo logotipo…</p>';
   try{
     const png = await convertirImagenAPng(archivo);
-    const { error: errSubida } = await sb.storage.from('empresa').upload('logo.png', png, { upsert: true, contentType: 'image/png' });
+    const { error: errSubida } = await sb.storage.from('empresa').upload(state.empresaId + '/logo.png', png, { upsert: true, contentType: 'image/png' });
     if(errSubida) throw errSubida;
-    const { data: pub } = sb.storage.from('empresa').getPublicUrl('logo.png');
+    const { data: pub } = sb.storage.from('empresa').getPublicUrl(state.empresaId + '/logo.png');
     const urlConVersion = `${pub.publicUrl}?v=${Date.now()}`; // evita que el navegador muestre una copia vieja en caché
     const { error: errGuardar } = await sb.from('empresas').update({ logo_url: urlConVersion }).eq('id', state.empresaId);
     if(errGuardar) throw errGuardar;
@@ -2504,8 +2563,9 @@ async function iniciarSesionApp(){
     return mostrarError(`Tu rol (${state.rol}) no tiene acceso a Admin Kositas. Usa el Punto de Venta.`);
   }
   const esSuperAdmin = !asignacion.empresa_id;
+  state.esSuperAdmin = esSuperAdmin;
 
-  const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true);
+  const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true).order('creado_en');
   const empresa = esSuperAdmin ? empresas[0] : empresas.find(e=>e.id === asignacion.empresa_id);
   if(!empresa){ return mostrarError('No se encontró una empresa activa para tu cuenta.'); }
   state.empresaId = empresa.id;
@@ -2546,7 +2606,8 @@ async function iniciarSesionApp(){
   state.permisosInventario = permisosInv || [];
   state.permisosMenu = Object.fromEntries((permisosMenu || []).map(r=>[r.clave, r.nivel]));
 
-  const puedeComprar = state.permisosInventario.includes('inventario.registrar_compra');
+  await cargarConfiguracionEmpresa();
+  const puedeComprar = state.permisosInventario.includes('inventario.registrar_compra') && state.modulos.compras !== false;
   const puedeAjustarTraspasar = state.permisosInventario.includes('inventario.ajuste_salida') || state.permisosInventario.includes('inventario.traspasos');
   $('tabbtn-compras').style.display = puedeComprar ? '' : 'none';
   $('tabbtn-inventario').style.display = puedeAjustarTraspasar ? '' : 'none';
@@ -2577,6 +2638,7 @@ async function iniciarSesionApp(){
   renderCxcTabla();
 
   ajustarVisibilidadMenus(); // Ronda 35: oculta pestañas sin acceso y desactiva acciones de solo-consulta
+  aplicarModulosEnMenus();
 
   mostrarPantalla('pantalla-admin');
   ajustarOffsetMenuFijo(); // Ronda 54: vuelve a medir ya con la pantalla de admin realmente visible
@@ -2669,6 +2731,130 @@ function ajustarVisibilidadMenus(){
   $('btn-actualizar-precios').style.display = tieneEdicionMenu('actualizar_precios') ? '' : 'none';
   $('btn-nuevo-cliente').style.display = tieneEdicionMenu('clientes') ? '' : 'none';
 }
+
+
+// ---------- v1.36.000: configuración por empresa (módulos, colores) y pantalla Empresas (Super Admin) ----------
+state.modulos = {};
+async function cargarConfiguracionEmpresa(){
+  try{
+    const { data } = await sb.rpc('mi_configuracion', { p_empresa: state.empresaId });
+    if(!data) return;
+    state.modulos = data.modulos || {};
+    const c = data.colores_pos || {};
+    if(c.barra || c.boton || c.acento){
+      const st = document.createElement('style');
+      st.textContent = `:root{${c.acento ? '--verde-osc:' + c.acento + ';' : ''}}`
+        + (c.barra ? `header,#header-app{background:${c.barra} !important;color:${c.barra_texto || '#fff'} !important;}` : '')
+        + (c.boton ? `.btn-primario{background:${c.boton};color:${c.boton_texto || '#fff'};}` : '');
+      document.head.appendChild(st);
+    }
+  }catch(e){ /* sin configuración: se usan los valores de siempre */ }
+}
+function aplicarModulosEnMenus(){
+  const m = state.modulos || {};
+  if(m.reparto === false){ const b = document.querySelector('[data-tab="tab-reparto"]'); if(b) b.style.display = 'none'; }
+  if(m.creditos === false){ const b = document.querySelector('[data-clitab="cli-panel-cxc"]'); if(b) b.style.display = 'none'; }
+  const be = $('tabbtn-empresas'); if(be) be.style.display = state.esSuperAdmin ? '' : 'none';
+  const activa = document.querySelector('#pantalla-admin > .tabs > .tab-btn.activo');
+  if(activa && activa.style.display === 'none'){
+    const v = document.querySelector('#pantalla-admin > .tabs > .tab-btn:not([style*="display: none"])'); if(v) v.click();
+  }
+}
+const emEsc = s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+async function emCargar(){
+  $('em-lista').innerHTML = '<p class="nota">Cargando…</p>';
+  const { data, error } = await sb.rpc('super_listar_empresas');
+  if(error){ $('em-lista').innerHTML = `<div class="msg-error">${emEsc(error.message)}</div>`; return; }
+  state.empresasLista = data || [];
+  $('em-lista').innerHTML = '<table class="tabla"><thead><tr><th>Empresa</th><th>Paquetes</th><th>Direcciones</th><th>Usuarios</th><th>Estado</th><th></th></tr></thead><tbody>'
+    + state.empresasLista.map(e=>{
+      const mo = e.modulos || {};
+      const paq = 'POS+Admin' + (mo.catalogo_publico ? ' + Catálogo' : '') + (mo.plan === 'completo' ? ' (completo)' : '');
+      const hosts = (e.dominios||[]).filter(d=>d.activo).map(d=>emEsc(d.host)).join('<br>');
+      return `<tr><td><b>${emEsc(e.nombre_comercial)}</b><br><span class="nota">${emEsc(e.razon_social||'')}</span></td><td>${paq}</td><td style="font-size:.82rem;">${hosts}</td><td>${e.usuarios}</td><td>${e.activo ? 'Activa' : 'Inactiva'}</td><td><button class="btn-gris" data-em-edit="${e.id}">Editar</button></td></tr>`;
+    }).join('') + '</tbody></table>';
+  document.querySelectorAll('[data-em-edit]').forEach(b=>b.addEventListener('click', ()=>emAbrir(b.dataset.emEdit)));
+}
+function emAbrir(id){
+  const e = id ? state.empresasLista.find(x=>x.id===id) : null;
+  $('em-id').value = id || '';
+  $('em-titulo').textContent = e ? 'Editar empresa' : 'Nueva empresa';
+  $('em-nombre').value = e?.nombre_comercial || ''; $('em-razon').value = e?.razon_social || ''; $('em-rfc').value = e?.rfc || '';
+  $('em-tel').value = e?.telefono || ''; $('em-dom').value = e?.domicilio || ''; $('em-slug').value = '';
+  $('em-slug-wrap').style.display = e ? 'none' : '';
+  $('em-dueno').style.display = e ? 'none' : ''; $('em-dueno-h').style.display = e ? 'none' : '';
+  $('em-dueno-nombre').value = ''; $('em-dueno-correo').value = '';
+  const mo = e?.modulos || {};
+  $('em-catalogo').checked = !!mo.catalogo_publico; $('em-compras').checked = e ? !!mo.compras : true;
+  $('em-creditos').checked = !!mo.creditos; $('em-invavz').checked = !!mo.inventario_avanzado;
+  const p = e?.marca?.pos || {}, k = e?.marca?.catalogo || {};
+  $('em-c-barra').value = p.barra || '#2f7d4f'; $('em-c-boton').value = p.boton || '#2f7d4f'; $('em-c-acento').value = p.acento || '#245f3c';
+  $('em-k-barra').value = k.barra || '#8E24AA'; $('em-k-boton').value = k.boton || '#8E24AA'; $('em-k-acento').value = k.acento || '#6A1B9A'; $('em-k-fondo').value = k.fondo || '#F4F4F4';
+  $('em-logo-wrap').style.display = e ? '' : 'none';
+  const lg = e?.marca?.logo_url; $('em-logo-prev').style.display = lg ? '' : 'none'; if(lg) $('em-logo-prev').src = lg;
+  $('em-logo').value = ''; $('em-error').innerHTML = '';
+  $('em-guardar').style.display = ''; $('em-cancelar').textContent = 'Cancelar';
+  emToggleCat();
+  $('modal-empresa').classList.add('activo');
+}
+function emToggleCat(){ $('em-cat-colores').style.display = $('em-catalogo').checked ? '' : 'none'; }
+$('em-catalogo').addEventListener('change', emToggleCat);
+$('em-nueva').addEventListener('click', ()=>emAbrir(null));
+$('em-cancelar').addEventListener('click', ()=>$('modal-empresa').classList.remove('activo'));
+document.querySelector('[data-tab="tab-empresas"]').addEventListener('click', emCargar);
+function emColores(){
+  return {
+    pos: { barra: $('em-c-barra').value, boton: $('em-c-boton').value, acento: $('em-c-acento').value, menu: '#ffffff', menu_texto: $('em-c-acento').value, barra_texto: '#ffffff', boton_texto: '#ffffff' },
+    catalogo: { barra: $('em-k-barra').value, boton: $('em-k-boton').value, acento: $('em-k-acento').value, fondo: $('em-k-fondo').value, barra_texto: '#ffffff', boton_texto: '#ffffff' }
+  };
+}
+$('em-guardar').addEventListener('click', async ()=>{
+  const err = m => { $('em-error').innerHTML = `<div class="msg-error">${emEsc(m)}</div>`; };
+  const btn = $('em-guardar'); const id = $('em-id').value;
+  const nombre = $('em-nombre').value.trim();
+  if(!nombre) return err('Captura el nombre comercial.');
+  const col = emColores();
+  const modulos = { compras: $('em-compras').checked, creditos: $('em-creditos').checked, inventario_avanzado: $('em-invavz').checked };
+  btn.disabled = true;
+  try{
+    if(id){
+      const { error } = await sb.rpc('super_actualizar_empresa', { p_empresa: id, p: {
+        nombre_comercial: nombre, razon_social: $('em-razon').value, rfc: $('em-rfc').value, telefono: $('em-tel').value, domicilio: $('em-dom').value,
+        catalogo: $('em-catalogo').checked, modulos, marca: { nombre_visible: nombre, pos: col.pos, catalogo: col.catalogo } } });
+      if(error) throw error;
+      const f = $('em-logo').files[0];
+      if(f){
+        const png = await convertirImagenAPng(f);
+        const { error: eu } = await sb.storage.from('empresa').upload(id + '/logo.png', png, { upsert: true, contentType: 'image/png' });
+        if(eu) throw eu;
+        const url = sb.storage.from('empresa').getPublicUrl(id + '/logo.png').data.publicUrl + '?v=' + Date.now();
+        const { error: em2 } = await sb.rpc('super_actualizar_empresa', { p_empresa: id, p: { marca: { logo_url: url } } });
+        if(em2) throw em2;
+      }
+      $('modal-empresa').classList.remove('activo'); emCargar(); return;
+    }
+    const slug = $('em-slug').value.trim().toLowerCase();
+    const dn = $('em-dueno-nombre').value.trim(), dc = $('em-dueno-correo').value.trim();
+    if(!slug) return err('Captura el subdominio.');
+    if(!dn || !/^\S+@\S+\.\S+$/.test(dc)) return err('Captura el nombre y un correo válido del dueño.');
+    const { data: r, error } = await sb.rpc('super_crear_empresa', { p: {
+      nombre_comercial: nombre, razon_social: $('em-razon').value, rfc: $('em-rfc').value, telefono: $('em-tel').value, domicilio: $('em-dom').value,
+      slug, catalogo: $('em-catalogo').checked, modulos, colores_pos: col.pos, colores_catalogo: col.catalogo } });
+    if(error) throw error;
+    const { data: rol } = await sb.from('roles').select('id').eq('nombre', 'Admin de Empresa').maybeSingle();
+    const { data: u, error: eu } = await sb.functions.invoke('crear_usuario', { body: { nombre: dn, email: dc, empresa_id: r.empresa_id, sucursal_id: r.sucursal_id, almacen_id: r.almacen_id, rol_ids: [rol?.id] } });
+    let aviso = '';
+    if(eu || u?.error){ aviso = `<div class="msg-error">La empresa se creó, pero no se pudo crear el usuario dueño: ${emEsc(u?.error || eu.message)}. Créalo desde Catálogos base → Usuarios.</div>`; }
+    else {
+      const { error: er } = await sb.auth.resetPasswordForEmail(dc);
+      aviso = `<div class="msg-ok">Dueño creado: <b>${emEsc(dc)}</b><br>Contraseña temporal: <b>${emEsc(u.password_temporal)}</b> (anótala y entrégala; ${er ? 'no se pudo enviar el correo para definir contraseña' : 'además se le envió un correo para definir su propia contraseña'}).</div>`;
+    }
+    $('em-error').innerHTML = `<div class="msg-ok">Empresa creada. POS/Admin: <b>${emEsc(r.host_pos)}</b>${r.host_catalogo ? '<br>Catálogo: <b>' + emEsc(r.host_catalogo) + '</b>' : ''}</div>` + aviso;
+    $('em-guardar').style.display = 'none'; $('em-cancelar').textContent = 'Cerrar';
+    emCargar();
+  }catch(e){ err(e.message || String(e)); }
+  finally{ btn.disabled = false; }
+});
 
 // ---------- TABS (pantalla principal) ----------
 document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
