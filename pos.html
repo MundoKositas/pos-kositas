@@ -117,6 +117,13 @@
     .card{padding:14px;}
     .centrado{margin:30px auto;}
   }
+.selmod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin:10px 0;}
+.selmod-op{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px;border:1px solid #cfd8d2;border-radius:10px;background:#fff;cursor:pointer;font:inherit;text-align:center;}
+.selmod-op:hover,.selmod-op:focus{border-color:var(--verde);box-shadow:0 0 0 2px rgba(0,0,0,.08);outline:none;}
+.selmod-op img,.selmod-ph{width:100%;height:96px;object-fit:contain;border-radius:8px;background:#f4f6f5;display:flex;align-items:center;justify-content:center;font-size:2rem;}
+.selmod-n{font-size:.85rem;font-weight:700;line-height:1.2;}
+.selmod-s{font-size:.75rem;color:#5b665f;}
+.selmod-sin{opacity:.55;}
 </style>
 </head>
 <body>
@@ -408,6 +415,15 @@
     <div id="ser-lista" style="max-height:260px;overflow:auto;margin-top:8px;"></div>
     <p class="nota" id="ser-cuenta"></p>
     <div class="acciones"><button class="btn-gris" id="ser-cancelar">Cancelar</button><button class="btn-primario" id="ser-ok">Continuar</button></div>
+  </div>
+</div>
+
+<div class="modal-fondo" id="modal-selector-modelo">
+  <div class="modal" style="max-width:720px;max-height:92vh;overflow:auto;">
+    <h2>¿Cuál modelo o color?</h2>
+    <p class="nota">El código <strong id="selmod-codigo"></strong> corresponde a varios modelos. Toca el que estás vendiendo.</p>
+    <div id="selmod-lista" class="selmod-grid"></div>
+    <div class="acciones"><button class="btn-gris" id="selmod-cancelar">Cancelar</button></div>
   </div>
 </div>
 
@@ -746,7 +762,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.10.001';
+const APP_VERSION = '1.10.002';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2194,8 +2210,8 @@ async function leerTodo(armar){
 async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
     consultaConRespaldo('catalogo_variantes', () => leerTodo(() => sb.from('variantes').select(`
-      id, nombre_variante, activo,
-      producto:productos(id, nombre, marca, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, unidad:unidades_medida(clave), producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+      id, nombre_variante, activo, imagen_url,
+      producto:productos(id, nombre, marca, imagen_url, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, unidad:unidades_medida(clave), producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
@@ -2247,6 +2263,7 @@ async function cargarCatalogo(){
       const combo = combosPorVarianteId[v.id];
       return {
         varianteId: v.id,
+        imagen: v.imagen_url || v.producto.imagen_url || null,
         nombre: v.producto.nombre + (v.nombre_variante && v.nombre_variante !== 'Único' ? ' - ' + v.nombre_variante : ''),
         preciosPorLista,
         precio: preciosPorLista[state.listaPrecioId] ?? null,
@@ -2450,12 +2467,40 @@ const buscarInput = $('buscar-input');
 // el cajero tenga que hacer nada más) como en Enter (compatibilidad con lectores que sí lo mandan, o
 // captura manual del código completo). Regresa true si se agregó.
 function intentarAgregarPorCodigoExacto(q){
-  const porCodigo = state.catalogo.find(p=>p.codigos.some(c=>c.codigo===q) && comboDisponibleEnPos(p));
+  // v1.10.002: un mismo código puede estar en varios modelos/colores del MISMO artículo (ej. carros a
+  // escala). Si coincide con más de uno, se pregunta cuál se está vendiendo.
+  const varios = state.catalogo.filter(p=>p.codigos.some(c=>c.codigo===q) && comboDisponibleEnPos(p));
+  if(varios.length > 1){ abrirSelectorModelo(q, varios); return true; }
+  const porCodigo = varios[0];
   if(!porCodigo) return false;
   const codigoInfo = porCodigo.codigos.find(c=>c.codigo===q);
   if(agregarAlCarrito(porCodigo, q, codigoInfo.factor)){ buscarInput.value=''; renderResultados(''); return true; }
   return false;
 }
+// ---- Selector de modelo/color cuando un código de barras corresponde a varias variantes ----
+function abrirSelectorModelo(codigo, lista){
+  $('selmod-codigo').textContent = codigo;
+  const esc = t=>String(t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const ordenada = lista.slice().sort((a,b)=> (b.stock>0)-(a.stock>0) || a.nombre.localeCompare(b.nombre));
+  $('selmod-lista').innerHTML = ordenada.map(p=>{
+    const sin = !p.esServicio && p.stock <= 0;
+    return `<button type="button" class="selmod-op ${sin?'selmod-sin':''}" data-v="${p.varianteId}">
+      ${p.imagen ? `<img src="${esc(p.imagen)}" alt="" loading="lazy">` : '<div class="selmod-ph">📦</div>'}
+      <span class="selmod-n">${esc(p.nombre)}</span>
+      <span class="selmod-s">${p.esServicio ? '' : (sin ? 'Sin existencia' : 'Existencia: ' + p.stock)}</span>
+    </button>`;
+  }).join('');
+  $('selmod-lista').querySelectorAll('.selmod-op').forEach(b=> b.addEventListener('click', ()=>{
+    const p = state.catalogo.find(x=>x.varianteId===b.dataset.v); if(!p) return;
+    const info = p.codigos.find(c=>c.codigo===codigo);
+    if(agregarAlCarrito(p, codigo, info ? info.factor : 1)){
+      $('modal-selector-modelo').classList.remove('activo');
+      buscarInput.value=''; renderResultados(''); buscarInput.focus();
+    }
+  }));
+  $('modal-selector-modelo').classList.add('activo');
+}
+$('selmod-cancelar').addEventListener('click', ()=>{ $('modal-selector-modelo').classList.remove('activo'); buscarInput.value=''; renderResultados(''); buscarInput.focus(); });
 // v1.9.013: búsqueda por palabras en cualquier posición y sin acentos (igual que el catálogo en línea).
 // "azul lapiz" encuentra "LAPIZ BIC AZUL". Cada palabra puede coincidir con el nombre o con un código.
 const FRACCIONABLES = ['KG'];

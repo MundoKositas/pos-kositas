@@ -1771,6 +1771,15 @@
         <select id="prod-nombre-variante"></select>
         <p class="nota" style="margin:4px 0 0;">Los colores salen del catálogo (Catálogos base → Colores). Un color que ya tiene este artículo no vuelve a aparecer en la lista.</p>
         <label id="prod-precio-propio-wrap" style="display:none;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="prod-precio-propio" style="width:auto;"> Este color tiene precio propio (no se actualiza cuando cambia el precio de los demás colores)</label>
+        <div id="prod-foto-var-wrap" style="display:none;margin-top:10px;">
+          <label>Foto de este modelo/color <span class="nota" style="font-weight:400;">(opcional — se ve en la tienda en línea al elegir esta opción y en la ventana de selección del POS)</span></label>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <img id="prod-foto-var-preview" src="" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--borde);display:none;">
+            <input type="file" accept="image/*" id="prod-foto-var-archivo">
+            <button type="button" class="btn-gris" id="prod-foto-var-quitar" style="display:none;padding:2px 8px;">Quitar foto</button>
+          </div>
+          <p class="nota" id="prod-foto-var-estado" style="margin:4px 0 0;"></p>
+        </div>
         <div id="prod-colores-seccion" style="display:none;margin-top:10px;">
           <p class="nota" style="margin:0 0 6px;">Colores de este artículo — cada uno lleva su propia existencia, movimientos y código de barras. El precio se captura una sola vez y aplica a todos (salvo los que tengan precio propio).</p>
           <div id="prod-colores-lista"></div>
@@ -2066,7 +2075,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.36.003';
+const APP_VERSION = '1.37.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3155,7 +3164,7 @@ async function leerTodo(armar){
 }
 async function cargarProductos(){
   const { data, error } = await leerTodo(()=> sb.from('variantes').select(`
-    id, nombre_variante, activo, precio_propio, color_id,
+    id, nombre_variante, activo, precio_propio, color_id, imagen_url,
     producto:productos(id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
       linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
@@ -3169,7 +3178,7 @@ async function cargarProductos(){
     const codigos = (v.codigos||[]).map(c=>({codigo: c.codigo, tipo: c.tipo, factor: c.factor_unidades_base}));
     return {
       varianteId: v.id, nombreVariante: v.nombre_variante, activoVariante: v.activo,
-      precioPropio: !!v.precio_propio, colorId: v.color_id || null,
+      precioPropio: !!v.precio_propio, colorId: v.color_id || null, imagenVariante: v.imagen_url || null,
       // Colores: "nombre" es lo que se ve en listas/búsquedas (Producto — Color); "nombreBase" es el
       // nombre real del artículo, el que se edita en el formulario.
       productoId: v.producto.id, nombreBase: v.producto.nombre,
@@ -4451,6 +4460,9 @@ function abrirProducto(varianteId){
   state.costoActual = p?.costo ?? null;
   state.imagenUrlActual = p?.imagenUrl || null;
   state.imagenUrlNueva = null;
+  state.varImgActual = p?.imagenVariante || null;
+  state.varImgNueva = null;
+  $('prod-foto-var-estado').textContent = ''; $('prod-foto-var-archivo').value = '';
   $('prod-error').innerHTML = '';
   // Ronda 56: "Eliminar producto" solo tiene sentido editando uno que ya existe (nunca en "Nuevo
   // producto") — el propio RPC decide si de verdad se puede borrar (nunca vendido/comprado/movido) o
@@ -4568,6 +4580,29 @@ function llenarSelectColores(colorActualId, base, nuevoColor){
   }
   sel.innerHTML = opts;
 }
+// ---- Foto por modelo/color (variantes.imagen_url) ----
+function pintarFotoVariante(){
+  const url = state.varImgNueva !== null && state.varImgNueva !== undefined ? state.varImgNueva : state.varImgActual;
+  const img = $('prod-foto-var-preview');
+  if(url){ img.src = url; img.style.display = 'block'; } else { img.removeAttribute('src'); img.style.display = 'none'; }
+  $('prod-foto-var-quitar').style.display = url ? '' : 'none';
+}
+$('prod-foto-var-archivo').addEventListener('change', async (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  $('prod-foto-var-estado').textContent = 'Subiendo foto…';
+  const nombreArchivo = `var-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const { error } = await sb.storage.from('productos').upload(nombreArchivo, file, { upsert: true });
+  if(error){ $('prod-foto-var-estado').textContent = `Error al subir la foto: ${error.message}`; return; }
+  state.varImgNueva = sb.storage.from('productos').getPublicUrl(nombreArchivo).data.publicUrl;
+  e.target.value = '';
+  $('prod-foto-var-estado').textContent = 'Foto lista — se guardará al guardar el producto.';
+  pintarFotoVariante();
+});
+$('prod-foto-var-quitar').addEventListener('click', ()=>{
+  state.varImgNueva = '';
+  $('prod-foto-var-estado').textContent = 'La foto se quitará al guardar.';
+  pintarFotoVariante();
+});
 function renderColoresProducto(p){
   const sec = $('prod-colores-seccion'), lista = $('prod-colores-lista'), btn = $('btn-agregar-color');
   const nuevoColor = !p && !!state.productoEditId;
@@ -4575,6 +4610,8 @@ function renderColoresProducto(p){
   // El botón solo aplica a un artículo ya guardado; el checkbox de precio propio, cuando hay más de un color
   btn.style.display = (p && tieneEdicionMenu('catalogo')) ? '' : 'none';
   $('prod-precio-propio-wrap').style.display = (hermanos.length > 1 || nuevoColor) ? 'flex' : 'none';
+  $('prod-foto-var-wrap').style.display = (hermanos.length > 1 || nuevoColor) ? 'block' : 'none';
+  pintarFotoVariante();
   if(hermanos.length <= 1){ sec.style.display = 'none'; lista.innerHTML = ''; return; }
   sec.style.display = 'block';
   lista.innerHTML = `<table style="width:100%;font-size:.88rem;"><thead><tr><th style="text-align:left;">Color</th><th class="num">Existencia</th><th>Código</th><th></th></tr></thead><tbody>${
@@ -4601,6 +4638,9 @@ function abrirNuevoColor(){
     $('prod-precio-propio-wrap').style.display = 'flex';
     $('prod-colores-seccion').style.display = 'none';
     $('btn-agregar-color').style.display = 'none';
+    state.varImgActual = null; state.varImgNueva = null;
+    $('prod-foto-var-wrap').style.display = 'block'; $('prod-foto-var-estado').textContent = '';
+    pintarFotoVariante();
     renderCodigosBarra([{codigo:'', tipo:'individual', factor:1}]);
     $('prod-minimo').value = 0; $('prod-maximo').value = 0;
     $('prod-cant-inicial-campo').style.display = 'none'; $('prod-cant-inicial').value = 0;
@@ -4617,6 +4657,7 @@ $('btn-agregar-color').addEventListener('click', abrirNuevoColor);
 function capturarEstadoFormulario(){
   return JSON.stringify({
     imagen: state.imagenUrlNueva || state.imagenUrlActual || null,
+    fotoVar: (state.varImgNueva !== null && state.varImgNueva !== undefined) ? state.varImgNueva : (state.varImgActual || null),
     nombre: $('prod-nombre').value.trim(),
     colorId: $('prod-nombre-variante').value, precioPropio: $('prod-precio-propio').checked,
     marca: $('prod-marca').value,
@@ -4902,6 +4943,7 @@ async function guardarProducto(){
     inventariable: $('prod-inventariable').checked, clave_prod_serv_sat: $('prod-clave-sat').value.trim(),
     activo: $('prod-activo').checked, activo_reparto: $('prod-activo-reparto').checked,
     imagen_url: state.imagenUrlNueva || state.imagenUrlActual || null,
+    ...($('prod-foto-var-wrap').style.display !== 'none' ? { variante_imagen_url: (state.varImgNueva !== null && state.varImgNueva !== undefined) ? state.varImgNueva : (state.varImgActual || '') } : {}),
     color_id: $('prod-nombre-variante').value || null, nombre_variante: 'Único', precio_propio: $('prod-precio-propio').checked,
     impuesto_ids: impuestoIds,
     precios_directos: preciosDirectos,
