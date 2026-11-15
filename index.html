@@ -2,31 +2,61 @@
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mundo Kositas · Acceso</title>
 <style>
-:root{--verde:#2f7d4f;--verde-osc:#245f3c;--gris:#6b7280;--bg:#f4f6f5;--card:#fff;--borde:#e2e5e3;--texto:#222}
+:root{--verde:#2f7d4f;--verde-osc:#245f3c;--barra:#2f7d4f;--barra-texto:#fff;--boton-texto:#fff;--gris:#6b7280;--bg:#f4f6f5;--card:#fff;--borde:#e2e5e3;--texto:#222}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--texto)}
-header{background:var(--verde);color:#fff;padding:10px 16px;font-weight:700;font-size:1.1rem}
+header{background:var(--barra);color:var(--barra-texto);padding:10px 16px;font-weight:700;font-size:1.1rem;min-height:44px}
 .card{background:var(--card);border:1px solid var(--borde);border-radius:10px;padding:20px;max-width:380px;margin:60px auto;text-align:center}
 @media(max-width:600px){.card{margin:30px 16px;padding:14px}}
 #logo{display:none;max-height:64px;max-width:220px;object-fit:contain;margin:0 auto 12px}
 h1{font-size:1.4rem;margin:0 0 4px}
 p{margin:0 0 18px;color:var(--gris);font-size:.9rem}
 a{display:block;padding:12px 14px;margin:10px 0;border-radius:6px;text-decoration:none;font-weight:600;font-size:.95rem}
-.p{background:var(--verde);color:#fff}.p:hover{background:var(--verde-osc)}
+.p{background:var(--verde);color:var(--boton-texto)}.p:hover{background:var(--verde-osc)}
 .s{background:#fff;color:var(--verde);border:1px solid var(--verde)}
 </style></head><body>
-<header>Mundo Kositas</header>
+<header id="encabezado">Mundo Kositas</header>
 <div class="card">
   <img id="logo" alt="">
-  <h1>Bienvenido</h1>
-  <p>Elige a dónde quieres entrar</p>
-  <a class="p" href="pos.html">🧾 Entrar al POS (caja)</a>
-  <a class="s" href="admin.html">⚙️ Entrar al Admin</a>
+  <h1 id="titulo">Bienvenido</h1>
+  <p id="subtitulo">Elige a dónde quieres entrar</p>
+  <div id="enlaces">
+    <a class="p" href="pos.html">🧾 Entrar al POS (caja)</a>
+    <a class="s" href="admin.html">⚙️ Entrar al Admin</a>
+  </div>
 </div>
 <script>
+// Marca por empresa: se toma de la dirección (subdominio) desde la que se abre. Sin respuesta, queda Mundo Kositas.
+var SB='https://vsfzkktmdwqkfbecmfcj.supabase.co';
+var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs';
 var l=document.getElementById('logo');
 l.addEventListener('load',function(){l.style.display='block'});
 l.addEventListener('error',function(){l.style.display='none'});
-l.src='https://vsfzkktmdwqkfbecmfcj.supabase.co/storage/v1/object/public/empresa/logo.png';
+function logoPorDefecto(){ l.src=SB+'/storage/v1/object/public/empresa/logo.png'; }
+fetch(SB+'/rest/v1/rpc/resolver_empresa',{method:'POST',headers:{'apikey':KEY,'Authorization':'Bearer '+KEY,'Content-Type':'application/json'},body:JSON.stringify({p_host:location.hostname})})
+.then(function(r){return r.ok?r.json():null})
+.then(function(d){
+  if(!d||!d.empresa_id){
+    if(/\.ofertienda\.mx$/i.test(location.hostname)){
+      document.getElementById('encabezado').textContent='';
+      document.getElementById('titulo').textContent='Empresa no encontrada';
+      document.getElementById('subtitulo').textContent='Esta dirección no corresponde a ninguna empresa activa. Revisa el enlace que te compartieron.';
+      document.getElementById('enlaces').style.display='none';
+      document.title='Acceso';
+      return;
+    }
+    return logoPorDefecto();
+  }
+  var c=d.colores_pos||{}, s=document.documentElement.style;
+  if(c.barra) s.setProperty('--barra',c.barra);
+  if(c.barra_texto) s.setProperty('--barra-texto',c.barra_texto);
+  if(c.boton) s.setProperty('--verde',c.boton);
+  if(c.acento) s.setProperty('--verde-osc',c.acento);
+  if(c.boton_texto) s.setProperty('--boton-texto',c.boton_texto);
+  document.title=(d.nombre||'')+' · Acceso';
+  document.getElementById('encabezado').textContent=d.nombre||'';
+  if(d.logo_url) l.src=d.logo_url; // sin logo propio: solo se muestra el nombre
+})
+.catch(function(){ logoPorDefecto(); });
 </script>
 </body></html>
