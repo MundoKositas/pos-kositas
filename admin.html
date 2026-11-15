@@ -32,7 +32,7 @@
   input.money-input{text-align:right;font-variant-numeric:tabular-nums;}
   label{font-size:.8rem;color:var(--gris);display:block;margin-bottom:3px;}
   .campo{margin-bottom:12px;}
-  .pantalla{display:none;padding:16px;max-width:1200px;margin:0 auto;}
+  .pantalla{display:none;padding:16px;max-width:1680px;margin:0 auto;}
   .pantalla.activa{display:block;}
   .card{background:var(--card);border:1px solid var(--borde);border-radius:10px;padding:20px;}
   .centrado{max-width:380px;margin:60px auto;}
@@ -46,6 +46,19 @@
   .fila{display:flex;gap:16px;flex-wrap:wrap;}
   .col{flex:1;min-width:220px;}
   .tabla-scroll{overflow-x:auto;}
+  /* v1.35.011: Catálogo — la primera columna (producto) tiene ancho fijo y el texto largo baja de renglón,
+     así las demás columnas siempre quedan a la vista. */
+  #tab-catalogo thead th:first-child, #cat-tabla-body td:first-child{white-space:normal;width:380px;min-width:260px;max-width:420px;word-break:break-word;}
+  /* Detalle de compra: ventana ancha; datos de la compra, botones y encabezados de columnas fijos arriba,
+     solo se desplazan los renglones; el total queda fijo abajo. */
+  #card-compra-detalle{max-width:min(1180px,96vw);width:100%;display:flex;flex-direction:column;overflow:hidden;max-height:92vh;padding:0;}
+  #card-compra-detalle .cd-fijo{padding:14px 20px 8px;flex:0 0 auto;}
+  #card-compra-detalle .cd-barra{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px;}
+  #card-compra-detalle .cd-barra .cd-botones{display:flex;gap:8px;flex-wrap:wrap;}
+  #cd-scroll{flex:1 1 auto;min-height:0;overflow:auto;padding:0 20px;}
+  #cd-scroll td:first-child{white-space:normal;min-width:240px;}
+  #cd-scroll thead th{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 var(--borde);}
+  #card-compra-detalle .cd-pie{padding:8px 20px 14px;flex:0 0 auto;border-top:1px solid var(--borde);}
   /* Ronda 53: encabezados de columna fijos para listas largas — Adrián pidió no perder de vista
      el nombre de cada columna al bajar en Catálogo, Kardex, estado de cuenta y Auditoría. La tabla
      se vuelve su propia "ventana" con scroll interno (en vez de que crezca con toda la página) y el
@@ -1855,31 +1868,37 @@
 
 <!-- MODAL: detalle de una compra registrada (Ronda 24; edición + historial en Ronda 25) -->
 <div class="modal-fondo" id="modal-compra-detalle">
-  <div class="modal" style="max-width:680px;">
-    <h2 style="margin-top:0;">Detalle de la compra</h2>
-    <p class="nota" id="cd-resumen">Cargando…</p>
-    <div class="campo" id="cd-agregar-campo" style="display:none;position:relative;margin-bottom:10px;">
-      <label>Agregar artículo que faltó (código o nombre)</label>
-      <input type="text" id="cd-buscar-producto" autocomplete="off" placeholder="Escanea o escribe el código, o teclea el nombre…">
-      <div class="resultados" id="cd-resultados-busqueda"></div>
+  <div class="modal" id="card-compra-detalle">
+    <div class="cd-fijo">
+      <div class="cd-barra">
+        <h2 style="margin:0;">Detalle de la compra</h2>
+        <div class="cd-botones">
+          <button class="btn-primario" id="cd-editar">Editar</button>
+          <button class="btn-primario" style="display:none;" id="cd-guardar">Guardar cambios</button>
+          <button class="btn-gris" style="display:none;" id="cd-cancelar-edicion">Cancelar edición</button>
+          <button class="btn-gris" id="cd-cerrar">Cerrar</button>
+        </div>
+      </div>
+      <p class="nota" id="cd-resumen" style="margin-bottom:6px;">Cargando…</p>
+      <div id="cd-error"></div>
+      <div class="campo" id="cd-agregar-campo" style="display:none;position:relative;margin:6px 0 0;">
+        <label>Agregar artículo que faltó (código o nombre)</label>
+        <input type="text" id="cd-buscar-producto" autocomplete="off" placeholder="Escanea o escribe el código, o teclea el nombre…">
+        <div class="resultados" id="cd-resultados-busqueda"></div>
+      </div>
     </div>
-    <div class="tabla-scroll">
+    <div id="cd-scroll">
       <table>
         <thead id="cd-thead"><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Importe</th></tr></thead>
         <tbody id="cd-tabla-body"></tbody>
       </table>
+      <div id="cd-historial" style="margin-top:12px;"></div>
     </div>
-    <div class="totales" style="margin-top:10px;">
-      <div class="linea total-final"><span>Total de la compra</span><span id="cd-total">$0.00</span></div>
-    </div>
-    <p class="nota">La columna "Total (con impuestos)" de la lista de compras es un cálculo aparte para comparar contra la factura del proveedor — este total es el que se capturó al registrar la compra.</p>
-    <div id="cd-error"></div>
-    <div id="cd-historial" style="margin-top:12px;"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button class="btn-gris" style="width:100%;" id="cd-cerrar">Cerrar</button>
-      <button class="btn-primario" style="width:100%;" id="cd-editar">Editar</button>
-      <button class="btn-primario" style="width:100%;display:none;" id="cd-guardar">Guardar cambios</button>
-      <button class="btn-gris" style="width:100%;display:none;" id="cd-cancelar-edicion">Cancelar edición</button>
+    <div class="cd-pie">
+      <div class="totales" style="margin:0;">
+        <div class="linea total-final"><span>Total de la compra</span><span id="cd-total">$0.00</span></div>
+      </div>
+      <p class="nota" style="margin:6px 0 0;">La columna "Total (con impuestos)" de la lista de compras es un cálculo aparte para comparar contra la factura del proveedor — este total es el que se capturó al registrar la compra.</p>
     </div>
   </div>
 </div>
@@ -1988,7 +2007,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.011';
+const APP_VERSION = '1.35.012';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
