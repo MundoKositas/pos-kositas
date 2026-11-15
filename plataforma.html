@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ofertienda · Desde Casa</title>
+<meta name="description" content="Punto de venta, administración y tienda en línea con entrega a domicilio para negocios en México.">
+<style>
+:root{--verde:#2f7d4f;--verde-osc:#245f3c;--claro:#eef6f1;--texto:#1f2a24;--gris:#5b665f;--borde:#dfe7e2;--fondo:#fbfcfb}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--texto);background:var(--fondo);line-height:1.55}
+.cont{max-width:980px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid var(--borde);background:#fff}
+header .cont{display:flex;align-items:center;justify-content:space-between;height:60px}
+.marca{font-weight:800;font-size:1.15rem;color:var(--verde-osc);letter-spacing:-.3px}
+.btn{display:inline-block;padding:12px 20px;border-radius:8px;background:var(--verde);color:#fff;text-decoration:none;font-weight:700;font-size:.98rem}
+.btn:hover{background:var(--verde-osc)}
+.btn.sec{background:#fff;color:var(--verde-osc);border:1px solid var(--verde)}
+.hero{padding:56px 0 40px}
+.hero h1{font-size:clamp(1.8rem,5vw,2.7rem);line-height:1.15;margin:0 0 14px;letter-spacing:-.8px}
+.hero p{font-size:1.08rem;color:var(--gris);max-width:620px;margin:0 0 24px}
+.hero .acc{display:flex;gap:12px;flex-wrap:wrap}
+h2{font-size:1.4rem;margin:0 0 6px;letter-spacing:-.3px}
+.sub{color:var(--gris);margin:0 0 22px}
+.paq{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:44px}
+.card{background:#fff;border:1px solid var(--borde);border-radius:12px;padding:22px}
+.card h3{margin:0 0 4px;font-size:1.15rem}
+.card .tag{display:inline-block;font-size:.75rem;font-weight:700;color:var(--verde-osc);background:var(--claro);border-radius:999px;padding:3px 10px;margin-bottom:10px}
+.card ul{margin:10px 0 0;padding-left:18px;color:var(--gris)}
+.card li{margin:5px 0}
+.pasos{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:44px}
+.paso{padding:4px 0}
+.paso b{display:inline-flex;width:30px;height:30px;border-radius:50%;background:var(--verde);color:#fff;align-items:center;justify-content:center;margin-bottom:8px}
+.paso p{margin:0;color:var(--gris);font-size:.95rem}
+.cta{background:var(--verde);color:#fff;border-radius:14px;padding:30px 26px;margin-bottom:44px;text-align:center}
+.cta h2{color:#fff}
+.cta p{margin:0 0 18px;opacity:.95}
+.cta .btn{background:#fff;color:var(--verde-osc)}
+footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-size:.88rem;text-align:center}
+</style></head><body>
+<header><div class="cont"><span class="marca" id="marca">Ofertienda</span><a class="btn" id="wa-top" href="#">Escríbenos</a></div></header>
+<main class="cont">
+  <section class="hero">
+    <h1 id="h1">Tu negocio con punto de venta y tienda en línea, en un solo lugar</h1>
+    <p id="lema">Cobra en caja, controla tu inventario y recibe pedidos a domicilio de tus clientes. Sencillo, en español y hecho en Durango.</p>
+    <div class="acc"><a class="btn" id="wa-hero" href="#">Quiero información</a><a class="btn sec" href="#paquetes">Ver qué incluye</a></div>
+  </section>
+
+  <section id="paquetes">
+    <h2>Dos paquetes, tú eliges</h2>
+    <p class="sub">Empieza con el punto de venta y suma la tienda en línea cuando la necesites.</p>
+    <div class="paq">
+      <div class="card"><span class="tag">Incluido siempre</span><h3>Punto de venta + Administración</h3>
+        <ul><li>Caja con ticket e impresión</li><li>Catálogo de productos y listas de precio</li><li>Inventario por almacén y sucursal</li><li>Compras a proveedores y reportes de ventas</li><li>Usuarios con roles: cajero, almacenista, comprador, gerente</li><li>Crédito a clientes (opcional)</li></ul></div>
+      <div class="card"><span class="tag">Se contrata aparte</span><h3>Tienda en línea</h3>
+        <ul><li>Catálogo público con tu nombre, logo y colores</li><li>Pedidos desde el celular de tu cliente</li><li>Entrega a domicilio con zonas y costos de envío</li><li>Repartidores y seguimiento de pedidos</li><li>Reseñas de tus clientes</li></ul></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Así empiezas</h2>
+    <p class="sub">Te lo dejamos listo para vender.</p>
+    <div class="pasos">
+      <div class="paso"><b>1</b><p>Nos escribes y nos cuentas de tu negocio.</p></div>
+      <div class="paso"><b>2</b><p>Creamos tu empresa con tu logo, colores y dirección propia.</p></div>
+      <div class="paso"><b>3</b><p>Cargamos tu catálogo y te acompañamos en tus primeras ventas.</p></div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <h2>¿Platicamos?</h2>
+    <p>Te respondemos por WhatsApp, rápido y sin compromiso.</p>
+    <a class="btn" id="wa-cta" href="#">Escribir por WhatsApp</a>
+  </section>
+</main>
+<footer><div class="cont">Ofertienda · Desde Casa — Durango, México. Probado a diario en una tienda real.</div></footer>
+<script>
+// Cambia este número (con lada de país, sin signos) si quieres que lleguen a otro WhatsApp.
+var WHATSAPP='526181280334';
+var esCatalogo=/desdecasa\.mx$/i.test(location.hostname);
+if(esCatalogo){
+  document.title='Desde Casa · Tienda en línea con entrega a domicilio';
+  document.getElementById('marca').textContent='Desde Casa';
+  document.getElementById('h1').textContent='Tu tienda en línea, con entrega a domicilio';
+  document.getElementById('lema').textContent='Muestra tus productos en un catálogo con tu marca, recibe pedidos desde el celular y organiza tus entregas. Todo conectado a tu punto de venta.';
+}
+var msg=encodeURIComponent(esCatalogo?'Hola, me interesa una tienda en línea con entrega a domicilio para mi negocio.':'Hola, me interesa el punto de venta y la tienda en línea para mi negocio.');
+['wa-top','wa-hero','wa-cta'].forEach(function(id){document.getElementById(id).href='https://wa.me/'+WHATSAPP+'?text='+msg;});
+</script>
+</body></html>
