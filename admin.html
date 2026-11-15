@@ -1149,6 +1149,7 @@
   <div class="modal" style="max-width:640px;width:96vw;max-height:92vh;overflow:auto;">
     <h2 id="em-titulo">Nueva empresa</h2>
     <input type="hidden" id="em-id">
+    <div class="campo" id="em-logo-wrap" style="text-align:center;"><div style="min-height:84px;display:flex;align-items:center;justify-content:center;margin-bottom:6px;"><img id="em-logo-prev" style="max-height:80px;max-width:60%;display:none;"><span id="em-logo-vacio" class="nota">Sin logotipo</span></div><label>Logotipo de la empresa (PNG/JPG)</label><input type="file" id="em-logo" accept="image/*"></div>
     <div class="campo"><label>Nombre comercial *</label><input type="text" id="em-nombre"></div>
     <div class="campo"><label>Razón social</label><input type="text" id="em-razon"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -1177,7 +1178,6 @@
       <div class="campo"><label>acento</label><input type="color" id="em-k-acento" value="#6A1B9A"></div>
       <div class="campo"><label>fondo</label><input type="color" id="em-k-fondo" value="#F4F4F4"></div>
     </div>
-    <div class="campo" id="em-logo-wrap" style="display:none;"><label>Logotipo (PNG/JPG)</label><input type="file" id="em-logo" accept="image/*"><img id="em-logo-prev" style="max-height:60px;display:none;margin-top:6px;"></div>
     <h3 style="margin:14px 0 6px;" id="em-dueno-h">Dueño de la empresa (Admin de Empresa)</h3>
     <div id="em-dueno">
       <div class="campo"><label>Nombre *</label><input type="text" id="em-dueno-nombre"></div>
@@ -2066,7 +2066,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.36.000';
+const APP_VERSION = '1.36.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2790,12 +2790,30 @@ function emAbrir(id){
   const p = e?.marca?.pos || {}, k = e?.marca?.catalogo || {};
   $('em-c-barra').value = p.barra || '#2f7d4f'; $('em-c-boton').value = p.boton || '#2f7d4f'; $('em-c-acento').value = p.acento || '#245f3c';
   $('em-k-barra').value = k.barra || '#8E24AA'; $('em-k-boton').value = k.boton || '#8E24AA'; $('em-k-acento').value = k.acento || '#6A1B9A'; $('em-k-fondo').value = k.fondo || '#F4F4F4';
-  $('em-logo-wrap').style.display = e ? '' : 'none';
-  const lg = e?.marca?.logo_url; $('em-logo-prev').style.display = lg ? '' : 'none'; if(lg) $('em-logo-prev').src = lg;
+  emMostrarLogo(e?.marca?.logo_url || '');
   $('em-logo').value = ''; $('em-error').innerHTML = '';
   $('em-guardar').style.display = ''; $('em-cancelar').textContent = 'Cancelar';
   emToggleCat();
   $('modal-empresa').classList.add('activo');
+}
+function emMostrarLogo(url){
+  const im = $('em-logo-prev');
+  if(url){ im.src = url; im.style.display = ''; $('em-logo-vacio').style.display = 'none'; }
+  else { im.removeAttribute('src'); im.style.display = 'none'; $('em-logo-vacio').style.display = ''; }
+}
+$('em-logo').addEventListener('change', ()=>{
+  const f = $('em-logo').files[0]; if(!f) return;
+  const lector = new FileReader(); lector.onload = ()=>emMostrarLogo(lector.result); lector.readAsDataURL(f);
+});
+async function emSubirLogo(empresaId){
+  const f = $('em-logo').files[0]; if(!f) return;
+  const png = await convertirImagenAPng(f);
+  const { error: eu } = await sb.storage.from('empresa').upload(empresaId + '/logo.png', png, { upsert: true, contentType: 'image/png' });
+  if(eu) throw eu;
+  const url = sb.storage.from('empresa').getPublicUrl(empresaId + '/logo.png').data.publicUrl + '?v=' + Date.now();
+  const { error } = await sb.rpc('super_actualizar_empresa', { p_empresa: empresaId, p: { marca: { logo_url: url } } });
+  if(error) throw error;
+  emMostrarLogo(url);
 }
 function emToggleCat(){ $('em-cat-colores').style.display = $('em-catalogo').checked ? '' : 'none'; }
 $('em-catalogo').addEventListener('change', emToggleCat);
@@ -2822,15 +2840,7 @@ $('em-guardar').addEventListener('click', async ()=>{
         nombre_comercial: nombre, razon_social: $('em-razon').value, rfc: $('em-rfc').value, telefono: $('em-tel').value, domicilio: $('em-dom').value,
         catalogo: $('em-catalogo').checked, modulos, marca: { nombre_visible: nombre, pos: col.pos, catalogo: col.catalogo } } });
       if(error) throw error;
-      const f = $('em-logo').files[0];
-      if(f){
-        const png = await convertirImagenAPng(f);
-        const { error: eu } = await sb.storage.from('empresa').upload(id + '/logo.png', png, { upsert: true, contentType: 'image/png' });
-        if(eu) throw eu;
-        const url = sb.storage.from('empresa').getPublicUrl(id + '/logo.png').data.publicUrl + '?v=' + Date.now();
-        const { error: em2 } = await sb.rpc('super_actualizar_empresa', { p_empresa: id, p: { marca: { logo_url: url } } });
-        if(em2) throw em2;
-      }
+      await emSubirLogo(id);
       $('modal-empresa').classList.remove('activo'); emCargar(); return;
     }
     const slug = $('em-slug').value.trim().toLowerCase();
@@ -2841,6 +2851,8 @@ $('em-guardar').addEventListener('click', async ()=>{
       nombre_comercial: nombre, razon_social: $('em-razon').value, rfc: $('em-rfc').value, telefono: $('em-tel').value, domicilio: $('em-dom').value,
       slug, catalogo: $('em-catalogo').checked, modulos, colores_pos: col.pos, colores_catalogo: col.catalogo } });
     if(error) throw error;
+    let avisoLogo = '';
+    try{ await emSubirLogo(r.empresa_id); }catch(e){ avisoLogo = `<div class="msg-error">La empresa se creó, pero no se pudo subir el logotipo (${emEsc(e.message)}). Súbelo después con Editar.</div>`; }
     const { data: rol } = await sb.from('roles').select('id').eq('nombre', 'Admin de Empresa').maybeSingle();
     const { data: u, error: eu } = await sb.functions.invoke('crear_usuario', { body: { nombre: dn, email: dc, empresa_id: r.empresa_id, sucursal_id: r.sucursal_id, almacen_id: r.almacen_id, rol_ids: [rol?.id] } });
     let aviso = '';
@@ -2849,7 +2861,7 @@ $('em-guardar').addEventListener('click', async ()=>{
       const { error: er } = await sb.auth.resetPasswordForEmail(dc);
       aviso = `<div class="msg-ok">Dueño creado: <b>${emEsc(dc)}</b><br>Contraseña temporal: <b>${emEsc(u.password_temporal)}</b> (anótala y entrégala; ${er ? 'no se pudo enviar el correo para definir contraseña' : 'además se le envió un correo para definir su propia contraseña'}).</div>`;
     }
-    $('em-error').innerHTML = `<div class="msg-ok">Empresa creada. POS/Admin: <b>${emEsc(r.host_pos)}</b>${r.host_catalogo ? '<br>Catálogo: <b>' + emEsc(r.host_catalogo) + '</b>' : ''}</div>` + aviso;
+    $('em-error').innerHTML = `<div class="msg-ok">Empresa creada. POS/Admin: <b>${emEsc(r.host_pos)}</b>${r.host_catalogo ? '<br>Catálogo: <b>' + emEsc(r.host_catalogo) + '</b>' : ''}</div>` + avisoLogo + aviso;
     $('em-guardar').style.display = 'none'; $('em-cancelar').textContent = 'Cerrar';
     emCargar();
   }catch(e){ err(e.message || String(e)); }
