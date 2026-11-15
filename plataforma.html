@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ofertienda · Desde Casa</title>
+<link rel="icon" id="favicon" type="image/png" href="ofertienda-icono.png">
 <meta name="description" content="Punto de venta, administración y tienda en línea con entrega a domicilio para negocios en México.">
 <style>
 :root{--verde:#2f7d4f;--verde-osc:#245f3c;--claro:#eef6f1;--texto:#1f2a24;--gris:#5b665f;--borde:#dfe7e2;--fondo:#fbfcfb}
@@ -9,7 +10,10 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-ser
 .cont{max-width:980px;margin:0 auto;padding:0 20px}
 header{border-bottom:1px solid var(--borde);background:#fff}
 header .cont{display:flex;align-items:center;justify-content:space-between;height:60px}
-.marca{font-weight:800;font-size:1.15rem;color:var(--verde-osc);letter-spacing:-.3px}
+.marca{display:inline-flex;align-items:center}
+.marca img{height:38px;width:auto;display:block}
+.marcas{display:flex;gap:28px;justify-content:center;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.marcas a{display:block;opacity:.9}.marcas a:hover{opacity:1}.marcas img{height:30px;width:auto;display:block}
 .btn{display:inline-block;padding:12px 20px;border-radius:8px;background:var(--verde);color:#fff;text-decoration:none;font-weight:700;font-size:.98rem}
 .btn:hover{background:var(--verde-osc)}
 .btn.sec{background:#fff;color:var(--verde-osc);border:1px solid var(--verde)}
@@ -35,7 +39,7 @@ h2{font-size:1.4rem;margin:0 0 6px;letter-spacing:-.3px}
 .cta .btn{background:#fff;color:var(--verde-osc)}
 footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-size:.88rem;text-align:center}
 </style></head><body>
-<header><div class="cont"><span class="marca" id="marca">Ofertienda</span><a class="btn" id="wa-top" href="#">Escríbenos</a></div></header>
+<header><div class="cont"><span class="marca"><img id="marca" src="ofertienda-logo.png" alt="Ofertienda"></span><a class="btn" id="wa-top" href="#">Escríbenos</a></div></header>
 <main class="cont">
   <div id="aviso" style="display:none;margin-top:22px;padding:14px 16px;border-radius:10px;background:#fff7e6;border:1px solid #f0d28a;color:#6b4e00;font-size:.95rem;">No encontramos la tienda que buscabas. Revisa que el enlace esté completo, o conoce lo que podemos hacer por tu negocio.</div>
   <section class="hero">
@@ -71,7 +75,7 @@ footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-s
     <a class="btn" id="wa-cta" href="#">Escribir por WhatsApp</a>
   </section>
 </main>
-<footer><div class="cont">Ofertienda · Desde Casa — Durango, México. Probado a diario en una tienda real.</div></footer>
+<footer><div class="cont"><div class="marcas"><a href="https://ofertienda.mx"><img src="ofertienda-logo.png" alt="Ofertienda"></a><a href="https://desdecasa.mx"><img src="desdecasa-logo.png" alt="Desde Casa"></a></div>Ofertienda · Desde Casa — Durango, México. Probado a diario en una tienda real.</div></footer>
 <script>
 // Cambia este número (con lada de país, sin signos) si quieres que lleguen a otro WhatsApp.
 var WHATSAPP='526182597230';
@@ -79,7 +83,9 @@ if(/noencontrada/.test(location.search)) document.getElementById('aviso').style.
 var esCatalogo=/desdecasa\.mx$/i.test(location.hostname);
 if(esCatalogo){
   document.title='Desde Casa · Tienda en línea con entrega a domicilio';
-  document.getElementById('marca').textContent='Desde Casa';
+  var m=document.getElementById('marca');m.src='desdecasa-logo.png';m.alt='Desde Casa';
+  document.getElementById('favicon').href='desdecasa-icono.png';
+  var r=document.documentElement.style;r.setProperty('--verde','#8E24AA');r.setProperty('--verde-osc','#6A1B9A');r.setProperty('--claro','#f6eefa');r.setProperty('--borde','#eadff0');r.setProperty('--fondo','#fcfbfd');
   document.getElementById('h1').textContent='Tu tienda en línea, con entrega a domicilio';
   document.getElementById('lema').textContent='Muestra tus productos en un catálogo con tu marca, recibe pedidos desde el celular y organiza tus entregas. Todo conectado a tu punto de venta.';
 }
