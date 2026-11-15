@@ -746,7 +746,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.9.021';
+const APP_VERSION = '1.9.022';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1335,6 +1335,17 @@ function suscribirCambiosCatalogoEnVivo(){
 function tasaTotal(item){
   return (item.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0), 0);
 }
+// v1.9.022: el precio SIN impuestos se guarda con hasta 6 decimales (49 / 1.16 = 42.241379) para que el
+// precio al público con impuestos quede exacto. El importe de una línea se calcula así:
+//   precio unitario con impuestos = redondeo a 2 decimales de (precio base × (1 + tasa))
+//   importe de la línea           = redondeo a 2 decimales de (precio unitario con impuestos × cantidad)
+// En pantalla y tickets todo se muestra a 2 decimales.
+const redondear6 = n => Math.round((Number(n)||0) * 1e6) / 1e6;
+function precioUnitConImp(item){ return redondear2(precioBaseEfectivo(item) * (1 + tasaTotal(item))); }
+function baseLineaCarrito(item){ return redondear2(precioBaseEfectivo(item) * item.cantidad); }
+function importeLineaConImp(item){ return redondear2(precioUnitConImp(item) * item.cantidad); }
+// Lo que se muestra como importe de la línea según la configuración de la empresa (con o sin desglose).
+function importeMostrarLinea(item){ return state.desglosarImpuestos ? baseLineaCarrito(item) : importeLineaConImp(item); }
 
 // Precio base de una línea del carrito, YA con el descuento o el precio manual aplicados (si los
 // tiene) — para un producto de catálogo plano (sin estos campos) regresa item.precio tal cual, sin
@@ -1345,10 +1356,10 @@ function precioBaseEfectivo(item){
   }
   const base = Number(item.precio) || 0;
   if(item.descuentoTipo === 'porcentaje'){
-    return redondear2(base * (1 - (Number(item.descuentoValor)||0)/100));
+    return redondear6(base * (1 - (Number(item.descuentoValor)||0)/100));
   }
   if(item.descuentoTipo === 'fijo'){
-    return redondear2(Math.max(0, base - (Number(item.descuentoValor)||0)));
+    return redondear6(Math.max(0, base - (Number(item.descuentoValor)||0)));
   }
   return base;
 }
@@ -1359,7 +1370,7 @@ function precioMostrar(item){
   // (con todos los impuestos del producto incluidos).
   const base = precioBaseEfectivo(item);
   if(state.desglosarImpuestos) return base;
-  return base * (1 + tasaTotal(item));
+  return precioUnitConImp(item);
 }
 
 // Ronda 55b: Adrián pidió que TODO el carrito y el ticket dejen ver el precio normal (antes de
@@ -2104,7 +2115,7 @@ $('el-aplicar').addEventListener('click', ()=>{
       l.precioManual = null;
     } else {
       const capturado = parseMoney(txt);
-      l.precioManual = state.desglosarImpuestos ? capturado : redondear2(capturado / (1 + tasaTotal(l)));
+      l.precioManual = state.desglosarImpuestos ? capturado : redondear6(capturado / (1 + tasaTotal(l)));
     }
     if(!txt) l.autorizaciones.precioManual = null;
   }
@@ -2615,7 +2626,7 @@ $('pe-precio-con').addEventListener('input', ()=>{
   if(peSincronizando || !peProducto) return;
   const v = Number($('pe-precio-con').value);
   peSincronizando = true;
-  $('pe-precio-sin').value = (isFinite(v) && v > 0) ? redondear2(v / (1 + tasaTotal(peProducto))) : '';
+  $('pe-precio-sin').value = (isFinite(v) && v > 0) ? redondear6(v / (1 + tasaTotal(peProducto))) : '';
   peSincronizando = false;
 });
 $('pe-cancelar').addEventListener('click', ()=>{
@@ -2701,7 +2712,7 @@ function renderCarrito(){
       <td class="num">${sinPrecio || normalUnitario===null ? '—' : money(normalUnitario)}</td>
       <td class="num">${descUnitario>0 ? money(descUnitario) : '—'}</td>
       <td class="num">${sinPrecio ? '<span class="stock-bajo">Sin precio</span>' : money(precioMostrar(l))}</td>
-      <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(precioMostrar(l)*l.cantidad)}</td>
+      <td class="num">${sinPrecio ? '<span class="stock-bajo">—</span>' : money(importeMostrarLinea(l))}</td>
       <td style="white-space:nowrap;">${l.esEnvio ? '' : `<button class="btn-gris editar-linea" data-idx="${i}" title="Cambiar lista de precio, descuento o precio manual">✎</button> <button class="quitar" data-idx="${i}">Quitar</button>`}</td>
     </tr>`;
   }).join('');
@@ -3111,22 +3122,28 @@ function agregarPaginaPagosMovimientosPDF(doc, reporte, { titulo, subtitulo, fil
 function calcularTotales(){
   // El desglose de impuestos es dinámico: solo aparecen los impuestos que de verdad
   // traen los productos del carrito (según el catálogo), no una lista fija en el código.
-  // Así, si el catálogo de impuestos cambia (nueva tasa, nuevo impuesto), el cobro se
-  // ajusta solo, sin tocar el sistema.
-  let subtotal = 0;
+  // v1.9.022: importe de línea con impuestos = redondeo2( redondeo2(base × (1+tasa)) × cantidad );
+  // el impuesto de la línea es la diferencia contra su base y se reparte entre sus impuestos.
+  let subtotal = 0, total = 0;
   const desglose = {}; // { impuesto_id: {nombre, tasa, monto} }
   for(const l of state.carrito){
-    const lineaBase = redondear2(precioBaseEfectivo(l) * l.cantidad);
+    const lineaBase = baseLineaCarrito(l);
+    const lineaCon = importeLineaConImp(l);
     subtotal += lineaBase;
-    (l.impuestos||[]).forEach(imp=>{
-      const monto = redondear2(lineaBase * (imp.tasa||0));
+    total += lineaCon;
+    const imps = l.impuestos||[];
+    const tasaSuma = imps.reduce((s,i)=>s+(Number(i.tasa)||0),0);
+    let resto = redondear2(lineaCon - lineaBase);
+    imps.forEach((imp,idx)=>{
+      const monto = (idx === imps.length-1 || !tasaSuma) ? resto : redondear2((lineaCon - lineaBase) * (Number(imp.tasa)||0) / tasaSuma);
+      resto = redondear2(resto - monto);
       if(!desglose[imp.impuestoId]) desglose[imp.impuestoId] = { nombre: imp.nombre, tasa: imp.tasa, monto: 0 };
       desglose[imp.impuestoId].monto = redondear2(desglose[imp.impuestoId].monto + monto);
     });
   }
   subtotal = redondear2(subtotal);
-  const impuesto = redondear2(Object.values(desglose).reduce((s,d)=>s+d.monto, 0));
-  const total = redondear2(subtotal + impuesto);
+  total = redondear2(total);
+  const impuesto = redondear2(total - subtotal);
   return { subtotal, impuesto, desglose, total };
 }
 
@@ -3284,16 +3301,16 @@ function renderPagos(){
 // trazable en la base de datos para la bitácora/reportes futuros.
 function datosGuardadoLinea(l){
   if(l.precioManual !== null && l.precioManual !== undefined && l.precioManual !== ''){
-    return { precio_unitario: redondear2(Number(l.precioManual)||0), descuento_unitario: 0 };
+    return { precio_unitario: redondear6(Number(l.precioManual)||0), descuento_unitario: 0 };
   }
   const precioLista = Number(l.precio) || 0;
   let descuentoUnitario = 0;
   if(l.descuentoTipo === 'porcentaje'){
     // Se topa a 100% por seguridad (nunca un descuento_unitario mayor al precio de lista),
     // aunque la validación normal ya evita capturar más de 100% al aplicar el descuento.
-    descuentoUnitario = Math.min(redondear2(precioLista * (Number(l.descuentoValor)||0) / 100), precioLista);
+    descuentoUnitario = Math.min(redondear6(precioLista * (Number(l.descuentoValor)||0) / 100), precioLista);
   } else if(l.descuentoTipo === 'fijo'){
-    descuentoUnitario = Math.min(redondear2(Number(l.descuentoValor)||0), precioLista);
+    descuentoUnitario = Math.min(redondear6(Number(l.descuentoValor)||0), precioLista);
   }
   return { precio_unitario: precioLista, descuento_unitario: descuentoUnitario };
 }
@@ -3497,7 +3514,7 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
     <tr><td colspan="2" class="nota" style="padding-top:0;">Precio normal: ${money(redondear2(normalUnit*l.cantidad))} · Descuento: −${money(descLinea)}</td></tr>
     ` : '';
     return `
-    <tr><td>${l.nombre}</td><td class="num">${money(precioMostrar(l)*l.cantidad)}</td></tr>
+    <tr><td>${l.nombre}</td><td class="num">${money(importeMostrarLinea(l))}</td></tr>
     <tr><td colspan="2" class="nota" style="padding:0 0 4px 10px;">${l.cantidad} x ${money(precioMostrar(l))}</td></tr>
     ${(state.seriesTicket && state.seriesTicket[l.varianteId]) ? `<tr><td colspan="2" class="nota" style="padding-top:0;">Serie(s): ${state.seriesTicket[l.varianteId].map(escSer).join(', ')}</td></tr>` : ''}
     ${filaDescuento}`;
@@ -3825,7 +3842,7 @@ async function ventaDomicilio(){
   $('btn-credito-cliente').disabled = true;
   const pedido = { pedido_id: d.pedidoId, cliente_final_id: d.clienteFinalId, repartidor_id: d.repartidorId, nombre: d.nombre, telefono: d.telefono, domicilio: d.domicilio, colonia: d.colonia,
     costo_envio: d.envio, fecha_entrega: d.fecha, hora_desde: d.horaDesde, hora_hasta: d.horaHasta, metodo_pago: d.metodoPago, paga_con: d.pagaCon, notas: d.notas,
-    items: state.carrito.filter(l=>!l.esEnvio).map(l=>({ variante_id: l.varianteId, nombre: l.nombre, cantidad: l.cantidad, precio: precioMostrar(l), subtotal: Math.round(precioMostrar(l)*l.cantidad*100)/100 })) };
+    items: state.carrito.filter(l=>!l.esEnvio).map(l=>({ variante_id: l.varianteId, nombre: l.nombre, cantidad: l.cantidad, precio: precioMostrar(l), subtotal: importeMostrarLinea(l) })) };
   const { data, error } = await sb.rpc('registrar_venta_domicilio', { p_venta: payloadVenta, p_detalle: payloadDetalle, p_autorizado_por: autorizadoPor, p_condicion_pago_id: state.condicionPagoVentaId, p_pedido: pedido });
   $('btn-credito-cliente').disabled = false;
   if(error){ $('cobro-error').innerHTML = `<div class="msg-error">${mensajeErrorAmigable(error)}</div>`; return; }
@@ -4232,8 +4249,8 @@ function htmlTicketDesdeDatos(datos, deltasPorVariante){
     const notaModificado = delta ? `<br><span class="nota" style="color:#b45309;">${delta > 0 ? '+' : ''}${delta} (Modificado)</span>` : '';
     const serTxt = (l.series||[]).length ? `<br><span class="nota">Serie(s): ${l.series.map(x=>escSer(x.numero) + (x.devuelta ? ' (devuelta)' : '')).join(', ')}</span>` : '';
     const _fi = 1 + (l.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0),0);
-    return `<tr><td>${l.producto}</td><td class="num">${money((l.precio_unitario - l.descuento_unitario) * l.cantidad * _fi)}</td></tr>
-    <tr><td colspan="2" class="nota" style="padding:0 0 4px 10px;">${l.cantidad} x ${money((l.precio_unitario - l.descuento_unitario) * _fi)}${serTxt}${notaModificado}</td></tr>`;
+    return `<tr><td>${l.producto}</td><td class="num">${money(redondear2(redondear2((l.precio_unitario - l.descuento_unitario) * _fi) * l.cantidad))}</td></tr>
+    <tr><td colspan="2" class="nota" style="padding:0 0 4px 10px;">${l.cantidad} x ${money(redondear2((l.precio_unitario - l.descuento_unitario) * _fi))}${serTxt}${notaModificado}</td></tr>`;
   }).join('');
   const filasPagos = (datos.pagos||[]).map(p=>`<div class="linea monto-grande"><span>${p.forma_pago}</span><span>${money(p.monto)}</span></div>`).join('');
   return `
@@ -4371,17 +4388,19 @@ let mvAutorizadoPor = null;
 // Impuesto por línea: redondeando CADA impuesto por separado y sumando — mismo criterio que
 // calcularTotales() (carrito) y que el propio RPC modificar_venta, para que el total mostrado
 // aquí coincida centavo a centavo con lo que el servidor va a calcular y guardar.
-function mvImpuestoLinea(l){
-  const baseLinea = (l.precioUnitario - l.descuentoUnitario) * l.cantidad;
-  return (l.impuestos||[]).reduce((s,i)=>s + redondear2(baseLinea * (Number(i.tasa)||0)), 0);
+function mvBaseLinea(l){ return redondear2((l.precioUnitario - l.descuentoUnitario) * l.cantidad); }
+function mvImporteLinea(l){
+  const tasa = (l.impuestos||[]).reduce((s,i)=>s+(Number(i.tasa)||0),0);
+  return redondear2(redondear2((l.precioUnitario - l.descuentoUnitario) * (1 + tasa)) * l.cantidad);
 }
+function mvImpuestoLinea(l){ return redondear2(mvImporteLinea(l) - mvBaseLinea(l)); }
 // v1.9.015: línea por kilo (o con cantidad ya fraccionada) acepta decimales.
 function mvFrac(l){ const p = state.catalogo.find(x=>x.varianteId===l.varianteId); return !!(p && p.fraccionable) || (Number(l.cantidad)%1 !== 0); }
 function renderModificarVenta(){
   $('mv-body').innerHTML = mvLineas.map((l,i)=>{
     const baseUnit = (l.precioUnitario - l.descuentoUnitario);
     const impLinea = mvImpuestoLinea(l);
-    const importe = redondear2(baseUnit * l.cantidad + impLinea);
+    const importe = mvImporteLinea(l);
     return `<tr>
       <td>${l.nombre}</td>
       <td class="num"><input type="number" class="cant-input${mvFrac(l)?' cant-frac':''}" min="${mvFrac(l)?'0.001':'1'}" step="${mvFrac(l)?'0.001':'1'}" value="${mvFrac(l)?Number(l.cantidad).toFixed(3):l.cantidad}" data-idx="${i}"></td>
@@ -4402,13 +4421,15 @@ function renderModificarVenta(){
     btn.addEventListener('click', ()=>{ mvLineas.splice(Number(btn.dataset.idx),1); renderModificarVenta(); });
   });
 
-  let subtotal=0, impuesto=0;
+  let subtotal=0, impuesto=0, descuentoTotal=0, total=0;
   mvLineas.forEach(l=>{
-    subtotal += l.precioUnitario * l.cantidad;
+    const bruto = redondear2(l.precioUnitario * l.cantidad);
+    subtotal += bruto;
+    descuentoTotal += redondear2(bruto - mvBaseLinea(l));
     impuesto += mvImpuestoLinea(l);
+    total += mvImporteLinea(l);
   });
-  const descuentoTotal = redondear2(mvLineas.reduce((s,l)=>s+l.descuentoUnitario*l.cantidad,0));
-  const total = redondear2(subtotal - descuentoTotal + impuesto);
+  subtotal = redondear2(subtotal); descuentoTotal = redondear2(descuentoTotal); impuesto = redondear2(impuesto); total = redondear2(total);
   $('mv-totales').innerHTML = `
     <div class="linea"><span>Total original</span><span>${money(mvDatos.total)}</span></div>
     <div class="linea total-final"><span>Total nuevo</span><span>${money(total)}</span></div>
@@ -4628,7 +4649,7 @@ function renderDevolverTotal(){
     const cant = Math.max(0, Math.min(Number(inp.value)||0, l.cantidad - (l.cantidad_devuelta||0)));
     const base = l.precio_unitario - l.descuento_unitario;
     const tasa = (l.impuestos||[]).reduce((s,x)=>s+(Number(x.tasa)||0),0);
-    total += redondear2(base * cant * (1+tasa));
+    total += redondear2(redondear2(base * (1+tasa)) * cant);
   });
   total = redondear2(total);
   $('dv-total').innerHTML = `<div class="linea total-final"><span>Total a devolver</span><span>${money(total)}</span></div>`;
@@ -4709,7 +4730,7 @@ $('dv-agregar-pago').addEventListener('click', ()=>{
     const cant = Math.max(0, Math.min(Number(inp.value)||0, l.cantidad - (l.cantidad_devuelta||0)));
     const base = l.precio_unitario - l.descuento_unitario;
     const tasa = (l.impuestos||[]).reduce((s,x)=>s+(Number(x.tasa)||0),0);
-    total += redondear2(base * cant * (1+tasa));
+    total += redondear2(redondear2(base * (1+tasa)) * cant);
   });
   total = redondear2(total);
   const repartido = dvPagos.reduce((s,p)=>s+(parseMoney(p.monto)||0),0);

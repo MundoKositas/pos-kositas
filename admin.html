@@ -2007,7 +2007,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.35.012';
+const APP_VERSION = '1.35.013';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2101,7 +2101,7 @@ function calcularPrecioMargen(costo, tasa, pct){
   const sinCrudo = costo / factor;
   const conCrudo = sinCrudo * (1+tasa);
   const conRedondeado = redondearPrecioLista(conCrudo);
-  const sinFinal = redondear2(conRedondeado / (1+tasa));
+  const sinFinal = redondear6(conRedondeado / (1+tasa));
   return { sin: sinFinal, con: conRedondeado };
 }
 
@@ -2126,6 +2126,24 @@ function parseMoney(str){
   const limpio = String(str).replace(/[^0-9.\-]/g,'');
   if(limpio==='') return NaN;
   return parseFloat(limpio);
+}
+// v1.35.013: el precio SIN impuestos se guarda internamente con hasta 6 decimales (así el precio al público
+// con impuestos queda exacto: 49 / 1.16 = 42.241379). Solo estas pantallas lo muestran/capturan a 6 decimales.
+function redondear6(n){ return Math.round((Number(n)||0) * 1e6) / 1e6; }
+function fmtPrecioSin(n){
+  n = Number(n); if(isNaN(n)) return '';
+  let t = redondear6(n).toFixed(6).replace(/0+$/,'');
+  const dec = (t.split('.')[1] || '').length;
+  return dec < 2 ? n.toFixed(2) : t;
+}
+function attachPrecioSinInput(el){
+  if(el.dataset.precioAttached) return;
+  el.dataset.precioAttached = '1';
+  el.classList.add('money-input');
+  const norm = ()=>{ const n = parseMoney(el.value); el.value = isNaN(n) ? '' : fmtPrecioSin(n); };
+  el.addEventListener('focus', ()=>{ norm(); el.select(); });
+  el.addEventListener('blur', norm);
+  norm();
 }
 function attachMoneyInput(el){
   if(el.dataset.moneyAttached) return;
@@ -3787,6 +3805,7 @@ function renderCatalogo(){
     const tasaProducto = tasaTotalProducto(p);
     const costoMostrado = p.costo!=null ? (conImpuestos ? redondear2(p.costo*(1+tasaProducto)) : p.costo) : null;
     const precioMostrado = precioPub ? (conImpuestos ? redondear2(precioPub.precio*(1+tasaProducto)) : precioPub.precio) : null;
+    const precioTxt = precioMostrado==null ? '—' : (conImpuestos ? money(precioMostrado) : '$' + fmtPrecioSin(precioMostrado));
     const bajoMinimo = p.inventariable && Number(p.stock) <= Number(p.minimo) && Number(p.maximo) > 0;
     const estadoTag = !p.activo ? '<span class="tag tag-off">Inactivo</span>' : (bajoMinimo ? '<span class="tag tag-bajo">Bajo mínimo</span>' : '<span class="tag tag-ok">Activo</span>');
     const impuestosTxt = p.impuestos.map(i=>i.nombre).join(', ') || '—';
@@ -3795,7 +3814,7 @@ function renderCatalogo(){
       <td>${nombreCelda}</td>
       <td>${p.marca||'—'}</td>
       <td class="num">${costoMostrado!=null ? money(costoMostrado) : '—'}</td>
-      <td class="num">${precioMostrado!=null ? money(precioMostrado) : '—'}</td>
+      <td class="num">${precioTxt}</td>
       <td class="num">${p.inventariable ? p.stock : '—'}</td>
       <td class="num">${p.inventariable ? `${p.minimo} / ${p.maximo}` : '—'}</td>
       <td>${impuestosTxt}</td>
@@ -4491,7 +4510,7 @@ function renderPreciosModal(p){
     return `<div class="lista-precio-campo" data-lista="${lista.id}" data-modo="directo">
       <div class="titulo">${lista.nombre}</div>
       <div class="par">
-        <div><label>Precio sin impuestos</label><input type="text" inputmode="decimal" class="precio-sin" data-lista="${lista.id}" value="${precioExistente!=null?Number(precioExistente.precio).toFixed(2):''}"></div>
+        <div><label>Precio sin impuestos</label><input type="text" inputmode="decimal" class="precio-sin" data-lista="${lista.id}" value="${precioExistente!=null?fmtPrecioSin(precioExistente.precio):''}"></div>
         <div><label>Precio con impuestos</label><input type="text" inputmode="decimal" class="precio-con" data-lista="${lista.id}"></div>
       </div>
     </div>`;
@@ -4500,7 +4519,7 @@ function renderPreciosModal(p){
   cont.innerHTML = html;
 
   cont.querySelectorAll('.precio-sin').forEach(el=>{
-    attachMoneyInput(el);
+    attachPrecioSinInput(el);
     const conEl = cont.querySelector(`.precio-con[data-lista="${el.dataset.lista}"]`);
     attachMoneyInput(conEl);
     const sync = ()=>{
@@ -4516,7 +4535,7 @@ function renderPreciosModal(p){
       const con = parseMoney(el.value); if(isNaN(con)) return;
       const sinEl = cont.querySelector(`.precio-sin[data-lista="${el.dataset.lista}"]`);
       const tasaAct = tasaTotalSeleccionada();
-      sinEl.value = redondear2(con / (1+tasaAct)).toFixed(2);
+      sinEl.value = fmtPrecioSin(redondear6(con / (1+tasaAct)));
       actualizarResumenPrecio();
     });
   });
@@ -5742,7 +5761,7 @@ function renderLineasCompra(scrollAlFinal){
   $('compra-lineas-body').innerHTML = state.compraLineas.map((l,i)=>{
     const factor = 1 + (Number(l.tasa)||0);
     const costoMostrado = conImp ? redondear2((Number(l.costoUnitario)||0) * factor) : (Number(l.costoUnitario)||0);
-    const precioMostrado = l.precioPublico != null ? (conImp ? redondear2(Number(l.precioPublico) * factor) : Number(l.precioPublico)) : '';
+    const precioMostrado = l.precioPublico != null ? (conImp ? redondear2(Number(l.precioPublico) * factor) : fmtPrecioSin(l.precioPublico)) : '';
     const ultimoCostoMostrado = l.ultimoCosto != null ? (conImp ? redondear2(Number(l.ultimoCosto) * factor) : Number(l.ultimoCosto)) : null;
     const pr = state.productos.find(p=>p.varianteId === l.varianteId);
     const cant = Number(l.cantidad) || 0;
@@ -5754,7 +5773,7 @@ function renderLineasCompra(scrollAlFinal){
       <td class="num">${ultimoCostoMostrado!=null?money(ultimoCostoMostrado):'—'}</td>
       <td class="num"><input type="text" inputmode="decimal" class="cant-input compra-cant num-libre" data-idx="${i}" data-dec="${decimalesPorUnidad(l.unidadMedidaId)}" value="${l.cantidad}"></td>
       <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-costo num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${costoMostrado}"></span></td>
-      <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-precio num-libre" data-idx="${i}" data-dec="2" style="width:90px;text-align:right;" value="${precioMostrado}" placeholder="sin cambio"></span></td>
+      <td class="num"><span class="money-input"><span class="money-prefix">$</span><input type="text" inputmode="decimal" class="compra-precio num-libre" data-idx="${i}" data-dec="${conImp?2:6}" style="width:${conImp?90:110}px;text-align:right;" value="${precioMostrado}" placeholder="sin cambio"></span></td>
       <td class="num" id="compra-importe-${i}">${money(redondear2((Number(l.cantidad)||0) * costoMostrado))}</td>
       <td><button type="button" class="quitar" data-idx="${i}">Quitar</button></td>
     </tr>`;
@@ -5785,7 +5804,7 @@ function renderLineasCompra(scrollAlFinal){
     inp.addEventListener('change', ()=>{
       const i = Number(inp.dataset.idx); const l = state.compraLineas[i];
       const factor = 1 + (Number(l.tasa)||0); const txt = inp.value.trim();
-      l.precioPublico = txt==='' ? null : (conImp ? redondear2(parseFloat(txt)/factor) : parseFloat(txt));
+      l.precioPublico = txt==='' ? null : (conImp ? redondear6(parseFloat(txt)/factor) : redondear6(parseFloat(txt)));
       renderLineasCompra();
     });
   });
