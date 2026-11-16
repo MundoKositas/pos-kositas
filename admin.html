@@ -397,6 +397,19 @@
       <p class="nota">Cada empresa tiene su propio POS/Admin y, si contrata el paquete Catálogo, su catálogo con servicio a domicilio. Los usuarios pertenecen a una sola empresa.</p>
       <div id="em-lista" style="overflow-x:auto;"></div>
     </div>
+    <div class="card" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <h2 style="margin:0;">Solicitudes de información</h2>
+        <div class="fila" style="gap:8px;align-items:center;">
+          <span class="nota" id="sl-resumen" style="margin:0;"></span>
+          <select id="sl-filtro"><option value="pendientes">Pendientes</option><option value="nuevo">Nuevas</option><option value="contactado">Contactadas</option><option value="cita">Con cita</option><option value="cliente">Clientes</option><option value="descartado">Descartadas</option><option value="todas">Todas</option></select>
+          <button type="button" class="btn-gris" id="sl-recargar">Actualizar</button>
+        </div>
+      </div>
+      <p class="nota">Personas que llenaron el formulario de ofertienda.mx o desdecasa.mx. Cambia el estado y anota el seguimiento; el botón de WhatsApp abre el chat con un mensaje listo.</p>
+      <div id="sl-error"></div>
+      <div id="sl-lista" style="overflow-x:auto;"></div>
+    </div>
   </div>
 
   <!-- TAB REPARTO (Ronda 61) -->
@@ -2109,7 +2122,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.39.001';
+const APP_VERSION = '1.39.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2829,6 +2842,52 @@ function aplicarModulosEnMenus(){
   }
 }
 const emEsc = s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+// ---------- SOLICITUDES DE INFORMACIÓN (formulario de la página de plataforma; solo Super Admin) ----------
+const SL_ESTADOS = [['nuevo','Nuevo'],['contactado','Contactado'],['cita','Cita agendada'],['cliente','Cliente'],['descartado','Descartado']];
+state.solicitudes = [];
+async function slCargar(){
+  $('sl-error').innerHTML = '';
+  const { data, error } = await sb.from('leads_plataforma').select('*').order('creado_en', { ascending:false }).limit(500);
+  if(error){ $('sl-error').innerHTML = `<div class="msg-error">${emEsc(error.message)}</div>`; return; }
+  state.solicitudes = data || [];
+  slRender();
+}
+function slWhatsApp(l){
+  let d = String(l.telefono||'').replace(/\D/g,'');
+  if(d.length === 10) d = '52' + d;
+  const txt = `Hola ${l.nombre}, te escribe Adrián de Ofertienda · Desde Casa. Recibí tu solicitud${l.negocio ? ' para ' + l.negocio : ''}. ¿Cuándo te queda bien una cita para platicar?`;
+  return `https://wa.me/${d}?text=${encodeURIComponent(txt)}`;
+}
+function slRender(){
+  const f = $('sl-filtro').value;
+  const lista = state.solicitudes.filter(l=> f==='todas' ? true : f==='pendientes' ? ['nuevo','contactado','cita'].includes(l.estado) : l.estado === f);
+  const nuevas = state.solicitudes.filter(l=>l.estado==='nuevo').length;
+  $('sl-resumen').textContent = `${nuevas} nueva(s) · ${lista.length} mostrada(s)`;
+  if(!lista.length){ $('sl-lista').innerHTML = '<p class="nota">No hay solicitudes con este filtro.</p>'; return; }
+  $('sl-lista').innerHTML = '<table><thead><tr><th>Fecha</th><th>Contacto</th><th>Negocio</th><th>Interés</th><th>Mensaje</th><th>Estado</th><th>Seguimiento</th></tr></thead><tbody>' + lista.map(l=>`<tr>
+    <td>${new Date(l.creado_en).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'})}</td>
+    <td><b>${emEsc(l.nombre)}</b><br>${emEsc(l.telefono)} <a href="${slWhatsApp(l)}" target="_blank" rel="noopener" title="Abrir WhatsApp">💬</a>${l.correo?'<br>'+emEsc(l.correo):''}</td>
+    <td style="white-space:normal;">${emEsc(l.negocio||'—')}<br><span class="nota">${emEsc(l.giro||'')}</span></td>
+    <td style="white-space:normal;">${emEsc(l.interes||'—')}</td>
+    <td style="white-space:normal;max-width:240px;">${emEsc(l.mensaje||'')}</td>
+    <td><select data-sl-estado="${l.id}">${SL_ESTADOS.map(([v,t])=>`<option value="${v}" ${l.estado===v?'selected':''}>${t}</option>`).join('')}</select></td>
+    <td><input type="text" data-sl-notas="${l.id}" value="${emEsc(l.notas||'')}" placeholder="Notas…" style="min-width:180px;"></td>
+  </tr>`).join('') + '</tbody></table>';
+}
+async function slGuardar(id, campos){
+  const { error } = await sb.from('leads_plataforma').update(campos).eq('id', id);
+  if(error){ $('sl-error').innerHTML = `<div class="msg-error">${emEsc(error.message)}</div>`; return; }
+  $('sl-error').innerHTML = '';
+  const l = state.solicitudes.find(x=>x.id===id); if(l) Object.assign(l, campos);
+  if('estado' in campos) slRender();
+}
+$('sl-filtro').addEventListener('change', slRender);
+$('sl-recargar').addEventListener('click', slCargar);
+$('sl-lista').addEventListener('change', e=>{
+  if(e.target.dataset.slEstado) slGuardar(e.target.dataset.slEstado, { estado: e.target.value });
+  else if(e.target.dataset.slNotas) slGuardar(e.target.dataset.slNotas, { notas: e.target.value.trim() || null });
+});
+
 async function emCargar(){
   $('em-lista').innerHTML = '<p class="nota">Cargando…</p>';
   const { data, error } = await sb.rpc('super_listar_empresas');
@@ -2842,6 +2901,7 @@ async function emCargar(){
       return `<tr><td><div style="display:flex;align-items:center;gap:10px;"><div style="width:52px;height:52px;flex:0 0 52px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">${(e.marca?.logo_url || e.logo_url) ? `<img src="${emEsc(e.marca?.logo_url || e.logo_url)}" alt="" style="max-width:100%;max-height:100%;">` : '<span class="nota" style="font-size:1.4rem;">🏢</span>'}</div><div><b>${emEsc(e.nombre_comercial)}</b><br><span class="nota">${emEsc(e.razon_social||'')}</span></div></div></td><td>${paq}</td><td style="font-size:.82rem;">${hosts}</td><td>${e.usuarios}</td><td>${e.activo ? 'Activa' : 'Inactiva'}</td><td><button class="btn-gris" data-em-edit="${e.id}">Editar</button></td></tr>`;
     }).join('') + '</tbody></table>';
   document.querySelectorAll('[data-em-edit]').forEach(b=>b.addEventListener('click', ()=>emAbrir(b.dataset.emEdit)));
+  slCargar();
 }
 function emAbrir(id){
   const e = id ? state.empresasLista.find(x=>x.id===id) : null;
