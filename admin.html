@@ -139,6 +139,7 @@
     </div>
   </div>
   <div class="acciones">
+    <select id="hdr-empresa-sel" title="Cambiar de empresa" style="display:none;padding:8px 10px;border-radius:8px;border:1px solid #fff;font-weight:600;max-width:220px;"></select>
     <button class="btn-gris" id="btn-config-empresa">Configuración de empresa</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
@@ -2075,7 +2076,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.37.000';
+const APP_VERSION = '1.38.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2596,7 +2597,9 @@ async function iniciarSesionApp(){
   state.esSuperAdmin = esSuperAdmin;
 
   const { data: empresas } = await sb.from('empresas').select('*').eq('activo', true).order('creado_en');
-  const empresa = esSuperAdmin ? empresas[0] : empresas.find(e=>e.id === asignacion.empresa_id);
+  let _empGuardada = null; try{ _empGuardada = localStorage.getItem('admin_empresa_sel'); }catch(e){}
+  const empresa = esSuperAdmin ? (empresas.find(e=>e.id === _empGuardada) || empresas[0]) : empresas.find(e=>e.id === asignacion.empresa_id);
+  state.empresasDisponibles = esSuperAdmin ? empresas : [];
   if(!empresa){ return mostrarError('No se encontró una empresa activa para tu cuenta.'); }
   state.empresaId = empresa.id;
   state.empresaNombre = empresa.nombre_comercial;
@@ -2615,16 +2618,18 @@ async function iniciarSesionApp(){
 
   registrarAccesoSistema('admin', 'entrada'); // no se espera (await) — no debe bloquear ni tronar el inicio de sesión si falla
 
-  const { data: almacenesActivos } = await sb.from('almacenes').select('*').eq('activo', true);
+  const { data: _sucEmp } = await sb.from('sucursales').select('id').eq('empresa_id', state.empresaId);
+  const _sucIds = (_sucEmp||[]).map(x=>x.id);
+  const { data: almacenesActivos } = await sb.from('almacenes').select('*').in('sucursal_id', _sucIds).eq('activo', true);
   state.almacenId = almacenesActivos?.[0]?.id || null;
 
   // Ronda 21: catálogos de apoyo para Compras/Inventario, y los permisos del módulo "inventario"
   // del usuario actual (mismo patrón que mis_permisos_pos() del POS) — deciden si las pestañas
   // nuevas se muestran.
   const [{ data: sucursales }, { data: almacenes }, { data: proveedores }, { data: usuariosEmpresa }, { data: permisosInv }, { data: permisosMenu }] = await Promise.all([
-    sb.from('sucursales').select('*').eq('activo', true),
-    sb.from('almacenes').select('*'),
-    sb.from('proveedores').select('*').eq('activo', true).order('nombre'),
+    sb.from('sucursales').select('*').eq('empresa_id', state.empresaId).eq('activo', true),
+    sb.from('almacenes').select('*').in('sucursal_id', _sucIds),
+    sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre'),
     sb.from('usuarios').select('id, nombre').eq('activo', true).order('nombre'),
     sb.rpc('mis_permisos_inventario'),
     sb.rpc('mis_permisos_menu'), // Ronda 35: árbol de menú/submenú, consulta vs edición
@@ -2645,6 +2650,12 @@ async function iniciarSesionApp(){
   if(puedeAjustarTraspasar) prepararPantallaInventario();
 
   $('hdr-empresa').textContent = state.empresaNombre;
+  { const sel = $('hdr-empresa-sel');
+    if(state.esSuperAdmin && (state.empresasDisponibles||[]).length > 1){
+      sel.innerHTML = state.empresasDisponibles.map(e=>`<option value="${e.id}">${e.nombre_comercial}</option>`).join('');
+      sel.value = state.empresaId; sel.style.display = '';
+      sel.onchange = ()=>{ try{ localStorage.setItem('admin_empresa_sel', sel.value); }catch(e){} location.reload(); };
+    } else sel.style.display = 'none'; }
   $('hdr-info').textContent = `${state.usuario.nombre} (${state.rol}) · v${APP_VERSION}`;
   $('header-app').style.display = 'flex';
   actualizarLogoHeader();
@@ -2658,7 +2669,7 @@ async function iniciarSesionApp(){
   renderActualizarPreciosChecks();
 
   // Ronda 22: Clientes/CxC.
-  const { data: clientes } = await sb.from('clientes').select('*').order('es_publico_general', {ascending:false}).order('nombre');
+  const { data: clientes } = await sb.from('clientes').select('*').eq('empresa_id', state.empresaId).order('es_publico_general', {ascending:false}).order('nombre');
   state.clientes = clientes || [];
   $('cliente-lista-precio').innerHTML = '<option value="">(usar la de la sucursal)</option>'
     + state.listasPrecio.filter(l=>l.activo).map(l=>`<option value="${l.id}">${l.nombre}</option>`).join('');
@@ -2931,12 +2942,12 @@ document.querySelectorAll('#prod-tabs .tab-btn').forEach(btn=>{
 async function cargarCatalogosBase(){
   const [{data: impuestos}, {data: categorias}, {data: lineas}, {data: unidades}, {data: listas}, {data: margenesLinea}, {data: marcas}, {data: condicionesPago}, {data: formasPago}, {data: formasPagoSat}, {data: colores}] = await Promise.all([
     sb.from('impuestos').select('*').order('nombre'),
-    sb.from('categorias').select('*').order('nombre'),
+    sb.from('categorias').select('*').eq('empresa_id', state.empresaId).order('nombre'),
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
     sb.from('unidades_medida').select('*').order('descripcion'),
-    sb.from('listas_precio').select('*').order('nombre'),
+    sb.from('listas_precio').select('*').eq('empresa_id', state.empresaId).order('nombre'),
     sb.from('listas_precio_margen_linea').select('*'),
-    sb.from('marcas').select('*').eq('activo', true).order('nombre'),
+    sb.from('marcas').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre'),
     sb.from('condiciones_pago').select('*').eq('activo', true).order('dias'), // Ronda 23
     sb.from('formas_pago').select('*').eq('activo', true).order('nombre'), // Ronda 45 — pago a proveedores (CxP)
     sb.from('formas_pago_sat').select('*').order('orden'), // Ronda 46 — catálogo SAT c_FormaPago para clave_sat
@@ -2944,7 +2955,7 @@ async function cargarCatalogosBase(){
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
-  state.lineas = lineas || [];
+  { const _ids = new Set((state.categorias||[]).map(c=>c.id)); state.lineas = (lineas||[]).filter(l=>_ids.has(l.categoria_id)); }
   state.unidades = unidades || [];
   state.listasPrecio = listas || [];
   state.margenesLinea = margenesLinea || [];
@@ -3089,7 +3100,7 @@ function marcaSeleccionada(){
   return m ? { id: m.id, nombre: m.nombre } : { id: '', nombre: '' };
 }
 async function recargarMarcas(){
-  const { data } = await sb.from('marcas').select('*').eq('activo', true).order('nombre');
+  const { data } = await sb.from('marcas').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
   if(data) state.marcas = data;
 }
 $('prod-marca').addEventListener('change', ()=>{
@@ -3165,13 +3176,13 @@ async function leerTodo(armar){
 async function cargarProductos(){
   const { data, error } = await leerTodo(()=> sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id, imagen_url,
-    producto:productos(id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
+    producto:productos!inner(id, empresa_id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
       linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
     stock:existencias(cantidad, minimo, maximo, almacen_id),
     codigos:codigos_barra(codigo, tipo, factor_unidades_base)
-  `));
+  `).eq('producto.empresa_id', state.empresaId));
   if(error){ console.error(error); return; }
   state.productos = (data||[]).map(v=>{
     const existenciaAlmacen = (v.stock||[]).find(s=>s.almacen_id===state.almacenId) || v.stock?.[0];
@@ -5913,7 +5924,7 @@ $('compra-proveedor-nuevo-guardar').addEventListener('click', async ()=>{
   if(!nombre) return;
   const { data, error } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre } });
   if(error){ $('compra-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
-  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
   state.proveedores = proveedores || [];
   renderProveedorSelect();
   $('compra-proveedor').value = data;
@@ -6165,7 +6176,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   await cargarComprasLista();
   if(fallasLS.length) $('compra-error').innerHTML = `<div class="msg-error">La compra se registró, pero no se pudo asignar: ${fallasLS.map(rpEsc).join(' · ')}. Asígnalo en Inventario → Lotes.</div>`;
   if(tipoCompra === 'credito' || tipoCompra === 'anticipo' || tipoCompra === 'mixto'){
-    const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+    const { data: proveedores } = await sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
     state.proveedores = proveedores || [];
     renderProveedorSelect();
   }
@@ -6450,7 +6461,7 @@ $('compra-xml-archivo').addEventListener('change', async (e)=>{
       if(yaExiste){ proveedorId = yaExiste.id; $('compra-proveedor').value = yaExiste.id; refrescarComboBuscable('compra-proveedor'); }
       else {
         const { data } = await sb.rpc('guardar_proveedor', { p: { empresa_id: state.empresaId, nombre: nombreEmisor, rfc: rfcEmisor } });
-        const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+        const { data: proveedores } = await sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
         state.proveedores = proveedores || [];
         renderProveedorSelect();
         if(data){ proveedorId = data; $('compra-proveedor').value = data; refrescarComboBuscable('compra-proveedor'); }
@@ -6828,8 +6839,8 @@ $('almacen-guardar').addEventListener('click', async ()=>{
   const { error } = await sb.rpc('guardar_almacen', { p: payload });
   if(error){ $('almacen-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
   const [{ data: almacenes }, { data: sucursales }] = await Promise.all([
-    sb.from('almacenes').select('*'),
-    sb.from('sucursales').select('*').eq('activo', true),
+    sb.from('almacenes').select('*').in('sucursal_id', (state.sucursales||[]).map(x=>x.id)),
+    sb.from('sucursales').select('*').eq('empresa_id', state.empresaId).eq('activo', true),
   ]);
   state.almacenes = almacenes || [];
   state.sucursales = sucursales || [];
@@ -7183,7 +7194,7 @@ $('td-cerrar').addEventListener('click', ()=>{ $('modal-traspaso-detalle').class
 
 // ---------- RONDA 22: CLIENTES / CxC ----------
 async function refrescarPantallaClientes(){
-  const { data: clientes } = await sb.from('clientes').select('*').order('es_publico_general', {ascending:false}).order('nombre');
+  const { data: clientes } = await sb.from('clientes').select('*').eq('empresa_id', state.empresaId).order('es_publico_general', {ascending:false}).order('nombre');
   state.clientes = clientes || [];
   renderClientesTabla();
   renderCxcTabla();
@@ -7360,7 +7371,7 @@ $('cliente-guardar').addEventListener('click', async ()=>{
   const { error } = await sb.rpc('guardar_cliente', { p: payload });
   $('cliente-guardar').disabled = false;
   if(error){ $('cliente-error').innerHTML = `<div class="msg-error">${error.message}</div>`; return; }
-  const { data: clientes } = await sb.from('clientes').select('*').order('es_publico_general', {ascending:false}).order('nombre');
+  const { data: clientes } = await sb.from('clientes').select('*').eq('empresa_id', state.empresaId).order('es_publico_general', {ascending:false}).order('nombre');
   state.clientes = clientes || [];
   renderClientesTabla();
   renderCxcTabla();
@@ -7762,7 +7773,7 @@ $('pp-pagar').addEventListener('click', async ()=>{
     $('pp-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
     return;
   }
-  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
   state.proveedores = proveedores || [];
   renderProveedorSelect();
   $('modal-pago-proveedor').classList.remove('activo');
@@ -7825,7 +7836,7 @@ $('ap-registrar').addEventListener('click', async ()=>{
     $('ap-error').innerHTML = `<div class="msg-error">${error.message}</div>`;
     return;
   }
-  const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+  const { data: proveedores } = await sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
   state.proveedores = proveedores || [];
   renderProveedorSelect();
   renderProveedorSelectAnticipoCxp();
@@ -8422,11 +8433,11 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
     state.colores = colores || [];
   }
   if(key === 'categorias'){
-    const { data: categorias } = await sb.from('categorias').select('*').order('nombre');
+    const { data: categorias } = await sb.from('categorias').select('*').eq('empresa_id', state.empresaId).order('nombre');
     state.categorias = categorias || [];
   }
   if(key === 'proveedores'){
-    const { data: proveedores } = await sb.from('proveedores').select('*').eq('activo', true).order('nombre');
+    const { data: proveedores } = await sb.from('proveedores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
     state.proveedores = proveedores || [];
     if(typeof renderProveedorSelect === 'function') renderProveedorSelect();
   }
