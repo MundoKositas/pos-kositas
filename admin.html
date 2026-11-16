@@ -174,6 +174,7 @@
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-reparto">Reparto</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
+    <button class="tab-btn" data-tab="tab-pedidos" id="tabbtn-pedidos" style="display:none;">Pedidos a proveedor</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
     <button class="tab-btn" data-tab="tab-empresas" id="tabbtn-empresas" style="display:none;">🏢 Empresas</button>
     <button class="tab-btn" data-tab="tab-catalogos-base">Catálogos base</button>
@@ -830,6 +831,37 @@
   </div>
 
   <!-- TAB INVENTARIO (almacenes, ajustes de salida, traspasos) -->
+  <div class="tab-panel" id="tab-pedidos" style="display:none;">
+    <div class="card">
+      <h2 style="margin-top:0;">Pedidos a proveedor</h2>
+      <p class="nota">Muestra lo que está en o bajo su punto de reorden, agrupado por proveedor. El proveedor de cada artículo es el que más veces le has comprado (si empatan, el de menor costo); si no tiene compras, se usa su <strong>proveedor inicial</strong>. Quita los renglones que no quieras pedir, ajusta cantidades y genera el pedido.</p>
+      <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div><label>Proveedor</label><select id="pv-filtro-proveedor"></select></div>
+        <div><label>Buscar</label><input type="text" id="pv-buscar" placeholder="Producto, marca o código"></div>
+        <div><label>Cantidad sugerida</label><select id="pv-base"><option value="maximo">Hasta stock máximo</option><option value="reorden">Hasta punto de reorden</option></select></div>
+        <label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="pv-con-impuestos"> Costos con impuestos</label>
+      </div>
+      <div id="pv-error" style="margin-top:8px;"></div>
+      <div id="pv-resumen" class="nota" style="margin:10px 0;font-weight:600;"></div>
+      <div id="pv-contenido" style="overflow-x:auto;"></div>
+      <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;">
+        <select id="pv-formato"><option value="xlsx">Excel</option><option value="pdf">PDF</option></select>
+        <button type="button" class="btn-primario" id="pv-exportar-pedido">Exportar pedido</button>
+        <button type="button" class="btn-gris" id="pv-exportar-reporte">Reporte de resurtido por proveedor</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <h3 style="margin-top:0;">Proveedor inicial de los artículos</h3>
+      <p class="nota">Para artículos que aún no has comprado. Descarga la plantilla, escribe el proveedor en la columna "Proveedor inicial" (el nombre debe ser igual al del catálogo de proveedores) y súbela. También puedes asignarlo renglón por renglón en el grupo "Sin proveedor" de arriba.</p>
+      <div class="fila" style="gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn-gris" id="pv-plantilla">Descargar plantilla (Excel)</button>
+        <button type="button" class="btn-gris" id="pv-importar">Importar plantilla</button>
+        <input type="file" id="pv-archivo" accept=".xlsx,.xls" style="display:none;">
+      </div>
+      <div id="pv-import-resultado" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
   <div class="tab-panel" id="tab-inventario" style="display:none;">
     <div class="tabs" id="inv-tabs" style="margin-bottom:14px;">
       <button type="button" class="tab-btn activo" data-invtab="inv-panel-almacenes">Almacenes</button>
@@ -2076,7 +2108,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.38.000';
+const APP_VERSION = '1.39.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2646,6 +2678,7 @@ async function iniciarSesionApp(){
   const puedeAjustarTraspasar = state.permisosInventario.includes('inventario.ajuste_salida') || state.permisosInventario.includes('inventario.traspasos');
   $('tabbtn-compras').style.display = puedeComprar ? '' : 'none';
   $('tabbtn-inventario').style.display = puedeAjustarTraspasar ? '' : 'none';
+  $('tabbtn-pedidos').style.display = puedeComprar ? '' : 'none';
   if(puedeComprar) prepararPantallaCompras();
   if(puedeAjustarTraspasar) prepararPantallaInventario();
 
@@ -2915,6 +2948,7 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     if(['tab-compras','tab-catalogo','tab-inventario'].includes(btn.dataset.tab)) actualizarCatalogosVivo('tab');
     if(btn.dataset.tab === 'tab-compras') prepararPantallaCompras();
     if(btn.dataset.tab === 'tab-inventario') prepararPantallaInventario();
+    if(btn.dataset.tab === 'tab-pedidos') pvEntrar();
     // Ronda 22, ajuste: Clientes se cargaba solo una vez al iniciar sesión — si se registraba una
     // venta a crédito o un abono desde el POS (otra pestaña/sesión), el saldo se veía desactualizado
     // hasta recargar el navegador. Ahora se refresca cada vez que se entra a la pestaña.
@@ -3176,7 +3210,7 @@ async function leerTodo(armar){
 async function cargarProductos(){
   const { data, error } = await leerTodo(()=> sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id, imagen_url,
-    producto:productos!inner(id, empresa_id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
+    producto:productos!inner(id, empresa_id, proveedor_inicial_id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
       linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
@@ -3192,6 +3226,7 @@ async function cargarProductos(){
       precioPropio: !!v.precio_propio, colorId: v.color_id || null, imagenVariante: v.imagen_url || null,
       // Colores: "nombre" es lo que se ve en listas/búsquedas (Producto — Color); "nombreBase" es el
       // nombre real del artículo, el que se edita en el formulario.
+      proveedorInicialId: v.producto.proveedor_inicial_id || null,
       productoId: v.producto.id, nombreBase: v.producto.nombre,
       nombre: nombreConColor(v.producto.nombre, v.nombre_variante), marca: v.producto.marca || '', marcaId: v.producto.marca_id || null,
       activo: v.producto.activo, activoReparto: v.producto.activo_reparto,
@@ -4340,6 +4375,195 @@ $('cat-exportar-resurtido').addEventListener('click', async ()=>{
   } else {
     exportarExcelAgrupado(`reporte_resurtido_${fecha}.xlsx`, 'Resurtido', encabezados, filas, tipos, [4, 6, 8]);
   }
+});
+
+// ---------- PEDIDOS A PROVEEDOR ----------
+// Pantalla de trabajo para armar el pedido por proveedor. El proveedor de cada artículo sale de
+// (1) el historial de compras — el que más veces se le ha comprado, y si empatan el de menor costo
+// (RPC proveedor_sugerido_variantes) — o, si no hay compras, (2) el "proveedor inicial" del artículo
+// (productos.proveedor_inicial_id). Sin ninguno: grupo "Sin proveedor" (al final).
+const pv = { hist: new Map(), cant: new Map(), excl: new Set(), grupos: new Map() };
+const pvEsc = t=>String(t==null?'':t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pvNorm = t=>String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+function pvNombreProveedor(id){ return state.proveedores.find(x=>x.id===id)?.nombre || 'Proveedor (inactivo)'; }
+async function pvEntrar(){
+  $('pv-error').innerHTML = '';
+  await cargarProductos();
+  const { data, error } = await sb.rpc('proveedor_sugerido_variantes', { p_empresa_id: state.empresaId });
+  if(error){ $('pv-error').innerHTML = `<div class="msg-error">${pvEsc(error.message)}</div>`; return; }
+  pv.hist = new Map((data||[]).map(r=>[r.variante_id, r]));
+  const sel = $('pv-filtro-proveedor'), previo = sel.value;
+  sel.innerHTML = '<option value="">Todos los proveedores</option><option value="__sin">Sin proveedor</option>' +
+    state.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>`<option value="${p.id}">${pvEsc(p.nombre)}</option>`).join('');
+  sel.value = [...sel.options].some(o=>o.value===previo) ? previo : '';
+  pvRender();
+}
+function pvProveedorDe(p){
+  const h = pv.hist.get(p.varianteId);
+  if(h) return { id: h.proveedor_id, origen: `Historial (${h.veces})` };
+  if(p.proveedorInicialId) return { id: p.proveedorInicialId, origen: 'Inicial' };
+  return { id: null, origen: '—' };
+}
+// Filas candidatas: mismo criterio del Reporte de resurtido (activo, inventariable, con máximo,
+// stock <= punto de reorden, temporadas vigentes), con búsqueda y filtro de proveedor propios.
+function pvFilas(){
+  const conImp = $('pv-con-impuestos').checked, modo = $('pv-base').value, filtro = $('pv-filtro-proveedor').value;
+  const palabras = pvNorm($('pv-buscar').value).split(/\s+/).filter(Boolean);
+  const filas = [];
+  state.productos.forEach(p=>{
+    if(!(p.activo && p.inventariable && Number(p.maximo) > 0 && Number(p.stock) <= Number(p.minimo))) return;
+    const temporadas = temporadasDeVariante(p.varianteId);
+    if(temporadas.length && !temporadas.some(t=>t.activo && temporadaVigenteHoy(t))) return;
+    if(palabras.length){
+      const txt = pvNorm(p.nombre) + ' ' + pvNorm(p.marca) + ' ' + p.codigos.map(c=>pvNorm(c.codigo)).join(' ');
+      if(!palabras.every(w=>txt.includes(w))) return;
+    }
+    const prov = pvProveedorDe(p);
+    if(filtro === '__sin' && prov.id) return;
+    if(filtro && filtro !== '__sin' && prov.id !== filtro) return;
+    const costo = p.costo!=null ? (conImp ? redondear2(p.costo*(1+tasaTotalProducto(p))) : Number(p.costo)) : 0;
+    const stock = Number(p.stock), minimo = Number(p.minimo), maximo = Number(p.maximo);
+    const cantReorden = Math.max(0, minimo - stock), cantMaximo = Math.max(0, maximo - stock);
+    const cantSugerida = modo === 'maximo' ? cantMaximo : cantReorden;
+    const cantPedir = pv.cant.has(p.varianteId) ? pv.cant.get(p.varianteId) : cantSugerida;
+    filas.push({
+      varianteId: p.varianteId, productoId: p.productoId, provId: prov.id, origen: prov.origen,
+      nombre: p.nombre, producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, marca: p.marca || '—',
+      stock, minimo, maximo, costo, cantReorden, totalReorden: redondear2(cantReorden*costo),
+      cantMaximo, totalMaximo: redondear2(cantMaximo*costo), cantPedir, totalPedir: redondear2(cantPedir*costo),
+      incluido: !pv.excl.has(p.varianteId),
+      temporada: temporadas.map(t=>t.nombre).join(', ') || '—',
+    });
+  });
+  return filas;
+}
+// Agrupa por proveedor (orden alfabético, "Sin proveedor" al final) y los artículos en orden alfabético.
+function pvAgrupar(filas){
+  const m = new Map();
+  filas.forEach(f=>{ const k = f.provId || '__sin'; if(!m.has(k)) m.set(k, []); m.get(k).push(f); });
+  return [...m.entries()].map(([k, fs])=>({
+    key: k, nombre: k === '__sin' ? 'Sin proveedor' : pvNombreProveedor(k),
+    filas: fs.sort((a,b)=>a.nombre.localeCompare(b.nombre, 'es')),
+  })).sort((a,b)=> a.key==='__sin' ? 1 : b.key==='__sin' ? -1 : a.nombre.localeCompare(b.nombre, 'es'));
+}
+function pvRender(){
+  const filas = pvFilas(), grupos = pvAgrupar(filas);
+  pv.grupos = new Map(grupos.map(g=>[g.key, g.filas.map(f=>f.varianteId)]));
+  const enPedido = filas.filter(f=>f.incluido && f.cantPedir > 0);
+  $('pv-resumen').textContent = filas.length
+    ? `${filas.length} artículo(s) bajo mínimo — ${enPedido.length} en el pedido por ${money(enPedido.reduce((s,f)=>s+f.totalPedir,0))}`
+    : 'No hay artículos bajo su punto de reorden con estos filtros.';
+  const opcionesProv = '<option value="">Asignar proveedor…</option>' + state.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>`<option value="${p.id}">${pvEsc(p.nombre)}</option>`).join('');
+  $('pv-contenido').innerHTML = grupos.map(g=>{
+    const inc = g.filas.filter(f=>f.incluido);
+    const sub = redondear2(inc.reduce((s,f)=>s+f.totalPedir,0));
+    const todos = g.filas.every(f=>f.incluido);
+    return `<table style="margin-bottom:18px;"><thead>
+      <tr><th colspan="10" style="font-size:.95rem;color:var(--texto,#222);background:#eef1f5;">
+        <label style="display:inline-flex;gap:8px;align-items:center;text-transform:none;"><input type="checkbox" class="pv-grp-inc" data-grupo="${g.key}" ${todos?'checked':''}> ${pvEsc(g.nombre)} — ${g.filas.length} artículo(s) · pedido ${money(sub)}</label></th></tr>
+      <tr><th>Pedir</th><th>Producto</th><th>Marca</th><th class="num">Stock</th><th class="num">Reorden</th><th class="num">Máx.</th><th class="num">Costo</th><th>Origen</th><th class="num">Cantidad</th><th class="num">Total</th></tr></thead><tbody>
+      ${g.filas.map(f=>`<tr style="${f.incluido?'':'opacity:.45;'}">
+        <td><input type="checkbox" class="pv-inc" data-v="${f.varianteId}" ${f.incluido?'checked':''}></td>
+        <td style="white-space:normal;min-width:240px;">${pvEsc(f.nombre)}</td><td>${pvEsc(f.marca)}</td>
+        <td class="num">${f.stock}</td><td class="num">${f.minimo}</td><td class="num">${f.maximo}</td><td class="num">${money(f.costo)}</td>
+        <td>${g.key==='__sin' ? `<select class="pv-asignar" data-p="${f.productoId}" style="max-width:170px;">${opcionesProv}</select>` : pvEsc(f.origen)}</td>
+        <td class="num"><input type="number" class="pv-cant" data-v="${f.varianteId}" min="0" step="1" value="${f.cantPedir}" style="width:72px;text-align:right;"></td>
+        <td class="num">${money(f.incluido ? f.totalPedir : 0)}</td></tr>`).join('')}
+      </tbody></table>`;
+  }).join('');
+}
+['pv-filtro-proveedor','pv-base','pv-con-impuestos'].forEach(id=> $(id).addEventListener('change', ()=>{ if(id==='pv-base') pv.cant.clear(); pvRender(); }));
+$('pv-buscar').addEventListener('input', pvRender);
+$('pv-contenido').addEventListener('change', async (e)=>{
+  const t = e.target;
+  if(t.classList.contains('pv-inc')){ if(t.checked) pv.excl.delete(t.dataset.v); else pv.excl.add(t.dataset.v); pvRender(); }
+  else if(t.classList.contains('pv-grp-inc')){ (pv.grupos.get(t.dataset.grupo)||[]).forEach(v=>{ if(t.checked) pv.excl.delete(v); else pv.excl.add(v); }); pvRender(); }
+  else if(t.classList.contains('pv-cant')){ const n = Math.max(0, Math.round(Number(t.value)||0)); pv.cant.set(t.dataset.v, n); pvRender(); }
+  else if(t.classList.contains('pv-asignar') && t.value){
+    const { error } = await sb.rpc('asignar_proveedor_inicial_ids', { p_empresa_id: state.empresaId, p_producto_ids: [t.dataset.p], p_proveedor_id: t.value });
+    if(error){ $('pv-error').innerHTML = `<div class="msg-error">${pvEsc(error.message)}</div>`; return; }
+    state.productos.filter(p=>p.productoId===t.dataset.p).forEach(p=>{ p.proveedorInicialId = t.value; });
+    pvRender();
+  }
+});
+// Arma filas/tipos para los exportadores: Proveedor → artículos (alfabético) → subtotal; total general.
+function pvTablaExport(grupos, filaFn, columnasSuma, numCols){
+  const filas = [], tipos = [], tot = new Array(numCols).fill(0);
+  grupos.forEach(g=>{
+    filas.push([`Proveedor: ${g.nombre}`, ...new Array(numCols-1).fill('')]); tipos.push('grupo');
+    const sub = new Array(numCols).fill(0);
+    g.filas.forEach(f=>{ const r = filaFn(f); filas.push(r); tipos.push('producto'); columnasSuma.forEach(i=>{ sub[i] += Number(r[i])||0; }); });
+    const fs = new Array(numCols).fill(''); fs[0] = `Subtotal "${g.nombre}"`;
+    columnasSuma.forEach(i=>{ fs[i] = redondear2(sub[i]); tot[i] += sub[i]; });
+    filas.push(fs); tipos.push('subtotal'); filas.push(new Array(numCols).fill('')); tipos.push('espacio');
+  });
+  const ft = new Array(numCols).fill(''); ft[0] = 'TOTAL GENERAL';
+  columnasSuma.forEach(i=>{ ft[i] = redondear2(tot[i]); });
+  filas.push(ft); tipos.push('total');
+  return { filas, tipos };
+}
+async function pvExportar(nombre, titulo, enc, filas, tipos, monedas, derecha){
+  const fecha = fechaLocalISO(), conImp = $('pv-con-impuestos').checked;
+  if($('pv-formato').value === 'pdf'){
+    await exportarPDFAgrupado(`${nombre}_${fecha}.pdf`, `${titulo} — ${state.empresaNombre || ''}`,
+      `Generado: ${new Date().toLocaleString('es-MX')} — Costo ${conImp?'con':'sin'} impuestos`, enc, filas, tipos, monedas, derecha);
+  } else exportarExcelAgrupado(`${nombre}_${fecha}.xlsx`, titulo.slice(0,31), enc, filas, tipos, monedas);
+}
+$('pv-exportar-pedido').addEventListener('click', async ()=>{
+  const filas = pvFilas().filter(f=>f.incluido && f.cantPedir > 0);
+  if(!filas.length){ $('pv-error').innerHTML = '<div class="msg-error">No hay renglones en el pedido.</div>'; return; }
+  $('pv-error').innerHTML = '';
+  const conImp = $('pv-con-impuestos').checked;
+  const enc = ['Producto', 'Marca', 'Stock', `Costo (${conImp?'con':'sin'} imp.)`, 'Cantidad a pedir', 'Total'];
+  const t = pvTablaExport(pvAgrupar(filas), f=>[f.producto, f.marca, f.stock, f.costo, f.cantPedir, f.totalPedir], [2, 4, 5], 6);
+  await pvExportar('pedido_proveedor', 'Pedido a proveedor', enc, t.filas, t.tipos, [3, 5], [2, 3, 4, 5]);
+});
+$('pv-exportar-reporte').addEventListener('click', async ()=>{
+  const filas = pvFilas();
+  if(!filas.length){ $('pv-error').innerHTML = '<div class="msg-error">No hay artículos para el reporte.</div>'; return; }
+  $('pv-error').innerHTML = '';
+  const conImp = $('pv-con-impuestos').checked;
+  const enc = ['Producto', 'Marca', 'Stock', 'Punto de reorden', `Costo (${conImp?'con':'sin'} imp.)`, 'Cantidad a punto de reorden', 'Total resurtido (punto de reorden)', 'Cantidad a stock máximo', 'Total resurtido (stock máximo)', 'Temporada'];
+  const t = pvTablaExport(pvAgrupar(filas), f=>[f.producto, f.marca, f.stock, f.minimo, f.costo, f.cantReorden, f.totalReorden, f.cantMaximo, f.totalMaximo, f.temporada], [2, 3, 5, 6, 7, 8], 10);
+  await pvExportar('reporte_resurtido_proveedor', 'Resurtido por proveedor', enc, t.filas, t.tipos, [4, 6, 8], [2, 3, 4, 5, 6, 7, 8]);
+});
+// Plantilla de proveedor inicial: todos los artículos activos, con el proveedor inicial actual (si hay)
+// y el proveedor por historial (solo informativo). Se importa por Código de barras + Proveedor inicial.
+$('pv-plantilla').addEventListener('click', ()=>{
+  const nombreCat = p=>{ const l = state.lineas.find(x=>x.id===p.lineaArticuloId); const c = l ? state.categorias.find(x=>x.id===l.categoria_id) : null; return [c?.nombre||'', l?.nombre||'']; };
+  const vistos = new Set();
+  const filas = state.productos.filter(p=>p.activo && p.codigoPrincipal && !vistos.has(p.productoId) && vistos.add(p.productoId))
+    .map(p=>{ const [c,l] = nombreCat(p); const h = pv.hist.get(p.varianteId);
+      return [c, l, p.codigoPrincipal, p.nombreBase, p.marca, p.proveedorInicialId ? pvNombreProveedor(p.proveedorInicialId) : '', h ? pvNombreProveedor(h.proveedor_id) : ''];
+    }).sort((a,b)=>a[0].localeCompare(b[0],'es') || a[1].localeCompare(b[1],'es') || a[3].localeCompare(b[3],'es'));
+  const ws = XLSX.utils.aoa_to_sheet([['Categoría','Línea','Código de barras','Producto','Marca','Proveedor inicial','Proveedor por historial (solo informativo)'], ...filas]);
+  ws['!cols'] = [{wch:22},{wch:24},{wch:18},{wch:48},{wch:18},{wch:30},{wch:30}];
+  const wsP = XLSX.utils.aoa_to_sheet([['Proveedores válidos'], ...state.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>[p.nombre])]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Proveedor inicial'); XLSX.utils.book_append_sheet(wb, wsP, 'Proveedores válidos');
+  XLSX.writeFile(wb, 'plantilla_proveedor_inicial.xlsx');
+});
+$('pv-importar').addEventListener('click', ()=> $('pv-archivo').click());
+$('pv-archivo').addEventListener('change', async (e)=>{
+  const archivo = e.target.files[0]; e.target.value = '';
+  if(!archivo) return;
+  const out = $('pv-import-resultado'); out.innerHTML = '<p class="nota">Leyendo archivo…</p>';
+  try{
+    const wb = XLSX.read(await archivo.arrayBuffer(), { type:'array' });
+    const hoja = wb.Sheets['Proveedor inicial'] || wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(hoja, { defval:'' }).map(r=>({ codigo: String(r['Código de barras']||'').trim(), proveedor: String(r['Proveedor inicial']||'').trim() })).filter(r=>r.codigo && r.proveedor);
+    if(!filas.length){ out.innerHTML = '<div class="msg-error">No encontré renglones con "Código de barras" y "Proveedor inicial" llenos.</div>'; return; }
+    let ok = 0; const sinCod = [], sinProv = new Set();
+    for(let i=0; i<filas.length; i+=500){
+      const { data, error } = await sb.rpc('importar_proveedor_inicial', { p_empresa_id: state.empresaId, p_filas: filas.slice(i, i+500) });
+      if(error) throw error;
+      ok += data.actualizados; sinCod.push(...data.codigos_no_encontrados); data.proveedores_no_encontrados.forEach(x=>sinProv.add(x));
+    }
+    await pvEntrar();
+    out.innerHTML = `<div class="msg-ok">Se asignó proveedor inicial a ${ok} artículo(s).</div>` +
+      (sinProv.size ? `<div class="msg-error">Proveedores que no existen (escríbelos igual que en el catálogo): ${pvEsc([...sinProv].join(', '))}</div>` : '') +
+      (sinCod.length ? `<div class="msg-error">Códigos no encontrados (${sinCod.length}): ${pvEsc(sinCod.slice(0,15).join(', '))}${sinCod.length>15?'…':''}</div>` : '');
+  }catch(err){ out.innerHTML = `<div class="msg-error">${pvEsc(err.message||String(err))}</div>`; }
 });
 
 // ---------- Imágenes adicionales del producto (producto_imagenes → carrusel del catálogo) ----------
