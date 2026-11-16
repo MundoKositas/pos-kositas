@@ -37,6 +37,21 @@ h2{font-size:1.4rem;margin:0 0 6px;letter-spacing:-.3px}
 .cta h2{color:#fff}
 .cta p{margin:0 0 18px;opacity:.95}
 .cta .btn{background:#fff;color:var(--verde-osc)}
+.contacto{margin-bottom:44px}
+.cgrid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px}
+@media(max-width:720px){.cgrid{grid-template-columns:1fr}}
+#form-lead{position:relative}
+#form-lead label{display:block;font-size:.88rem;font-weight:600;color:var(--gris);margin-bottom:12px}
+#form-lead input,#form-lead select,#form-lead textarea{display:block;width:100%;margin-top:4px;padding:10px;border:1px solid var(--borde);border-radius:8px;font:inherit;color:var(--texto);background:#fff}
+#form-lead input:focus,#form-lead select:focus,#form-lead textarea:focus{outline:2px solid var(--verde);outline-offset:1px}
+#form-lead button{width:100%;border:0;cursor:pointer;font-family:inherit}
+#form-lead button[disabled]{opacity:.6;cursor:wait}
+.nota-priv{font-size:.8rem;color:var(--gris);margin:10px 0 0}
+#lead-msg{margin-top:10px;font-size:.95rem}
+#lead-msg .ok{background:#eafaf1;border:1px solid #b9e4c9;border-radius:8px;padding:12px;color:#1f5f3a}
+#lead-msg .err{background:#fdecea;border:1px solid #f3c2bd;border-radius:8px;padding:10px;color:#a12b20}
+#lead-msg .ok .btn{margin-top:10px;display:block;text-align:center}
+.contacto-dir h3{margin:0 0 6px}.contacto-dir p{color:var(--gris);margin:0 0 14px}.contacto-dir .det{margin:18px 0 0;font-size:.93rem;line-height:1.8}
 footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-size:.88rem;text-align:center}
 </style></head><body>
 <header><div class="cont"><span class="marca"><img id="marca" src="ofertienda-logo.png" alt="Ofertienda"></span><a class="btn" id="wa-top" href="#">Escríbenos</a></div></header>
@@ -69,10 +84,29 @@ footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-s
     </div>
   </section>
 
-  <section class="cta">
+  <section id="contacto" class="contacto">
     <h2>¿Platicamos?</h2>
-    <p>Te respondemos por WhatsApp, rápido y sin compromiso.</p>
-    <a class="btn" id="wa-cta" href="#">Escribir por WhatsApp</a>
+    <p class="sub">Déjanos tus datos y te contactamos para agendar una cita sin compromiso, o escríbenos directo por WhatsApp.</p>
+    <div class="cgrid">
+      <form id="form-lead" class="card" novalidate>
+        <label>Tu nombre *<input name="nombre" maxlength="120" autocomplete="name" required></label>
+        <label>Teléfono / WhatsApp *<input name="telefono" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="10 dígitos" required></label>
+        <label>Nombre de tu negocio<input name="negocio" maxlength="120" autocomplete="organization"></label>
+        <label>Giro<select name="giro"><option value="">Selecciona…</option><option>Abarrotes / tienda</option><option>Papelería y regalos</option><option>Ferretería / plomería</option><option>Ropa y boutique</option><option>Farmacia / salud</option><option>Restaurante / alimentos</option><option>Otro</option></select></label>
+        <label>¿Qué te interesa?<select name="interes"><option value="">Selecciona…</option><option>Punto de venta</option><option>Inventarios y compras</option><option>Tienda en línea</option><option>Entrega a domicilio</option><option>Todo el sistema</option></select></label>
+        <label>Cuéntanos de tu negocio (opcional)<textarea name="mensaje" rows="3" maxlength="500"></textarea></label>
+        <input name="web" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+        <button class="btn" type="submit" id="lead-enviar">Quiero que me contacten</button>
+        <p class="nota-priv">Usaremos tus datos solo para contactarte sobre Ofertienda · Desde Casa.</p>
+        <div id="lead-msg" role="status"></div>
+      </form>
+      <div class="card contacto-dir">
+        <h3>Prefieres escribirnos</h3>
+        <p>Te respondemos por WhatsApp, rápido y sin compromiso.</p>
+        <a class="btn" id="wa-cta" href="#">Escribir por WhatsApp</a>
+        <p class="det">📍 Durango, México<br>🌐 ofertienda.mx</p>
+      </div>
+    </div>
   </section>
 </main>
 <footer><div class="cont"><div class="marcas"><a href="https://ofertienda.mx"><img src="ofertienda-logo.png" alt="Ofertienda"></a><a href="https://desdecasa.mx"><img src="desdecasa-logo.png" alt="Desde Casa"></a></div>Ofertienda · Desde Casa — Durango, México. Probado a diario en una tienda real.</div></footer>
@@ -90,6 +124,31 @@ if(esCatalogo){
   document.getElementById('lema').textContent='Muestra tus productos en un catálogo con tu marca, recibe pedidos desde el celular y organiza tus entregas. Todo conectado a tu punto de venta.';
 }
 var msg=encodeURIComponent(esCatalogo?'Hola, me interesa una tienda en línea con entrega a domicilio para mi negocio.':'Hola, me interesa el punto de venta y la tienda en línea para mi negocio.');
-['wa-top','wa-hero','wa-cta'].forEach(function(id){document.getElementById(id).href='https://wa.me/'+WHATSAPP+'?text='+msg;});
+['wa-top','wa-cta'].forEach(function(id){document.getElementById(id).href='https://wa.me/'+WHATSAPP+'?text='+msg;});
+document.getElementById('wa-hero').href='#contacto';
+
+// ---- Formulario de contacto: guarda el registro en la base y ofrece abrir WhatsApp con el mensaje listo ----
+var SB_URL='https://vsfzkktmdwqkfbecmfcj.supabase.co', SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs';
+function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+document.getElementById('form-lead').addEventListener('submit',function(e){
+  e.preventDefault();
+  var f=e.target, out=document.getElementById('lead-msg'), btn=document.getElementById('lead-enviar');
+  var d={nombre:f.nombre.value.trim(),telefono:f.telefono.value.trim(),negocio:f.negocio.value.trim(),giro:f.giro.value,interes:f.interes.value,mensaje:f.mensaje.value.trim(),web:f.web.value,origen:location.hostname};
+  if(d.nombre.length<2){out.innerHTML='<div class="err">Escribe tu nombre.</div>';return;}
+  if(d.telefono.replace(/\D/g,'').length<10){out.innerHTML='<div class="err">Escribe un teléfono de 10 dígitos.</div>';return;}
+  btn.disabled=true; out.innerHTML='';
+  var texto='Hola, soy '+d.nombre+(d.negocio?' de '+d.negocio:'')+'. Me interesa '+(d.interes?d.interes.toLowerCase():'el sistema Ofertienda')+' para mi negocio. Quisiera agendar una cita.';
+  var wa='https://wa.me/'+WHATSAPP+'?text='+encodeURIComponent(texto);
+  fetch(SB_URL+'/rest/v1/rpc/registrar_lead_plataforma',{method:'POST',headers:{'Content-Type':'application/json',apikey:SB_KEY,Authorization:'Bearer '+SB_KEY},body:JSON.stringify({p:d})})
+  .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.message||'Error');return j;});})
+  .then(function(){
+    f.reset();
+    out.innerHTML='<div class="ok"><b>¡Gracias, '+esc(d.nombre)+'!</b> Recibimos tus datos y te contactaremos pronto.<br>Si quieres adelantar, escríbenos ahora:<a class="btn" href="'+wa+'" target="_blank" rel="noopener">Abrir WhatsApp</a></div>';
+  })
+  .catch(function(err){
+    out.innerHTML='<div class="err">'+esc(err.message&&err.message.indexOf('Escribe')===0?err.message:'No pudimos guardar tus datos.')+' Puedes escribirnos directo por WhatsApp.</div><a class="btn" style="margin-top:10px;display:block;text-align:center" href="'+wa+'" target="_blank" rel="noopener">Abrir WhatsApp</a>';
+  })
+  .then(function(){btn.disabled=false;});
+});
 </script>
 </body></html>
