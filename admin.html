@@ -64,6 +64,7 @@
      se vuelve su propia "ventana" con scroll interno (en vez de que crezca con toda la página) y el
      encabezado se queda pegado arriba de esa ventana mientras se hace scroll dentro de ella. */
   .tabla-fija{overflow-y:auto;max-height:min(58vh,520px);}
+  .pv-tabla thead th{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 var(--borde);}
   .tabla-fija thead th{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 var(--borde);}
   /* Ronda 53/54: menú principal de admin.html fijo — Adrián pidió no tener que subir hasta arriba de
      una lista larga para cambiar de sección, y luego señaló que el encabezado azul (con
@@ -832,33 +833,32 @@
 
   <!-- TAB INVENTARIO (almacenes, ajustes de salida, traspasos) -->
   <div class="tab-panel" id="tab-pedidos" style="display:none;">
-    <div class="card">
-      <h2 style="margin-top:0;">Pedidos a proveedor</h2>
-      <p class="nota">Muestra lo que está en o bajo su punto de reorden, agrupado por proveedor. El proveedor de cada artículo es el que más veces le has comprado (si empatan, el de menor costo); si no tiene compras, se usa su <strong>proveedor inicial</strong>. Quita los renglones que no quieras pedir, ajusta cantidades y genera el pedido.</p>
+    <div class="card" id="pv-encabezado" style="padding:12px 16px;">
       <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <h2 style="margin:0 10px 0 0;font-size:1.1rem;">Pedidos a proveedor</h2>
         <div><label>Proveedor</label><select id="pv-filtro-proveedor"></select></div>
         <div><label>Buscar</label><input type="text" id="pv-buscar" placeholder="Producto, marca o código"></div>
         <div><label>Cantidad sugerida</label><select id="pv-base"><option value="maximo">Hasta stock máximo</option><option value="reorden">Hasta punto de reorden</option></select></div>
         <label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="pv-con-impuestos"> Costos con impuestos</label>
+        <button type="button" class="btn-gris" id="pv-ayuda" title="Cómo se calcula">?</button>
       </div>
-      <div id="pv-error" style="margin-top:8px;"></div>
-      <div id="pv-resumen" class="nota" style="margin:10px 0;font-weight:600;"></div>
-      <div id="pv-contenido" style="overflow-x:auto;"></div>
-      <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;">
+      <div id="pv-ayuda-texto" class="nota" style="display:none;margin-top:8px;">El proveedor de cada artículo es el que más veces le has comprado (si empatan, el de menor costo); si no tiene compras, se usa su <strong>proveedor inicial</strong>. Si el artículo se pide por caja o empaque, la cantidad se redondea hacia abajo a empaques completos («Pedir en múltiplos de» en la ficha del artículo; 1 = sin restricción). Quita renglones con "Pedir", ajusta cantidades y exporta.</div>
+      <div id="pv-error"></div>
+      <div id="pv-resumen" class="nota" style="margin-top:8px;font-weight:600;"></div>
+    </div>
+    <div id="pv-contenido" style="overflow:auto;border:1px solid var(--borde);border-radius:8px;background:#fff;margin-top:8px;"></div>
+    <div class="card" id="pv-pie" style="padding:10px 16px;margin-top:8px;">
+      <div class="fila" style="gap:8px;flex-wrap:wrap;align-items:center;">
         <select id="pv-formato"><option value="xlsx">Excel</option><option value="pdf">PDF</option></select>
         <button type="button" class="btn-primario" id="pv-exportar-pedido">Exportar pedido</button>
         <button type="button" class="btn-gris" id="pv-exportar-reporte">Reporte de resurtido por proveedor</button>
-      </div>
-    </div>
-    <div class="card" style="margin-top:14px;">
-      <h3 style="margin-top:0;">Proveedor inicial de los artículos</h3>
-      <p class="nota">Para artículos que aún no has comprado. Descarga la plantilla, escribe el proveedor en la columna "Proveedor inicial" (el nombre debe ser igual al del catálogo de proveedores) y súbela. También puedes asignarlo renglón por renglón en el grupo "Sin proveedor" de arriba.</p>
-      <div class="fila" style="gap:8px;flex-wrap:wrap;">
-        <button type="button" class="btn-gris" id="pv-plantilla">Descargar plantilla (Excel)</button>
+        <span style="border-left:1px solid var(--borde);height:26px;margin:0 6px;"></span>
+        <span class="nota" style="margin:0;">Proveedor inicial y múltiplos:</span>
+        <button type="button" class="btn-gris" id="pv-plantilla">Descargar plantilla</button>
         <button type="button" class="btn-gris" id="pv-importar">Importar plantilla</button>
         <input type="file" id="pv-archivo" accept=".xlsx,.xls" style="display:none;">
       </div>
-      <div id="pv-import-resultado" style="margin-top:8px;"></div>
+      <div id="pv-import-resultado"></div>
     </div>
   </div>
 
@@ -1851,6 +1851,7 @@
         <div class="campo"><label>Máximo</label><input type="number" step="1" min="0" id="prod-maximo" value="0"></div>
       </div>
       <div class="campo"><label>Días de entrega «sobre pedido» (catálogo a domicilio, cuando no hay existencia)</label><input type="number" step="1" min="0" id="prod-dias-pedido" value="3"></div>
+      <div class="campo"><label>Pedir a proveedor en múltiplos de (piezas por caja o empaque; 1 = sin restricción)</label><input type="number" step="1" min="1" id="prod-multiplo" value="1"></div>
       <div class="campo" id="prod-cant-inicial-campo"><label>Existencia inicial</label><input type="number" step="1" min="0" id="prod-cant-inicial" value="0"></div>
       <div class="campo">
         <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="prod-inventariable" checked style="width:auto;"> Es inventariable (controla stock)</label>
@@ -2108,7 +2109,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.39.000';
+const APP_VERSION = '1.39.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3211,7 +3212,7 @@ async function cargarProductos(){
   const { data, error } = await leerTodo(()=> sb.from('variantes').select(`
     id, nombre_variante, activo, precio_propio, color_id, imagen_url,
     producto:productos!inner(id, empresa_id, proveedor_inicial_id, nombre, marca, marca_id, activo, activo_reparto, imagen_url, costo_ultima_compra,
-      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido,
+      linea_articulo_id, unidad_medida_id, clave_prod_serv_sat, inventariable, controla_lote, lleva_serie, dias_entrega_sobre_pedido, multiplo_pedido,
       producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
     precios:variante_precios(precio, lista_precio_id, porcentaje_margen_manual),
     stock:existencias(cantidad, minimo, maximo, almacen_id),
@@ -3233,7 +3234,7 @@ async function cargarProductos(){
       imagenUrl: v.producto.imagen_url || null,
       costo: v.producto.costo_ultima_compra,
       lineaArticuloId: v.producto.linea_articulo_id, unidadMedidaId: v.producto.unidad_medida_id,
-      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote, llevaSerie: !!v.producto.lleva_serie, diasSobrePedido: v.producto.dias_entrega_sobre_pedido ?? 3,
+      claveSat: v.producto.clave_prod_serv_sat || '', inventariable: v.producto.inventariable, controlaLote: !!v.producto.controla_lote, llevaSerie: !!v.producto.lleva_serie, diasSobrePedido: v.producto.dias_entrega_sobre_pedido ?? 3, multiploPedido: v.producto.multiplo_pedido || 1,
       impuestos: (v.producto.producto_impuestos||[]).map(pi=>({
         impuestoId: pi.impuesto_id, nombre: pi.impuestos?.nombre || 'Impuesto', tasa: Number(pi.impuestos?.tasa)||0,
       })),
@@ -4387,7 +4388,7 @@ const pvEsc = t=>String(t==null?'':t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&
 const pvNorm = t=>String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
 function pvNombreProveedor(id){ return state.proveedores.find(x=>x.id===id)?.nombre || 'Proveedor (inactivo)'; }
 async function pvEntrar(){
-  $('pv-error').innerHTML = '';
+  $('pv-error').innerHTML = ''; window.scrollTo(0, 0);
   await cargarProductos();
   const { data, error } = await sb.rpc('proveedor_sugerido_variantes', { p_empresa_id: state.empresaId });
   if(error){ $('pv-error').innerHTML = `<div class="msg-error">${pvEsc(error.message)}</div>`; return; }
@@ -4424,12 +4425,14 @@ function pvFilas(){
     const costo = p.costo!=null ? (conImp ? redondear2(p.costo*(1+tasaTotalProducto(p))) : Number(p.costo)) : 0;
     const stock = Number(p.stock), minimo = Number(p.minimo), maximo = Number(p.maximo);
     const cantReorden = Math.max(0, minimo - stock), cantMaximo = Math.max(0, maximo - stock);
-    const cantSugerida = modo === 'maximo' ? cantMaximo : cantReorden;
+    const mult = Math.max(1, Number(p.multiploPedido) || 1);
+    const cantBruta = modo === 'maximo' ? cantMaximo : cantReorden;
+    const cantSugerida = Math.floor(cantBruta / mult) * mult; // solo empaques completos, sin pasarse
     const cantPedir = pv.cant.has(p.varianteId) ? pv.cant.get(p.varianteId) : cantSugerida;
     filas.push({
       varianteId: p.varianteId, productoId: p.productoId, provId: prov.id, origen: prov.origen,
       nombre: p.nombre, producto: p.marca ? `${p.nombre} (${p.marca})` : p.nombre, marca: p.marca || '—',
-      stock, minimo, maximo, costo, cantReorden, totalReorden: redondear2(cantReorden*costo),
+      stock, minimo, maximo, mult, costo, cantReorden, totalReorden: redondear2(cantReorden*costo),
       cantMaximo, totalMaximo: redondear2(cantMaximo*costo), cantPedir, totalPedir: redondear2(cantPedir*costo),
       incluido: !pv.excl.has(p.varianteId),
       temporada: temporadas.map(t=>t.nombre).join(', ') || '—',
@@ -4454,24 +4457,33 @@ function pvRender(){
     ? `${filas.length} artículo(s) bajo mínimo — ${enPedido.length} en el pedido por ${money(enPedido.reduce((s,f)=>s+f.totalPedir,0))}`
     : 'No hay artículos bajo su punto de reorden con estos filtros.';
   const opcionesProv = '<option value="">Asignar proveedor…</option>' + state.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>`<option value="${p.id}">${pvEsc(p.nombre)}</option>`).join('');
-  $('pv-contenido').innerHTML = grupos.map(g=>{
+  $('pv-contenido').innerHTML = filas.length ? `<table class="pv-tabla"><thead><tr><th>Pedir</th><th>Producto</th><th>Marca</th><th class="num">Stock</th><th class="num">Reorden</th><th class="num">Máx.</th><th class="num">Múlt.</th><th class="num">Costo</th><th>Origen</th><th class="num">Cantidad</th><th class="num">Total</th></tr></thead>` + grupos.map(g=>{
     const inc = g.filas.filter(f=>f.incluido);
     const sub = redondear2(inc.reduce((s,f)=>s+f.totalPedir,0));
     const todos = g.filas.every(f=>f.incluido);
-    return `<table style="margin-bottom:18px;"><thead>
-      <tr><th colspan="10" style="font-size:.95rem;color:var(--texto,#222);background:#eef1f5;">
-        <label style="display:inline-flex;gap:8px;align-items:center;text-transform:none;"><input type="checkbox" class="pv-grp-inc" data-grupo="${g.key}" ${todos?'checked':''}> ${pvEsc(g.nombre)} — ${g.filas.length} artículo(s) · pedido ${money(sub)}</label></th></tr>
-      <tr><th>Pedir</th><th>Producto</th><th>Marca</th><th class="num">Stock</th><th class="num">Reorden</th><th class="num">Máx.</th><th class="num">Costo</th><th>Origen</th><th class="num">Cantidad</th><th class="num">Total</th></tr></thead><tbody>
+    return `<tbody><tr><td colspan="11" style="background:#eef1f5;font-weight:700;">
+        <label style="display:inline-flex;gap:8px;align-items:center;"><input type="checkbox" class="pv-grp-inc" data-grupo="${g.key}" ${todos?'checked':''}> ${pvEsc(g.nombre)} — ${g.filas.length} artículo(s) · pedido ${money(sub)}</label></td></tr>
       ${g.filas.map(f=>`<tr style="${f.incluido?'':'opacity:.45;'}">
         <td><input type="checkbox" class="pv-inc" data-v="${f.varianteId}" ${f.incluido?'checked':''}></td>
         <td style="white-space:normal;min-width:240px;">${pvEsc(f.nombre)}</td><td>${pvEsc(f.marca)}</td>
-        <td class="num">${f.stock}</td><td class="num">${f.minimo}</td><td class="num">${f.maximo}</td><td class="num">${money(f.costo)}</td>
+        <td class="num">${f.stock}</td><td class="num">${f.minimo}</td><td class="num">${f.maximo}</td><td class="num">${f.mult>1 ? f.mult : '—'}</td><td class="num">${money(f.costo)}</td>
         <td>${g.key==='__sin' ? `<select class="pv-asignar" data-p="${f.productoId}" style="max-width:170px;">${opcionesProv}</select>` : pvEsc(f.origen)}</td>
-        <td class="num"><input type="number" class="pv-cant" data-v="${f.varianteId}" min="0" step="1" value="${f.cantPedir}" style="width:72px;text-align:right;"></td>
+        <td class="num"><input type="number" class="pv-cant" data-v="${f.varianteId}" min="0" step="${f.mult}" value="${f.cantPedir}" style="width:72px;text-align:right;"></td>
         <td class="num">${money(f.incluido ? f.totalPedir : 0)}</td></tr>`).join('')}
-      </tbody></table>`;
-  }).join('');
+      </tbody>`;
+  }).join('') + '</table>' : '';
+  pvAjustarAlto();
 }
+// El encabezado (filtros) y el pie (exportar/plantilla) quedan siempre a la vista: solo la lista
+// de artículos se desplaza, ocupando el alto disponible entre ambos.
+function pvAjustarAlto(){
+  const caja = $('pv-contenido'); if(!caja || !$('tab-pedidos') || $('tab-pedidos').style.display === 'none') return;
+  const arriba = caja.getBoundingClientRect().top + window.scrollY;
+  const alto = window.innerHeight - (caja.getBoundingClientRect().top) - $('pv-pie').offsetHeight - 24;
+  caja.style.maxHeight = Math.max(220, alto) + 'px';
+}
+window.addEventListener('resize', pvAjustarAlto);
+$('pv-ayuda').addEventListener('click', ()=>{ const t = $('pv-ayuda-texto'); t.style.display = t.style.display === 'none' ? 'block' : 'none'; pvAjustarAlto(); });
 ['pv-filtro-proveedor','pv-base','pv-con-impuestos'].forEach(id=> $(id).addEventListener('change', ()=>{ if(id==='pv-base') pv.cant.clear(); pvRender(); }));
 $('pv-buscar').addEventListener('input', pvRender);
 $('pv-contenido').addEventListener('change', async (e)=>{
@@ -4534,10 +4546,10 @@ $('pv-plantilla').addEventListener('click', ()=>{
   const vistos = new Set();
   const filas = state.productos.filter(p=>p.activo && p.codigoPrincipal && !vistos.has(p.productoId) && vistos.add(p.productoId))
     .map(p=>{ const [c,l] = nombreCat(p); const h = pv.hist.get(p.varianteId);
-      return [c, l, p.codigoPrincipal, p.nombreBase, p.marca, p.proveedorInicialId ? pvNombreProveedor(p.proveedorInicialId) : '', h ? pvNombreProveedor(h.proveedor_id) : ''];
+      return [c, l, p.codigoPrincipal, p.nombreBase, p.marca, p.proveedorInicialId ? pvNombreProveedor(p.proveedorInicialId) : '', p.multiploPedido || 1, h ? pvNombreProveedor(h.proveedor_id) : ''];
     }).sort((a,b)=>a[0].localeCompare(b[0],'es') || a[1].localeCompare(b[1],'es') || a[3].localeCompare(b[3],'es'));
-  const ws = XLSX.utils.aoa_to_sheet([['Categoría','Línea','Código de barras','Producto','Marca','Proveedor inicial','Proveedor por historial (solo informativo)'], ...filas]);
-  ws['!cols'] = [{wch:22},{wch:24},{wch:18},{wch:48},{wch:18},{wch:30},{wch:30}];
+  const ws = XLSX.utils.aoa_to_sheet([['Categoría','Línea','Código de barras','Producto','Marca','Proveedor inicial','Múltiplo de pedido','Proveedor por historial (solo informativo)'], ...filas]);
+  ws['!cols'] = [{wch:22},{wch:24},{wch:18},{wch:48},{wch:18},{wch:30},{wch:12},{wch:30}];
   const wsP = XLSX.utils.aoa_to_sheet([['Proveedores válidos'], ...state.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>[p.nombre])]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Proveedor inicial'); XLSX.utils.book_append_sheet(wb, wsP, 'Proveedores válidos');
@@ -4551,16 +4563,16 @@ $('pv-archivo').addEventListener('change', async (e)=>{
   try{
     const wb = XLSX.read(await archivo.arrayBuffer(), { type:'array' });
     const hoja = wb.Sheets['Proveedor inicial'] || wb.Sheets[wb.SheetNames[0]];
-    const filas = XLSX.utils.sheet_to_json(hoja, { defval:'' }).map(r=>({ codigo: String(r['Código de barras']||'').trim(), proveedor: String(r['Proveedor inicial']||'').trim() })).filter(r=>r.codigo && r.proveedor);
-    if(!filas.length){ out.innerHTML = '<div class="msg-error">No encontré renglones con "Código de barras" y "Proveedor inicial" llenos.</div>'; return; }
-    let ok = 0; const sinCod = [], sinProv = new Set();
+    const filas = XLSX.utils.sheet_to_json(hoja, { defval:'' }).map(r=>({ codigo: String(r['Código de barras']||'').trim(), proveedor: String(r['Proveedor inicial']||'').trim(), multiplo: String(r['Múltiplo de pedido']||'').trim() })).filter(r=>r.codigo && (r.proveedor || (r.multiplo && r.multiplo !== '1')));
+    if(!filas.length){ out.innerHTML = '<div class="msg-error">No encontré renglones con "Código de barras" y "Proveedor inicial" (o "Múltiplo de pedido" distinto de 1) llenos.</div>'; return; }
+    let ok = 0, okMult = 0; const sinCod = [], sinProv = new Set();
     for(let i=0; i<filas.length; i+=500){
       const { data, error } = await sb.rpc('importar_proveedor_inicial', { p_empresa_id: state.empresaId, p_filas: filas.slice(i, i+500) });
       if(error) throw error;
-      ok += data.actualizados; sinCod.push(...data.codigos_no_encontrados); data.proveedores_no_encontrados.forEach(x=>sinProv.add(x));
+      ok += data.actualizados; okMult += data.multiplos; sinCod.push(...data.codigos_no_encontrados); data.proveedores_no_encontrados.forEach(x=>sinProv.add(x));
     }
     await pvEntrar();
-    out.innerHTML = `<div class="msg-ok">Se asignó proveedor inicial a ${ok} artículo(s).</div>` +
+    out.innerHTML = `<div class="msg-ok">Proveedor inicial asignado a ${ok} artículo(s); múltiplo de pedido actualizado en ${okMult}.</div>` +
       (sinProv.size ? `<div class="msg-error">Proveedores que no existen (escríbelos igual que en el catálogo): ${pvEsc([...sinProv].join(', '))}</div>` : '') +
       (sinCod.length ? `<div class="msg-error">Códigos no encontrados (${sinCod.length}): ${pvEsc(sinCod.slice(0,15).join(', '))}${sinCod.length>15?'…':''}</div>` : '');
   }catch(err){ out.innerHTML = `<div class="msg-error">${pvEsc(err.message||String(err))}</div>`; }
@@ -4719,6 +4731,7 @@ function abrirProducto(varianteId){
   $('prod-clave-sat').value = p?.claveSat || '';
   $('prod-minimo').value = p?.minimo ?? 0;
   $('prod-dias-pedido').value = p?.diasSobrePedido ?? 3;
+  $('prod-multiplo').value = p?.multiploPedido ?? 1;
   $('prod-maximo').value = p?.maximo ?? 0;
   $('prod-inventariable').checked = p ? !!p.inventariable : true;
   $('prod-activo').checked = p ? !!p.activo : true;
@@ -4902,7 +4915,7 @@ function capturarEstadoFormulario(){
     claveSat: $('prod-clave-sat').value.trim(),
     impuestos: Array.from(document.querySelectorAll('#prod-impuestos .chk-impuesto:checked')).map(c=>c.value).sort(),
     codigos: leerCodigosBarra(),
-    minimo: $('prod-minimo').value, maximo: $('prod-maximo').value, diasPedido: $('prod-dias-pedido').value,
+    minimo: $('prod-minimo').value, maximo: $('prod-maximo').value, diasPedido: $('prod-dias-pedido').value, multiplo: $('prod-multiplo').value,
     cantidadInicial: $('prod-cant-inicial').value,
     inventariable: $('prod-inventariable').checked, activo: $('prod-activo').checked, activoReparto: $('prod-activo-reparto').checked,
     preciosDirectos: Array.from(document.querySelectorAll('#prod-precios .precio-sin')).map(el=>({ lista: el.dataset.lista, valor: el.value })),
@@ -5194,7 +5207,7 @@ async function guardarProducto(){
   }
   state.varianteEditId = data; // variante recién creada/editada — usado por el flujo de altas pendientes de XML
   { const { data: vv } = await sb.from('variantes').select('producto_id').eq('id', data).maybeSingle();
-    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked, lleva_serie: $('prod-lleva-serie').checked, dias_entrega_sobre_pedido: Math.max(0, parseInt($('prod-dias-pedido').value,10)||0) }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
+    if(vv?.producto_id){ const { error: eL } = await sb.from('productos').update({ controla_lote: $('prod-controla-lote').checked, lleva_serie: $('prod-lleva-serie').checked, dias_entrega_sobre_pedido: Math.max(0, parseInt($('prod-dias-pedido').value,10)||0), multiplo_pedido: Math.max(1, parseInt($('prod-multiplo').value,10)||1) }).eq('id', vv.producto_id); if(eL) console.error(eL); } }
   await cargarProductos();
   // El snapshot se actualiza para que formTieneCambios() ya no detecte estos cambios como pendientes
   // (relevante para el flujo de "Guardar y continuar" desde el modal de cambios sin guardar).
