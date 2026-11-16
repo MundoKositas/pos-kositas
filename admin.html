@@ -172,6 +172,7 @@
     <button class="tab-btn" data-tab="tab-actualizar-precios">Actualizar precios</button>
     <button class="tab-btn" data-tab="tab-reporte">Reporte de precios</button>
     <button class="tab-btn" data-tab="tab-reportes-ventas">Reportes</button>
+    <button class="tab-btn" data-tab="tab-cortes">Cortes</button>
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-reparto">Reparto</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
@@ -409,6 +410,45 @@
       <p class="nota">Personas que llenaron el formulario de ofertienda.mx o desdecasa.mx. Cambia el estado y anota el seguimiento; el botón de WhatsApp abre el chat con un mensaje listo.</p>
       <div id="sl-error"></div>
       <div id="sl-lista" style="overflow-x:auto;"></div>
+    </div>
+  </div>
+
+  <!-- TAB CORTES: cierre por sucursal (se genera solo al cerrar la última caja del día) y resumen por empresa -->
+  <div class="tab-panel" id="tab-cortes" style="display:none;">
+    <div class="tabs" style="margin-bottom:14px;">
+      <button type="button" class="tab-btn activo" data-cortestab="co-panel-empresa">Resumen por sucursal</button>
+      <button type="button" class="tab-btn" data-cortestab="co-panel-sucursal">Cierres diarios</button>
+    </div>
+    <div id="co-panel-empresa">
+      <div class="card">
+        <h2 style="margin-top:0;">Cortes por sucursal</h2>
+        <p class="nota">Ventas y efectivo de cada sucursal en el rango de fechas, con total general. Cada día cuenta por la fecha en que se abrió la caja. Por defecto muestra el día anterior.</p>
+        <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
+          <div><label>Desde</label><input type="date" id="co-emp-desde"></div>
+          <div><label>Hasta</label><input type="date" id="co-emp-hasta"></div>
+          <button type="button" class="btn-primario" id="co-emp-consultar">Consultar</button>
+          <select id="co-emp-formato"><option value="xlsx">Excel</option><option value="pdf">PDF</option></select>
+          <button type="button" class="btn-gris" id="co-emp-exportar">Exportar</button>
+        </div>
+        <div id="co-emp-error"></div>
+        <div id="co-emp-tabla" style="overflow-x:auto;margin-top:12px;"></div>
+      </div>
+    </div>
+    <div id="co-panel-sucursal" style="display:none;">
+      <div class="card">
+        <h2 style="margin-top:0;">Cierres diarios de la sucursal</h2>
+        <p class="nota">El cierre se genera solo cuando se cierra la última caja del día. Si hay diferencia, abre el detalle para ver las pistas y registrar cómo se resolvió.</p>
+        <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
+          <div><label>Sucursal</label><select id="co-suc-sucursal"></select></div>
+          <div><label>Desde</label><input type="date" id="co-suc-desde"></div>
+          <div><label>Hasta</label><input type="date" id="co-suc-hasta"></div>
+          <button type="button" class="btn-primario" id="co-suc-consultar">Consultar</button>
+          <select id="co-suc-formato"><option value="xlsx">Excel</option><option value="pdf">PDF</option></select>
+          <button type="button" class="btn-gris" id="co-suc-exportar">Exportar</button>
+        </div>
+        <div id="co-suc-error"></div>
+        <div id="co-suc-tabla" style="overflow-x:auto;margin-top:12px;"></div>
+      </div>
     </div>
   </div>
 
@@ -1191,6 +1231,16 @@
 </div>
 
 <!-- MODAL: catálogo simple (Marcas/Categorías/Líneas/Unidades/Impuestos/Formas de pago/Condiciones de pago — Ronda 30) -->
+<div class="modal-fondo" id="modal-cierre">
+  <div class="modal" style="max-width:860px;width:96vw;max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <h2 style="margin:0;" id="cierre-titulo">Cierre</h2>
+      <button type="button" class="btn-gris" id="cierre-cerrar">Cerrar</button>
+    </div>
+    <div id="cierre-contenido" style="margin-top:12px;"></div>
+  </div>
+</div>
+
 <div class="modal-fondo" id="modal-empresa">
   <div class="modal" style="max-width:640px;width:96vw;max-height:92vh;overflow:auto;">
     <h2 id="em-titulo">Nueva empresa</h2>
@@ -2122,7 +2172,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.39.002';
+const APP_VERSION = '1.40.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2842,6 +2892,161 @@ function aplicarModulosEnMenus(){
   }
 }
 const emEsc = s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+// ---------- CORTES: resumen por sucursal (empresa) y cierres diarios (sucursal) ----------
+// El cierre de sucursal lo genera la base de datos sola (trigger sobre sesiones_caja) cuando se cierra la
+// última caja del día. Diferencia = efectivo contado − esperado (negativa = faltante, positiva = sobrante).
+const CO_CAUSAS = ['Error de cambio al cliente', 'Error de captura (venta o forma de pago)', 'Gasto o retiro no registrado', 'Fondo inicial mal capturado', 'Venta cancelada con efectivo ya cobrado', 'Faltante sin identificar', 'Sobrante sin identificar', 'Otra'];
+const CO_RESOLUCIONES = ['Aclarada, sin ajuste necesario', 'Se corrigió el registro', 'Faltante cubierto por el cajero', 'Faltante absorbido por la tienda', 'Sobrante registrado como ingreso de la tienda'];
+const coAyer = ()=> fechaLocalISO(new Date(Date.now() - 86400000));
+const coDif = n => { n = Number(n)||0; return `<span style="color:${n===0?'inherit':(n<0?'#b3261e':'#b26a00')};font-weight:${n===0?400:700};">${n>0?'+':''}${money(n)}</span>`; };
+function coInicializar(){
+  ['co-emp-desde','co-emp-hasta','co-suc-desde','co-suc-hasta'].forEach(id=>{ if(!$(id).value) $(id).value = coAyer(); });
+  const sel = $('co-suc-sucursal'), previo = sel.value;
+  sel.innerHTML = (state.sucursales||[]).map(s=>`<option value="${s.id}">${emEsc(s.nombre)}</option>`).join('');
+  if(previo && [...sel.options].some(o=>o.value===previo)) sel.value = previo;
+  coEmpresaCargar();
+}
+document.querySelectorAll('[data-cortestab]').forEach(b=>b.addEventListener('click', ()=>{
+  document.querySelectorAll('[data-cortestab]').forEach(x=>x.classList.toggle('activo', x===b));
+  ['co-panel-empresa','co-panel-sucursal'].forEach(id=>{ $(id).style.display = id===b.dataset.cortestab ? 'block' : 'none'; });
+  if(b.dataset.cortestab === 'co-panel-sucursal') coSucursalCargar();
+}));
+const coEstadoTag = (estado, dif, resuelta)=>{
+  if(estado === 'pendiente') return '<span class="tag tag-bajo">Caja abierta</span>';
+  if(Number(dif) === 0) return '<span class="tag tag-ok">Cuadrado</span>';
+  return resuelta ? '<span class="tag tag-ok">Resuelta</span>' : '<span class="tag tag-off">Diferencia por resolver</span>';
+};
+// ---- Resumen por sucursal (nivel empresa) ----
+async function coEmpresaCargar(){
+  $('co-emp-error').innerHTML = '';
+  const desde = $('co-emp-desde').value, hasta = $('co-emp-hasta').value;
+  if(!desde || !hasta || desde > hasta){ $('co-emp-error').innerHTML = '<div class="msg-error">Revisa el rango de fechas.</div>'; return; }
+  $('co-emp-tabla').innerHTML = '<p class="nota">Cargando…</p>';
+  const { data, error } = await sb.rpc('rep_cierres_empresa', { p_empresa_id: state.empresaId, p_desde: desde, p_hasta: hasta });
+  if(error){ $('co-emp-tabla').innerHTML = ''; $('co-emp-error').innerHTML = `<div class="msg-error">${emEsc(error.message)}</div>`; return; }
+  state.coEmp = data;
+  const formas = data.formas || [], suc = data.sucursales || [];
+  if(!suc.length){ $('co-emp-tabla').innerHTML = '<p class="nota">No hay movimientos en este rango.</p>'; return; }
+  const filas = coEmpFilas();
+  $('co-emp-tabla').innerHTML = '<table><thead><tr>' + filas.encabezados.map((h,i)=>`<th class="${i>0?'num':''}">${emEsc(h)}</th>`).join('') + '<th></th></tr></thead><tbody>'
+    + suc.map((s,i)=>`<tr><td><b>${emEsc(s.nombre)}</b>${s.pendientes?` <span class="tag tag-bajo">${s.pendientes} sin cerrar</span>`:''}${s.dif_sin_resolver?` <span class="tag tag-off">${s.dif_sin_resolver} dif. por resolver</span>`:''}</td>${filas.cuerpo[i].slice(1).map((v,j)=>`<td class="num">${filas.formatos[j+1](v)}</td>`).join('')}<td><button type="button" class="btn-gris" data-co-ver="${s.sucursal_id}">Ver días</button></td></tr>`).join('')
+    + `<tr style="font-weight:700;background:#eef1f5;"><td>TOTAL GENERAL</td>${filas.total.slice(1).map((v,j)=>`<td class="num">${filas.formatos[j+1](v)}</td>`).join('')}<td></td></tr></tbody></table>`;
+  document.querySelectorAll('[data-co-ver]').forEach(b=>b.addEventListener('click', ()=>{
+    $('co-suc-sucursal').value = b.dataset.coVer; $('co-suc-desde').value = desde; $('co-suc-hasta').value = hasta;
+    document.querySelector('[data-cortestab="co-panel-sucursal"]').click();
+  }));
+}
+// Columnas: Sucursal | Días | # Ventas | Ventas | A crédito | (una por forma de pago) | Efectivo esperado | Efectivo contado | Diferencia | Depositado
+function coEmpFilas(){
+  const d = state.coEmp || { formas: [], sucursales: [] }, formas = d.formas || [];
+  const encabezados = ['Sucursal', 'Días', 'Núm. ventas', 'Ventas', 'A crédito', ...formas.map(f=>'Cobrado en ' + f), 'Efectivo esperado', 'Efectivo contado', 'Diferencia', 'Depositado'];
+  const fila = s=>[s.nombre, s.dias, s.num_ventas, Number(s.ventas_total), Number(s.credito), ...formas.map(f=>Number((s.pagos||{})[f])||0), Number(s.esperado), Number(s.contado), Number(s.diferencia), Number(s.depositado)];
+  const cuerpo = d.sucursales.map(fila);
+  const total = encabezados.map((_,i)=> i===0 ? 'TOTAL GENERAL' : redondear2(cuerpo.reduce((s,f)=>s+(Number(f[i])||0),0)));
+  const monto = v=>money(v), entero = v=>String(v);
+  const formatos = encabezados.map((_,i)=> i===0 ? (v=>emEsc(v)) : (i<=2 ? entero : (i===encabezados.length-2 ? (v=>coDif(v)) : monto)));
+  return { encabezados, cuerpo, total, formatos };
+}
+$('co-emp-consultar').addEventListener('click', coEmpresaCargar);
+$('co-emp-exportar').addEventListener('click', async ()=>{
+  if(!state.coEmp || !(state.coEmp.sucursales||[]).length){ $('co-emp-error').innerHTML = '<div class="msg-error">Primero consulta un rango con datos.</div>'; return; }
+  const f = coEmpFilas(), rango = `${$('co-emp-desde').value} a ${$('co-emp-hasta').value}`;
+  const filas = [...f.cuerpo, f.total], tipos = [...f.cuerpo.map(()=>'producto'), 'total'];
+  const monedas = f.encabezados.map((_,i)=>i).filter(i=>i>=3);
+  if($('co-emp-formato').value === 'pdf') await exportarPDFAgrupado(`cortes_sucursales_${$('co-emp-desde').value}_${$('co-emp-hasta').value}.pdf`, `Cortes por sucursal — ${state.empresaNombre||''}`, `Del ${rango} — generado ${new Date().toLocaleString('es-MX')}`, f.encabezados, filas, tipos, monedas, monedas.concat([1,2]));
+  else exportarExcelAgrupado(`cortes_sucursales_${$('co-emp-desde').value}_${$('co-emp-hasta').value}.xlsx`, 'Cortes por sucursal', f.encabezados, filas, tipos, monedas);
+});
+// ---- Cierres diarios de una sucursal ----
+async function coSucursalCargar(){
+  $('co-suc-error').innerHTML = '';
+  const suc = $('co-suc-sucursal').value, desde = $('co-suc-desde').value, hasta = $('co-suc-hasta').value;
+  if(!suc || !desde || !hasta || desde > hasta){ $('co-suc-error').innerHTML = '<div class="msg-error">Elige sucursal y revisa el rango de fechas.</div>'; return; }
+  $('co-suc-tabla').innerHTML = '<p class="nota">Cargando…</p>';
+  const { data, error } = await sb.rpc('rep_cierres_sucursal_dias', { p_sucursal_id: suc, p_desde: desde, p_hasta: hasta });
+  if(error){ $('co-suc-tabla').innerHTML = ''; $('co-suc-error').innerHTML = `<div class="msg-error">${emEsc(error.message)}</div>`; return; }
+  state.coSuc = data;
+  const dias = data.dias || [], formas = data.formas || [];
+  if(!dias.length){ $('co-suc-tabla').innerHTML = '<p class="nota">No hay cierres en este rango.</p>'; return; }
+  const f = coSucFilas();
+  $('co-suc-tabla').innerHTML = '<table><thead><tr><th>Fecha</th><th>Estado</th>' + f.encabezados.slice(1).map(h=>`<th class="num">${emEsc(h)}</th>`).join('') + '<th></th></tr></thead><tbody>'
+    + dias.map((d,i)=>`<tr><td>${emEsc(d.fecha)}</td><td>${coEstadoTag(d.estado, d.diferencia, d.resuelta_en)}</td>${f.cuerpo[i].slice(1).map((v,j)=>`<td class="num">${f.formatos[j+1](v)}</td>`).join('')}<td><button type="button" class="btn-gris" data-co-det="${d.cierre_id}">Detalle</button></td></tr>`).join('')
+    + `<tr style="font-weight:700;background:#eef1f5;"><td>TOTAL</td><td></td>${f.total.slice(1).map((v,j)=>`<td class="num">${f.formatos[j+1](v)}</td>`).join('')}<td></td></tr></tbody></table>`;
+  document.querySelectorAll('[data-co-det]').forEach(b=>b.addEventListener('click', ()=>coAbrirCierre(b.dataset.coDet)));
+}
+function coSucFilas(){
+  const d = state.coSuc || { formas: [], dias: [] }, formas = d.formas || [];
+  const encabezados = ['Fecha', 'Cajas', 'Núm. ventas', 'Ventas', 'A crédito', ...formas.map(x=>'Cobrado en ' + x), 'Efectivo esperado', 'Efectivo contado', 'Diferencia', 'Depositado', 'Resolución'];
+  const fila = x=>[x.fecha, x.num_cajas, x.num_ventas, Number(x.ventas_total), Number(x.credito), ...formas.map(fp=>Number((x.pagos||{})[fp])||0), Number(x.esperado), Number(x.contado), Number(x.diferencia), Number(x.depositado), x.estado==='pendiente' ? 'Caja abierta' : (Number(x.diferencia)===0 ? 'Cuadrado' : (x.resuelta_en ? 'Resuelta: ' + (x.resolucion||'') : 'Por resolver'))];
+  const cuerpo = d.dias.map(fila);
+  const nNum = encabezados.length - 1; // la última columna es texto
+  const total = encabezados.map((_,i)=> i===0 ? 'TOTAL' : (i===nNum ? '' : redondear2(cuerpo.reduce((s,r)=>s+(Number(r[i])||0),0))));
+  const formatos = encabezados.map((_,i)=> i===0 ? (v=>emEsc(v)) : (i<=2 ? (v=>String(v)) : (i===nNum ? (v=>emEsc(v)) : (i===nNum-2 ? (v=>coDif(v)) : (v=>money(v))))));
+  return { encabezados, cuerpo, total, formatos };
+}
+$('co-suc-consultar').addEventListener('click', coSucursalCargar);
+$('co-suc-sucursal').addEventListener('change', coSucursalCargar);
+$('co-suc-exportar').addEventListener('click', async ()=>{
+  if(!state.coSuc || !(state.coSuc.dias||[]).length){ $('co-suc-error').innerHTML = '<div class="msg-error">Primero consulta un rango con datos.</div>'; return; }
+  const f = coSucFilas(), nom = $('co-suc-sucursal').selectedOptions[0]?.textContent || '', rango = `${$('co-suc-desde').value} a ${$('co-suc-hasta').value}`;
+  const filas = [...f.cuerpo, f.total], tipos = [...f.cuerpo.map(()=>'producto'), 'total'];
+  const monedas = f.encabezados.map((_,i)=>i).filter(i=>i>=3 && i<f.encabezados.length-1);
+  const nombre = `cierres_${nom.replace(/[^A-Za-z0-9]+/g,'_')}_${$('co-suc-desde').value}_${$('co-suc-hasta').value}`;
+  if($('co-suc-formato').value === 'pdf') await exportarPDFAgrupado(`${nombre}.pdf`, `Cierres diarios — ${nom}`, `${state.empresaNombre||''} — del ${rango} — generado ${new Date().toLocaleString('es-MX')}`, f.encabezados, filas, tipos, monedas, monedas.concat([1,2]));
+  else exportarExcelAgrupado(`${nombre}.xlsx`, 'Cierres diarios', f.encabezados, filas, tipos, monedas);
+});
+// ---- Detalle de un cierre: cajas, movimientos, pistas y resolución de diferencia ----
+async function coAbrirCierre(cierreId){
+  $('cierre-contenido').innerHTML = '<p class="nota">Cargando…</p>'; $('modal-cierre').classList.add('activo');
+  try{
+    const { data: cs, error: e0 } = await sb.from('cierres_sucursal').select('*').eq('id', cierreId).single(); if(e0) throw e0;
+    const { data: ses, error: e1 } = await sb.from('sesiones_caja').select('id, caja_id, usuario_id, fondo_inicial, fecha_apertura, fecha_cierre, efectivo_esperado, efectivo_contado, diferencia, estado, observaciones, cajas(nombre, numero)').eq('cierre_sucursal_id', cierreId).order('fecha_apertura'); if(e1) throw e1;
+    const ids = (ses||[]).map(s=>s.id);
+    const [{ data: movs }, { data: vts }, { data: usus }] = await Promise.all([
+      ids.length ? sb.from('caja_movimientos').select('*').in('sesion_caja_id', ids).order('fecha_hora') : { data: [] },
+      ids.length ? sb.from('ventas').select('folio, total, estado, tipo_venta, fecha_hora, sesion_caja_id').in('sesion_caja_id', ids).limit(5000) : { data: [] },
+      sb.from('usuarios').select('id, nombre'),
+    ]);
+    const nomU = id => (usus||[]).find(u=>u.id===id)?.nombre || '—';
+    const dif = Number(cs.diferencia)||0, suc = (state.sucursales||[]).find(s=>s.id===cs.sucursal_id)?.nombre || '';
+    $('cierre-titulo').textContent = `Cierre ${cs.fecha} — ${suc}`;
+    const hora = t=> t ? new Date(t).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}) : '—';
+    const abiertas = (ses||[]).filter(s=>s.estado!=='cerrada');
+    let h = '';
+    if(cs.estado === 'pendiente') h += `<div class="msg-error">Este cierre sigue pendiente: hay caja(s) abierta(s) (${abiertas.map(s=>emEsc('Caja ' + (s.cajas?.nombre || s.cajas?.numero || '') + ' — ' + nomU(s.usuario_id))).join(', ')}). Se completa solo cuando se cierren.</div>`;
+    h += `<div class="fila" style="gap:18px;flex-wrap:wrap;margin:8px 0;"><div><span class="nota">Ventas</span><br><b>${money(cs.ventas_total)}</b> (${cs.num_ventas})</div><div><span class="nota">Efectivo esperado</span><br><b>${money(cs.efectivo_esperado_total)}</b></div><div><span class="nota">Efectivo contado</span><br><b>${money(cs.efectivo_contado_total)}</b></div><div><span class="nota">Diferencia</span><br><b>${coDif(dif)}</b></div></div>`;
+    h += '<h3 style="margin:14px 0 6px;">Cajas del día</h3><div style="overflow-x:auto;"><table><thead><tr><th>Caja</th><th>Cajero</th><th>Apertura</th><th>Cierre</th><th class="num">Fondo</th><th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th></tr></thead><tbody>'
+      + (ses||[]).map(s=>`<tr><td>${emEsc(s.cajas?.nombre || s.cajas?.numero || '')}</td><td>${emEsc(nomU(s.usuario_id))}</td><td>${hora(s.fecha_apertura)}</td><td>${s.estado==='cerrada'?hora(s.fecha_cierre):'<span class="tag tag-bajo">Abierta</span>'}</td><td class="num">${money(s.fondo_inicial)}</td><td class="num">${s.estado==='cerrada'?money(s.efectivo_esperado):'—'}</td><td class="num">${s.estado==='cerrada'?money(s.efectivo_contado):'—'}</td><td class="num">${s.estado==='cerrada'?coDif(s.diferencia):'—'}</td></tr>${s.observaciones?`<tr><td colspan="8" class="nota">Observaciones: ${emEsc(s.observaciones)}</td></tr>`:''}`).join('') + '</tbody></table></div>';
+    h += '<h3 style="margin:14px 0 6px;">Entradas y salidas de efectivo</h3>' + ((movs||[]).length ? '<div style="overflow-x:auto;"><table><thead><tr><th>Hora</th><th>Tipo</th><th class="num">Monto</th><th>Motivo</th><th>Usuario</th></tr></thead><tbody>' + movs.map(m=>`<tr><td>${hora(m.fecha_hora)}</td><td>${emEsc(m.tipo)}</td><td class="num">${money(m.monto)}</td><td style="white-space:normal;">${emEsc(m.motivo||'')}</td><td>${emEsc(nomU(m.usuario_id))}</td></tr>`).join('') + '</tbody></table></div>' : '<p class="nota">Sin entradas ni salidas registradas.</p>');
+    if(dif !== 0 && cs.estado === 'cerrado'){
+      const pistas = [], abs = Math.abs(dif), canc = (vts||[]).filter(v=>v.estado==='cancelada');
+      (movs||[]).filter(m=>Math.abs(Number(m.monto)-abs) < 0.01).forEach(m=>pistas.push(`Coincide con un movimiento de caja de ${money(m.monto)} (${emEsc(m.tipo)}${m.motivo?': '+emEsc(m.motivo):''}): revisa si se registró en el sentido correcto.`));
+      (vts||[]).filter(v=>v.estado!=='cancelada' && Math.abs(Number(v.total)-abs) < 0.01).forEach(v=>pistas.push(`Coincide con el total de la venta folio ${emEsc(v.folio)} (${money(v.total)}): revisa si se cobró de más, de menos o quedó duplicada.`));
+      if(canc.length) pistas.push(`Hay ${canc.length} venta(s) cancelada(s) (${money(canc.reduce((s,v)=>s+Number(v.total),0))}): si se canceló después de cobrar, el efectivo debió devolverse al cliente.`);
+      if(abs <= 20) pistas.push('Diferencias pequeñas suelen ser cambio mal dado o monedas mal contadas.');
+      if(abs >= 20 && abs % 20 === 0) pistas.push('El monto es múltiplo de $20: puede ser un billete mal contado o entregado de más como cambio.');
+      if(dif < 0) pistas.push('Faltante: revisa gastos o retiros sin registrar, cambios mal dados, y que el fondo inicial capturado sea el correcto.');
+      else pistas.push('Sobrante: revisa ventas o abonos de clientes cobrados y no registrados, y que el fondo inicial capturado sea el correcto.');
+      h += `<div style="margin-top:16px;padding:14px;border:1px solid var(--borde);border-radius:10px;background:#fffdf5;"><h3 style="margin:0 0 6px;">${dif<0?'Faltante':'Sobrante'} de ${money(abs)} — cómo resolverlo</h3>
+        <p class="nota" style="margin:0 0 6px;">Pasos sugeridos: 1) revisa las pistas, 2) confirma con el cajero, 3) corrige el registro si hubo error, 4) documenta la causa y la resolución. Mientras no se documente, la diferencia aparece "por resolver" en el reporte.</p>
+        <ul style="margin:0 0 10px;padding-left:18px;color:var(--gris);">${pistas.map(p=>`<li>${p}</li>`).join('')}</ul>
+        <div class="grid-2"><div class="campo"><label>Causa</label><select id="cierre-causa"><option value="">Selecciona…</option>${CO_CAUSAS.map(c=>`<option ${cs.causa===c?'selected':''}>${emEsc(c)}</option>`).join('')}</select></div>
+        <div class="campo"><label>Resolución</label><select id="cierre-resolucion"><option value="">Selecciona…</option>${CO_RESOLUCIONES.map(c=>`<option ${cs.resolucion===c?'selected':''}>${emEsc(c)}</option>`).join('')}</select></div></div>
+        <div class="campo"><label>Notas</label><textarea id="cierre-notas" rows="2" style="width:100%;">${emEsc(cs.notas_resolucion||'')}</textarea></div>
+        ${cs.resuelta_en?`<p class="nota">Resuelta el ${new Date(cs.resuelta_en).toLocaleString('es-MX')}.</p>`:''}</div>`;
+    }
+    h += `<div class="grid-2" style="margin-top:14px;"><div class="campo"><label>Monto depositado / entregado (opcional)</label><input type="number" id="cierre-deposito" step="0.01" min="0" value="${cs.monto_depositado!=null && Number(cs.monto_depositado)>0 ? cs.monto_depositado : ''}"></div></div>
+      <div class="fila" style="gap:8px;margin-top:8px;"><button type="button" class="btn-primario" id="cierre-guardar">Guardar</button><span id="cierre-msg"></span></div>`;
+    $('cierre-contenido').innerHTML = h;
+    $('cierre-guardar').addEventListener('click', async ()=>{
+      const dep = $('cierre-deposito').value;
+      const { error } = await sb.rpc('resolver_cierre_sucursal', { p_cierre_id: cierreId, p_causa: $('cierre-causa')?.value || '', p_resolucion: $('cierre-resolucion')?.value || '', p_notas: $('cierre-notas')?.value || '', p_monto_depositado: dep === '' ? null : Number(dep) });
+      if(error){ $('cierre-msg').innerHTML = `<span class="msg-error">${emEsc(error.message)}</span>`; return; }
+      $('modal-cierre').classList.remove('activo'); coSucursalCargar();
+    });
+  }catch(err){ $('cierre-contenido').innerHTML = `<div class="msg-error">${emEsc(err.message||String(err))}</div>`; }
+}
+$('cierre-cerrar').addEventListener('click', ()=> $('modal-cierre').classList.remove('activo'));
+
 // ---------- SOLICITUDES DE INFORMACIÓN (formulario de la página de plataforma; solo Super Admin) ----------
 const SL_ESTADOS = [['nuevo','Nuevo'],['contactado','Contactado'],['cita','Cita agendada'],['cliente','Cliente'],['descartado','Descartado']];
 state.solicitudes = [];
@@ -3010,6 +3215,7 @@ document.querySelectorAll('#pantalla-admin > .tabs > .tab-btn').forEach(btn=>{
     if(btn.dataset.tab === 'tab-compras') prepararPantallaCompras();
     if(btn.dataset.tab === 'tab-inventario') prepararPantallaInventario();
     if(btn.dataset.tab === 'tab-pedidos') pvEntrar();
+    if(btn.dataset.tab === 'tab-cortes') coInicializar();
     // Ronda 22, ajuste: Clientes se cargaba solo una vez al iniciar sesión — si se registraba una
     // venta a crédito o un abono desde el POS (otra pestaña/sesión), el saldo se veía desactualizado
     // hasta recargar el navegador. Ahora se refresca cada vez que se entra a la pestaña.
