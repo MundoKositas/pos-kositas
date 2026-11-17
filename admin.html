@@ -2172,7 +2172,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.40.001';
+const APP_VERSION = '1.40.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4869,7 +4869,7 @@ $('prod-extra-archivo').addEventListener('change', async e=>{
   const file = e.target.files[0]; if(!file || !state.productoEditId) return;
   if((state.extraImgs||[]).length >= 4){ $('prod-extra-estado').textContent = 'Máximo 4 imágenes adicionales.'; return; }
   $('prod-extra-estado').textContent = 'Subiendo…';
-  const nombre = `extra-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const nombre = `${prefijoStorage()}extra-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
   const up = await sb.storage.from('productos').upload(nombre, file, { upsert:true });
   if(up.error){ $('prod-extra-estado').textContent = 'Error al subir: ' + up.error.message; return; }
   const { data: pub } = sb.storage.from('productos').getPublicUrl(nombre);
@@ -4880,6 +4880,10 @@ $('prod-extra-archivo').addEventListener('change', async e=>{
   await extraCargar();
 });
 
+// Imágenes nuevas: Mundo Kositas conserva la raíz del bucket (así estaban sus archivos); cada otra empresa
+// guarda las suyas en su propia carpeta ({empresa_id}/…). Así "Imágenes huérfanas" muestra solo las de la empresa activa.
+function prefijoStorage(){ return state.empresaId === EMPRESA_ORIGINAL ? '' : state.empresaId + '/'; }
+
 // ---------- MODAL PRODUCTO ----------
 $('btn-nuevo-producto').addEventListener('click', ()=>abrirProducto(null));
 
@@ -4887,7 +4891,7 @@ $('prod-imagen-archivo').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
   $('prod-imagen-estado').textContent = 'Subiendo imagen…';
-  const nombreArchivo = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const nombreArchivo = `${prefijoStorage()}${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
   const { error } = await sb.storage.from('productos').upload(nombreArchivo, file, { upsert: true });
   if(error){
     $('prod-imagen-estado').textContent = `Error al subir la imagen: ${error.message}`;
@@ -5109,7 +5113,7 @@ function pintarFotoVariante(){
 $('prod-foto-var-archivo').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
   $('prod-foto-var-estado').textContent = 'Subiendo foto…';
-  const nombreArchivo = `var-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const nombreArchivo = `${prefijoStorage()}var-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
   const { error } = await sb.storage.from('productos').upload(nombreArchivo, file, { upsert: true });
   if(error){ $('prod-foto-var-estado').textContent = `Error al subir la foto: ${error.message}`; return; }
   state.varImgNueva = sb.storage.from('productos').getPublicUrl(nombreArchivo).data.publicUrl;
@@ -8845,7 +8849,7 @@ $('cfg-modal-campos').addEventListener('change', async (e)=>{
   est.textContent = 'Subiendo imagen…';
   try{
     const blob = await reducirImagenABlob(file);
-    const nombre = `cat-${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+    const nombre = `${prefijoStorage()}cat-${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
     const { error } = await sb.storage.from('productos').upload(nombre, blob, { upsert: true, contentType: 'image/jpeg' });
     if(error) throw error;
     const { data } = sb.storage.from('productos').getPublicUrl(nombre);
@@ -9389,32 +9393,23 @@ $('img-huerfanas-buscar').addEventListener('click', async ()=>{
   $('img-huerfanas-estado').textContent = 'Buscando…';
   $('img-huerfanas-lista').innerHTML = '';
   $('img-huerfanas-acciones').style.display = 'none';
-  // Referencias: TODAS las columnas que apuntan al bucket (productos, fotos de variantes/modelos, fotos
-  // adicionales, portadas de categorías y de líneas) de TODAS las empresas — así una foto en uso por
-  // cualquier empresa nunca se marca como huérfana. Con RLS, un usuario normal solo ve las suyas.
-  const [{ data: archivos, error: errStorage }, { data: productosTodos, error: errProd }, rVar, rExtra, rCat, rLin] = await Promise.all([
-    sb.storage.from('productos').list('', { limit: 1000, sortBy: { column: 'name', order: 'asc' } }),
-    sb.from('productos').select('imagen_url'),
-    sb.from('variantes').select('imagen_url').not('imagen_url', 'is', null),
-    sb.from('producto_imagenes').select('url'),
-    sb.from('categorias').select('imagen_url').not('imagen_url', 'is', null),
-    sb.from('lineas_articulo').select('imagen_url').not('imagen_url', 'is', null),
+  // Solo se listan los archivos de la empresa activa: la raíz del bucket para Mundo Kositas (donde siempre
+  // estuvieron) o su carpeta {empresa_id}/ para las demás. "En uso" se calcula en la base de datos con TODAS las
+  // tablas que usan imágenes (productos, modelos, fotos extra, categorías y líneas) de TODAS las empresas,
+  // sin el tope de 1000 filas — así una foto en uso nunca se marca como huérfana.
+  const pref = prefijoStorage();
+  const [{ data: archivos, error: errStorage }, { data: enUso, error: errUso }] = await Promise.all([
+    sb.storage.from('productos').list(pref.replace(/\/$/, ''), { limit: 1000, sortBy: { column: 'name', order: 'asc' } }),
+    sb.rpc('imagenes_en_uso'),
   ]);
-  const errRef = rVar.error || rExtra.error || rCat.error || rLin.error;
-  if(errRef){ $('img-huerfanas-estado').textContent = `Error al leer referencias de imágenes: ${errRef.message}`; return; }
   if(errStorage){ $('img-huerfanas-estado').textContent = `Error al leer Storage: ${errStorage.message}`; return; }
-  if(errProd){ $('img-huerfanas-estado').textContent = `Error al leer productos: ${errProd.message}`; return; }
-  const referenciados = new Set([
-    ...(productosTodos || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
-    ...(rVar.data || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
-    ...(rExtra.data || []).map(p=>nombreArchivoDesdeUrl(p.url)),
-    ...(rCat.data || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
-    ...(rLin.data || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
-  ].filter(Boolean));
-  const huerfanas = (archivos || []).filter(a=>a.id && !referenciados.has(a.name)); // a.id null = "carpeta", se ignora
+  if(errUso){ $('img-huerfanas-estado').textContent = `Error al leer las imágenes en uso: ${errUso.message}`; return; }
+  const decod = t=>{ try{ return decodeURIComponent(t); }catch(e){ return t; } };
+  const referenciados = new Set((enUso || []).map(decod));
+  const huerfanas = (archivos || []).filter(a=>a.id && !referenciados.has(pref + a.name)).map(a=>({ ...a, ruta: pref + a.name })); // a.id null = "carpeta", se ignora
   state.imagenesHuerfanas = huerfanas;
   if((archivos || []).length >= 1000){
-    $('img-huerfanas-estado').textContent = 'Aviso: hay 1000 o más archivos en el bucket — puede que existan más huérfanas de las que se alcanzan a listar aquí de una vez.';
+    $('img-huerfanas-estado').textContent = 'Aviso: hay 1000 o más archivos en esta ubicación — puede que existan más huérfanas de las que se alcanzan a listar aquí de una vez.';
   } else {
     $('img-huerfanas-estado').textContent = '';
   }
@@ -9426,9 +9421,9 @@ $('img-huerfanas-buscar').addEventListener('click', async ()=>{
   const baseUrl = pub0.publicUrl;
   $('img-huerfanas-lista').innerHTML = huerfanas.map(a=>`
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;cursor:pointer;">
-      <img src="${baseUrl}${encodeURIComponent(a.name)}" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd;">
+      <img src="${baseUrl}${a.ruta.split('/').map(encodeURIComponent).join('/')}" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd;">
       <span style="word-break:break-all;">${a.name}</span>
-      <span style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="img-huerfana-check" value="${a.name}" style="width:auto;"> Marcar</span>
+      <span style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="img-huerfana-check" value="${a.ruta}" style="width:auto;"> Marcar</span>
     </label>
   `).join('');
   $('img-huerfanas-estado').textContent = `${huerfanas.length} imagen(es) huérfana(s) encontrada(s).`;
