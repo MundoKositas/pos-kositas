@@ -2172,7 +2172,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.40.003';
+const APP_VERSION = '1.40.004';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -9396,12 +9396,33 @@ $('img-huerfanas-buscar').addEventListener('click', async ()=>{
   // Solo se listan los archivos de la empresa activa: la raíz del bucket para Mundo Kositas (donde siempre
   // estuvieron) o su carpeta {empresa_id}/ para las demás. "En uso" se calcula en la base de datos con TODAS las
   // tablas que usan imágenes (productos, modelos, fotos extra, categorías y líneas) de TODAS las empresas,
-  // sin el tope de 1000 filas — así una foto en uso nunca se marca como huérfana.
+  // con paginación (sin el tope de 1000 filas) — así una foto en uso nunca se marca como huérfana.
   const pref = prefijoStorage();
+  // PostgREST corta cualquier respuesta a 1000 filas: se pide por páginas hasta traerlo todo.
+  const rpcTodo = async (fn, args)=>{
+    let todo = [];
+    for(let desde = 0; ; desde += 1000){
+      const { data, error } = await sb.rpc(fn, args || {}).range(desde, desde + 999);
+      if(error) return { data: null, error };
+      todo = todo.concat(data || []);
+      if(!data || data.length < 1000) break;
+    }
+    return { data: todo, error: null };
+  };
+  const listarTodo = async ()=>{
+    let todo = [];
+    for(let offset = 0; ; offset += 1000){
+      const { data, error } = await sb.storage.from('productos').list(pref.replace(/\/$/, ''), { limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } });
+      if(error) return { data: null, error };
+      todo = todo.concat(data || []);
+      if(!data || data.length < 1000) break;
+    }
+    return { data: todo, error: null };
+  };
   const [{ data: archivos, error: errStorage }, { data: enUso, error: errUso }, { data: deOtra }] = await Promise.all([
-    sb.storage.from('productos').list(pref.replace(/\/$/, ''), { limit: 1000, sortBy: { column: 'name', order: 'asc' } }),
-    sb.rpc('imagenes_en_uso'),
-    sb.rpc('archivos_otra_empresa', { p_empresa_id: state.empresaId }), // subidos por usuarios de otra empresa (Storage guarda quién los subió)
+    listarTodo(),
+    rpcTodo('imagenes_en_uso'),
+    rpcTodo('archivos_otra_empresa', { p_empresa_id: state.empresaId }), // subidos por usuarios de otra empresa (Storage guarda quién los subió)
   ]);
   if(errStorage){ $('img-huerfanas-estado').textContent = `Error al leer Storage: ${errStorage.message}`; return; }
   if(errUso){ $('img-huerfanas-estado').textContent = `Error al leer las imágenes en uso: ${errUso.message}`; return; }
@@ -9428,7 +9449,7 @@ $('img-huerfanas-buscar').addEventListener('click', async ()=>{
       <span style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="img-huerfana-check" value="${a.ruta}" style="width:auto;"> Marcar</span>
     </label>
   `).join('');
-  $('img-huerfanas-estado').textContent = `${huerfanas.length} imagen(es) huérfana(s) encontrada(s).`;
+  $('img-huerfanas-estado').textContent = `${huerfanas.length} imagen(es) huérfana(s) encontrada(s). (admin v${APP_VERSION})`;
   $('img-huerfanas-acciones').style.display = 'flex';
 });
 $('img-huerfanas-marcar-todas').addEventListener('click', ()=>{
