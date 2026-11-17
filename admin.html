@@ -2172,7 +2172,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.40.002';
+const APP_VERSION = '1.40.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -9398,15 +9398,17 @@ $('img-huerfanas-buscar').addEventListener('click', async ()=>{
   // tablas que usan imágenes (productos, modelos, fotos extra, categorías y líneas) de TODAS las empresas,
   // sin el tope de 1000 filas — así una foto en uso nunca se marca como huérfana.
   const pref = prefijoStorage();
-  const [{ data: archivos, error: errStorage }, { data: enUso, error: errUso }] = await Promise.all([
+  const [{ data: archivos, error: errStorage }, { data: enUso, error: errUso }, { data: deOtra }] = await Promise.all([
     sb.storage.from('productos').list(pref.replace(/\/$/, ''), { limit: 1000, sortBy: { column: 'name', order: 'asc' } }),
     sb.rpc('imagenes_en_uso'),
+    sb.rpc('archivos_otra_empresa', { p_empresa_id: state.empresaId }), // subidos por usuarios de otra empresa (Storage guarda quién los subió)
   ]);
   if(errStorage){ $('img-huerfanas-estado').textContent = `Error al leer Storage: ${errStorage.message}`; return; }
   if(errUso){ $('img-huerfanas-estado').textContent = `Error al leer las imágenes en uso: ${errUso.message}`; return; }
   const decod = t=>{ try{ return decodeURIComponent(t); }catch(e){ return t; } };
   const referenciados = new Set((enUso || []).map(decod));
-  const huerfanas = (archivos || []).filter(a=>a.id && !referenciados.has(pref + a.name)).map(a=>({ ...a, ruta: pref + a.name })); // a.id null = "carpeta", se ignora
+  const ajenos = new Set(pref ? [] : (deOtra || []));
+  const huerfanas = (archivos || []).filter(a=>a.id && !ajenos.has(a.name) && !referenciados.has(pref + a.name)).map(a=>({ ...a, ruta: pref + a.name })); // a.id null = "carpeta", se ignora
   state.imagenesHuerfanas = huerfanas;
   if((archivos || []).length >= 1000){
     $('img-huerfanas-estado').textContent = 'Aviso: hay 1000 o más archivos en esta ubicación — puede que existan más huérfanas de las que se alcanzan a listar aquí de una vez.';
