@@ -2172,7 +2172,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.40.000';
+const APP_VERSION = '1.40.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2733,7 +2733,9 @@ async function iniciarSesionApp(){
   state.sucursales = sucursales || [];
   state.almacenes = almacenes || [];
   state.proveedores = proveedores || [];
-  state.usuariosEmpresa = usuariosEmpresa || [];
+  { const { data: _asigEmp } = await sb.from('usuario_asignaciones').select('usuario_id').eq('empresa_id', state.empresaId);
+    const _uids = new Set((_asigEmp||[]).map(a=>a.usuario_id));
+    state.usuariosEmpresa = (usuariosEmpresa || []).filter(u=>_uids.has(u.id)); } // solo usuarios de la empresa activa
   state.permisosInventario = permisosInv || [];
   state.permisosMenu = Object.fromEntries((permisosMenu || []).map(r=>[r.clave, r.nivel]));
 
@@ -3247,19 +3249,19 @@ async function cargarCatalogosBase(){
     sb.from('lineas_articulo').select('*').eq('activo', true).order('nombre'),
     sb.from('unidades_medida').select('*').order('descripcion'),
     sb.from('listas_precio').select('*').eq('empresa_id', state.empresaId).order('nombre'),
-    sb.from('listas_precio_margen_linea').select('*'),
+    sb.from('listas_precio_margen_linea').select('*'), // se filtra abajo por las listas de la empresa
     sb.from('marcas').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre'),
-    sb.from('condiciones_pago').select('*').eq('activo', true).order('dias'), // Ronda 23
-    sb.from('formas_pago').select('*').eq('activo', true).order('nombre'), // Ronda 45 — pago a proveedores (CxP)
+    sb.from('condiciones_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('dias'), // Ronda 23
+    sb.from('formas_pago').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre'), // Ronda 45 — pago a proveedores (CxP)
     sb.from('formas_pago_sat').select('*').order('orden'), // Ronda 46 — catálogo SAT c_FormaPago para clave_sat
-    sb.from('colores').select('*').eq('activo', true).order('nombre'), // Ronda 60 — catálogo de colores
+    sb.from('colores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre'), // Ronda 60 — catálogo de colores
   ]);
   state.impuestos = impuestos || [];
   state.categorias = categorias || [];
   { const _ids = new Set((state.categorias||[]).map(c=>c.id)); state.lineas = (lineas||[]).filter(l=>_ids.has(l.categoria_id)); }
   state.unidades = unidades || [];
   state.listasPrecio = listas || [];
-  state.margenesLinea = margenesLinea || [];
+  { const _l = new Set((state.listasPrecio||[]).map(x=>x.id)); state.margenesLinea = (margenesLinea||[]).filter(m=>_l.has(m.lista_precio_id)); }
   state.marcas = marcas || [];
   state.colores = colores || [];
   state.condicionesPago = condicionesPago || [];
@@ -3550,12 +3552,14 @@ function suscribirStockEnVivo(){
 
 // ---------- COMBOS / PAQUETES DE PRODUCTOS (Ronda 55) ----------
 async function cargarCombos(){
-  const [{ data: combos, error: e1 }, { data: componentes, error: e2 }, { data: listas, error: e3 }] = await Promise.all([
+  let [{ data: combos, error: e1 }, { data: componentes, error: e2 }, { data: listas, error: e3 }] = await Promise.all([
     sb.from('combos').select('variante_id, modo_precio, descuento_pct, maximo_por_venta, vigente_desde, vigente_hasta'),
     sb.from('combo_componentes').select('combo_variante_id, componente_variante_id, cantidad'),
     sb.from('combo_listas').select('combo_variante_id, lista_precio_id'),
   ]);
   if(e1 || e2 || e3){ console.error(e1||e2||e3); return; }
+  const _vars = new Set((state.productos||[]).map(p=>p.varianteId)); // solo combos de la empresa activa
+  combos = (combos||[]).filter(c=>_vars.has(c.variante_id));
   state.combos = (combos||[]).map(c=>({
     varianteId: c.variante_id, modoPrecio: c.modo_precio, descuentoPct: c.descuento_pct,
     maximoPorVenta: c.maximo_por_venta, vigenteDesde: c.vigente_desde, vigenteHasta: c.vigente_hasta,
@@ -3910,8 +3914,8 @@ function temporadasDeVariante(varianteId){
 }
 
 async function cargarTemporadas(){
-  const [{ data: temporadas, error: e1 }, { data: asociaciones, error: e2 }] = await Promise.all([
-    sb.from('temporadas').select('id, nombre, mes_inicio, dia_inicio, mes_fin, dia_fin, activo').order('nombre'),
+  let [{ data: temporadas, error: e1 }, { data: asociaciones, error: e2 }] = await Promise.all([
+    sb.from('temporadas').select('id, nombre, mes_inicio, dia_inicio, mes_fin, dia_fin, activo').eq('empresa_id', state.empresaId).order('nombre'),
     sb.from('variante_temporadas').select('variante_id, temporada_id'),
   ]);
   if(e1 || e2){ console.error(e1||e2); return; }
@@ -3919,6 +3923,7 @@ async function cargarTemporadas(){
     id: t.id, nombre: t.nombre, mesInicio: t.mes_inicio, diaInicio: t.dia_inicio,
     mesFin: t.mes_fin, diaFin: t.dia_fin, activo: t.activo,
   }));
+  { const _t = new Set((temporadas||[]).map(t=>t.id)); asociaciones = (asociaciones||[]).filter(a=>_t.has(a.temporada_id)); }
   state.varianteTemporadas = (asociaciones||[]).map(a=>({ varianteId: a.variante_id, temporadaId: a.temporada_id }));
   renderTemporadasTabla();
 }
@@ -7237,8 +7242,8 @@ async function lotCargar(){
   $('lot-error').innerHTML = '';
   const alm = $('lot-almacen').value; if(!alm) return;
   const [{ data: lotes, error }, { data: vars }] = await Promise.all([
-    sb.from('lotes').select('id, variante_id, codigo, fecha_caducidad, cantidad, cantidad_inicial, variante:variantes(nombre_variante, producto:productos(nombre))').eq('almacen_id', alm).eq('activo', true).gt('cantidad', 0).order('fecha_caducidad', { nullsFirst:false }),
-    sb.from('variantes').select('id, nombre_variante, producto:productos!inner(nombre, controla_lote), stock:existencias(cantidad, almacen_id)').eq('producto.controla_lote', true),
+    sb.from('lotes').select('id, variante_id, codigo, fecha_caducidad, cantidad, cantidad_inicial, variante:variantes(nombre_variante, producto:productos(nombre))').eq('almacen_id', alm).eq('empresa_id', state.empresaId).eq('activo', true).gt('cantidad', 0).order('fecha_caducidad', { nullsFirst:false }),
+    sb.from('variantes').select('id, nombre_variante, producto:productos!inner(nombre, controla_lote, empresa_id), stock:existencias(cantidad, almacen_id)').eq('producto.controla_lote', true).eq('producto.empresa_id', state.empresaId),
   ]);
   if(error){ $('lot-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
   state.lotes = lotes || [];
@@ -8137,7 +8142,8 @@ async function cajasAbiertasAhora(){
     .select('id, cajas(nombre, sucursal_id), usuarios(nombre)')
     .eq('estado', 'abierta');
   if(error){ console.error(error); return []; }
-  return data || [];
+  const _ids = new Set((state.sucursales||[]).map(x=>x.id)); // solo cajas de la empresa activa
+  return (data || []).filter(s=>_ids.has(s.cajas?.sucursal_id));
 }
 
 // ---------- Estado de cuenta (solo lectura, paginado, exportable) ----------
@@ -8691,8 +8697,15 @@ function mostrarSubpanelCatalogosBase(key){
 async function cargarYRenderCatalogoSimple(key){
   const cfg = CATALOGOS_SIMPLES[key];
   let q = sb.from(cfg.tabla).select('*');
+  if(!cfg.global && !cfg.omitirEmpresaId) q = q.eq('empresa_id', state.empresaId); // solo la empresa activa
   q = (cfg.orden === 'orden') ? q.order('orden', { ascending: true, nullsFirst: false }).order('nombre') : q.order(cfg.orden);
-  const { data, error } = await q;
+  const { data: dataTodas, error } = await q;
+  let data = dataTodas;
+  // Tablas sin empresa_id propio: se ubican por su padre (líneas → categorías; cajas → sucursales)
+  if(!error && cfg.omitirEmpresaId){
+    if(key === 'lineas'){ const ids = new Set((state.categorias||[]).map(c=>c.id)); data = (dataTodas||[]).filter(r=>ids.has(r.categoria_id)); }
+    else if(key === 'cajas'){ const ids = new Set((state.sucursales||[]).map(x=>x.id)); data = (dataTodas||[]).filter(r=>ids.has(r.sucursal_id)); }
+  }
   if(!error) state.cfgCache[key] = data || [];
   if(key === 'categorias') state.categorias = state.cfgCache.categorias || state.categorias; // para el select de Líneas
   renderCatalogoSimple(key);
@@ -8932,7 +8945,7 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
   // filtros de Catálogo; Proveedores/Sucursales → el select de "Nueva compra" y el resto de
   // Inventario), se refresca también esa copia para que se vea al toque sin salir y volver a entrar.
   if(key === 'colores'){
-    const { data: colores } = await sb.from('colores').select('*').eq('activo', true).order('nombre');
+    const { data: colores } = await sb.from('colores').select('*').eq('empresa_id', state.empresaId).eq('activo', true).order('nombre');
     state.colores = colores || [];
   }
   if(key === 'categorias'){
@@ -8945,7 +8958,7 @@ $('cfg-modal-guardar').addEventListener('click', async ()=>{
     if(typeof renderProveedorSelect === 'function') renderProveedorSelect();
   }
   if(key === 'sucursales'){
-    const { data: sucursales } = await sb.from('sucursales').select('*').eq('activo', true);
+    const { data: sucursales } = await sb.from('sucursales').select('*').eq('empresa_id', state.empresaId).eq('activo', true);
     state.sucursales = sucursales || [];
   }
 });
@@ -9337,7 +9350,7 @@ async function cargarYRenderAuditoriaProductos(){
   const desde = $('aud-prod-desde').value, hasta = $('aud-prod-hasta').value;
   const { data, error } = await sb.from('auditoria')
     .select('id, registro_id, datos_anteriores, datos_nuevos, creado_en, usuarios(nombre)')
-    .eq('tabla', 'productos')
+    .eq('tabla', 'productos').eq('empresa_id', state.empresaId)
     .gte('creado_en', `${desde}T00:00:00`)
     .lte('creado_en', `${hasta}T23:59:59`)
     .order('creado_en', { ascending: false });
@@ -9376,13 +9389,28 @@ $('img-huerfanas-buscar').addEventListener('click', async ()=>{
   $('img-huerfanas-estado').textContent = 'Buscando…';
   $('img-huerfanas-lista').innerHTML = '';
   $('img-huerfanas-acciones').style.display = 'none';
-  const [{ data: archivos, error: errStorage }, { data: productosTodos, error: errProd }] = await Promise.all([
+  // Referencias: TODAS las columnas que apuntan al bucket (productos, fotos de variantes/modelos, fotos
+  // adicionales, portadas de categorías y de líneas) de TODAS las empresas — así una foto en uso por
+  // cualquier empresa nunca se marca como huérfana. Con RLS, un usuario normal solo ve las suyas.
+  const [{ data: archivos, error: errStorage }, { data: productosTodos, error: errProd }, rVar, rExtra, rCat, rLin] = await Promise.all([
     sb.storage.from('productos').list('', { limit: 1000, sortBy: { column: 'name', order: 'asc' } }),
     sb.from('productos').select('imagen_url'),
+    sb.from('variantes').select('imagen_url').not('imagen_url', 'is', null),
+    sb.from('producto_imagenes').select('url'),
+    sb.from('categorias').select('imagen_url').not('imagen_url', 'is', null),
+    sb.from('lineas_articulo').select('imagen_url').not('imagen_url', 'is', null),
   ]);
+  const errRef = rVar.error || rExtra.error || rCat.error || rLin.error;
+  if(errRef){ $('img-huerfanas-estado').textContent = `Error al leer referencias de imágenes: ${errRef.message}`; return; }
   if(errStorage){ $('img-huerfanas-estado').textContent = `Error al leer Storage: ${errStorage.message}`; return; }
   if(errProd){ $('img-huerfanas-estado').textContent = `Error al leer productos: ${errProd.message}`; return; }
-  const referenciados = new Set((productosTodos || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)).filter(Boolean));
+  const referenciados = new Set([
+    ...(productosTodos || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
+    ...(rVar.data || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
+    ...(rExtra.data || []).map(p=>nombreArchivoDesdeUrl(p.url)),
+    ...(rCat.data || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
+    ...(rLin.data || []).map(p=>nombreArchivoDesdeUrl(p.imagen_url)),
+  ].filter(Boolean));
   const huerfanas = (archivos || []).filter(a=>a.id && !referenciados.has(a.name)); // a.id null = "carpeta", se ignora
   state.imagenesHuerfanas = huerfanas;
   if((archivos || []).length >= 1000){
@@ -9428,7 +9456,8 @@ async function cargarYRenderAperturasCierresCaja(){
     .gte('fecha_apertura', `${desde}T00:00:00`)
     .lte('fecha_apertura', `${hasta}T23:59:59`)
     .order('fecha_apertura', { ascending: false });
-  const filas = error ? [] : (data || []);
+  const _sucIds = new Set((state.sucursales||[]).map(x=>x.id));
+  const filas = error ? [] : (data || []).filter(s=>_sucIds.has(s.cajas?.sucursal_id));
   if(!filas.length){
     $('aud-caja-tabla-body').innerHTML = '';
     $('aud-caja-vacio').style.display = 'block';
@@ -9455,7 +9484,7 @@ $('aud-caja-filtrar').addEventListener('click', cargarYRenderAperturasCierresCaj
 async function cargarYRenderAccesosSistema(){
   const desde = $('aud-acceso-desde').value, hasta = $('aud-acceso-hasta').value;
   const { data, error } = await sb.from('accesos_sistema')
-    .select('id, app, tipo, creado_en, usuarios(nombre)')
+    .select('id, app, tipo, creado_en, usuarios(nombre)').eq('empresa_id', state.empresaId)
     .gte('creado_en', `${desde}T00:00:00`)
     .lte('creado_en', `${hasta}T23:59:59`)
     .order('creado_en', { ascending: false });
