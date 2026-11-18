@@ -764,7 +764,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.11.001';
+const APP_VERSION = '1.11.002';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -2523,7 +2523,8 @@ function abrirSelectorModelo(codigo, lista){
 $('selmod-cancelar').addEventListener('click', ()=>{ $('modal-selector-modelo').classList.remove('activo'); buscarInput.value=''; renderResultados(''); buscarInput.focus(); });
 // v1.9.013: búsqueda por palabras en cualquier posición y sin acentos (igual que el catálogo en línea).
 // "azul lapiz" encuentra "LAPIZ BIC AZUL". Cada palabra puede coincidir con el nombre o con un código.
-const FRACCIONABLES = ['KG'];
+// v1.11.002: también se venden por fracción los artículos en metros (MTR) y litros (LT), no solo por kilo.
+const FRACCIONABLES = ['KG', 'MTR', 'LT'];
 function normBusq(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function coincideBusqueda(p, palabras){
   if(!p._bn) p._bn = normBusq(p.nombre);
