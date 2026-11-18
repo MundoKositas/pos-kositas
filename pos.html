@@ -764,7 +764,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.11.000';
+const APP_VERSION = '1.11.001';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1634,11 +1634,22 @@ async function hacerLogin(){
   await iniciarSesionApp();
 }
 
+// v1.11.001: salir SIEMPRE borra la sesión de este navegador. Antes, si la petición de cierre de sesión al
+// servidor fallaba o la página se recargaba antes de terminarla, supabase-js dejaba la sesión guardada y al
+// abrir el link del POS se entraba sin pedir usuario y contraseña.
+async function cerrarSesionPorCompleto(){
+  try{ await borrarCopiaLocal(); }catch(e){}
+  try{ await Promise.race([ sb.auth.signOut(), new Promise(r=>setTimeout(r, 4000)) ]); }catch(e){}
+  try{ await sb.auth.signOut({ scope: 'local' }); }catch(e){}
+  try{
+    Object.keys(localStorage).filter(k=>k.startsWith('sb-mundokositas-pos-auth')).forEach(k=>localStorage.removeItem(k));
+    sessionStorage.removeItem('mk_pos_venta_pendiente');
+  }catch(e){}
+  location.reload();
+}
 $('btn-logout').addEventListener('click', async ()=>{
   await registrarAccesoSistema('pos', 'salida');
-  await borrarCopiaLocal();
-  await sb.auth.signOut();
-  location.reload();
+  await cerrarSesionPorCompleto();
 });
 
 // ---------- ACCESOS AL SISTEMA (entrada/salida, fecha y hora del servidor) ----------
@@ -5254,6 +5265,7 @@ async function generarReportePDFCierre(r, reporte){
   }
 }
 
+let cierreEsperadoActual = null;
 $('btn-cerrar-caja').addEventListener('click', async ()=>{
   // Ronda 28: Adrián pidió explícitamente que no se pueda cerrar caja si quedan tickets en espera sin
   // resolver — hay que cobrarlos o cancelarlos el mismo día, no se guardan para el día siguiente.
@@ -5264,8 +5276,11 @@ $('btn-cerrar-caja').addEventListener('click', async ()=>{
   }
   $('cierre-confirmar').disabled = false;
   $('cierre-resumen').innerHTML = 'Calculando…';
+  $('cierre-efectivo').value = ''; $('cierre-obs').value = ''; $('cierre-error').innerHTML = ''; // siempre se captura de nuevo el efectivo contado
+  cierreEsperadoActual = null;
   $('modal-cerrar-caja').classList.add('activo');
   const resumen = await calcularResumenCierre();
+  cierreEsperadoActual = Number(resumen.esperado) || 0;
   renderResumenCierre(resumen);
   $('cierre-efectivo').focus();
 });
@@ -5274,10 +5289,18 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
   if($('cierre-confirmar').disabled) return; // evita cerrar dos veces por doble clic
   $('cierre-confirmar').disabled = true;
   $('cierre-error').innerHTML='';
+  // v1.11.001: un campo VACÍO ya no cuenta como $0 (el 17/11 una caja se cerró con $0 contado por dejarlo
+  // vacío y presionar Enter). Hay que capturar el monto aunque sea 0, y si es 0 con efectivo esperado se confirma.
   const efectivo = moneyInputValue($('cierre-efectivo'));
-  if(efectivo<0){
-    $('cierre-error').innerHTML='<div class="msg-error">Captura el efectivo contado.</div>';
+  if($('cierre-efectivo').value.trim() === '' || efectivo<0){
+    $('cierre-error').innerHTML='<div class="msg-error">Captura el efectivo contado (si de verdad no hay efectivo, escribe 0).</div>';
     $('cierre-confirmar').disabled = false;
+    $('cierre-efectivo').focus();
+    return;
+  }
+  if(efectivo === 0 && (cierreEsperadoActual || 0) > 0 && !window.confirm(`Capturaste $0.00 de efectivo contado, pero el sistema espera ${money(cierreEsperadoActual)}.\n\n¿Cerrar la caja con $0.00 contado?`)){
+    $('cierre-confirmar').disabled = false;
+    $('cierre-efectivo').focus();
     return;
   }
   const obs = $('cierre-obs').value.trim();
@@ -5335,9 +5358,7 @@ $('cierre-confirmar').addEventListener('click', async ()=>{
 });
 $('resultado-cierre-ok').addEventListener('click', async ()=>{
   $('modal-resultado-cierre').classList.remove('activo');
-  await borrarCopiaLocal();
-  await sb.auth.signOut();
-  location.reload();
+  await cerrarSesionPorCompleto();
 });
 
 // ---------- PESTAÑA REPORTES (reporte de ventas acumulado, con filtros) ----------

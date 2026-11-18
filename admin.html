@@ -117,6 +117,35 @@
   .chip-impuesto input{width:auto;}
   .codigo-fila{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
   .codigo-fila .campo{margin-bottom:0;}
+  /* v1.41.000 — Catálogo y Pedidos a proveedor en celular: cada artículo es una tarjeta con el nombre
+     arriba y el stock / cantidades a la vista, sin deslizar la tabla hacia la derecha. */
+  @media (max-width:700px){
+    #tab-catalogo .tabla-fija{max-height:none;overflow:visible;}
+    #tab-catalogo table, #tab-catalogo tbody{display:block;}
+    #tab-catalogo thead{display:none;}
+    #cat-tabla-body tr{display:grid;grid-template-columns:repeat(3,1fr);gap:2px 10px;border:1px solid var(--borde);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:#fff;}
+    #cat-tabla-body td{display:block;border:none;padding:1px 0;white-space:normal;text-align:left;font-size:.85rem;min-width:0;}
+    #cat-tabla-body td:first-child{grid-column:1/-1;font-weight:600;width:auto;min-width:0;max-width:none;font-size:.92rem;}
+    #cat-tabla-body td[data-l]::before{content:attr(data-l);display:block;font-size:.66rem;color:var(--gris);text-transform:uppercase;}
+    #cat-tabla-body td:nth-child(5){order:1;font-size:1.05rem;font-weight:700;}
+    #cat-tabla-body td:nth-child(4){order:2;} #cat-tabla-body td:nth-child(3){order:3;}
+    #cat-tabla-body td:nth-child(6){order:4;} #cat-tabla-body td:nth-child(8){order:5;}
+    #cat-tabla-body td:nth-child(2){order:6;} #cat-tabla-body td:nth-child(7){order:7;}
+    #pv-contenido table, #pv-contenido tbody, #pv-contenido tr:not(.pv-fila), #pv-contenido tr:not(.pv-fila) td{display:block;}
+    #pv-contenido thead{display:none;}
+    #pv-contenido tr.pv-fila{display:grid;grid-template-columns:34px repeat(3,1fr);gap:2px 10px;border-bottom:1px solid var(--borde);padding:8px 10px;}
+    #pv-contenido tr.pv-fila td{display:block;border:none;padding:1px 0;white-space:normal;text-align:left;min-width:0;font-size:.85rem;}
+    #pv-contenido tr.pv-fila td:nth-child(1){grid-row:1 / span 4;grid-column:1;}
+    #pv-contenido tr.pv-fila td:nth-child(2){grid-column:2 / -1;font-weight:600;font-size:.92rem;min-width:0;}
+    #pv-contenido tr.pv-fila td[data-l]::before{content:attr(data-l);display:block;font-size:.66rem;color:var(--gris);text-transform:uppercase;}
+    #pv-contenido tr.pv-fila td:nth-child(4){order:1;font-weight:700;font-size:1rem;}
+    #pv-contenido tr.pv-fila td:nth-child(5){order:2;} #pv-contenido tr.pv-fila td:nth-child(6){order:3;}
+    #pv-contenido tr.pv-fila td:nth-child(8){order:4;} #pv-contenido tr.pv-fila td:nth-child(10){order:5;}
+    #pv-contenido tr.pv-fila td:nth-child(11){order:6;font-weight:700;} #pv-contenido tr.pv-fila td:nth-child(9){order:7;}
+    #pv-contenido tr.pv-fila td:nth-child(7){order:8;} #pv-contenido tr.pv-fila td:nth-child(3){order:9;}
+    #pv-contenido tr.pv-fila select{max-width:100% !important;width:100%;}
+    #pv-contenido .pv-cant{width:84px !important;}
+  }
   @media (max-width:480px){
     header{padding:10px 12px;}
     .pantalla{padding:10px;}
@@ -2172,7 +2201,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.40.004';
+const APP_VERSION = '1.41.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2949,6 +2978,10 @@ function coEmpFilas(){
   const formatos = encabezados.map((_,i)=> i===0 ? (v=>emEsc(v)) : (i<=2 ? entero : (i===encabezados.length-2 ? (v=>coDif(v)) : monto)));
   return { encabezados, cuerpo, total, formatos };
 }
+// Al elegir la fecha "Desde", "Hasta" se pone igual (el caso normal es consultar un solo día); si se quiere
+// un rango, se cambia "Hasta" después.
+$('co-emp-desde').addEventListener('change', ()=>{ if($('co-emp-desde').value) $('co-emp-hasta').value = $('co-emp-desde').value; });
+$('co-suc-desde').addEventListener('change', ()=>{ if($('co-suc-desde').value) $('co-suc-hasta').value = $('co-suc-desde').value; });
 $('co-emp-consultar').addEventListener('click', coEmpresaCargar);
 $('co-emp-exportar').addEventListener('click', async ()=>{
   if(!state.coEmp || !(state.coEmp.sucursales||[]).length){ $('co-emp-error').innerHTML = '<div class="msg-error">Primero consulta un rango con datos.</div>'; return; }
@@ -2971,9 +3004,17 @@ async function coSucursalCargar(){
   if(!dias.length){ $('co-suc-tabla').innerHTML = '<p class="nota">No hay cierres en este rango.</p>'; return; }
   const f = coSucFilas();
   $('co-suc-tabla').innerHTML = '<table><thead><tr><th>Fecha</th><th>Estado</th>' + f.encabezados.slice(1).map(h=>`<th class="num">${emEsc(h)}</th>`).join('') + '<th></th></tr></thead><tbody>'
-    + dias.map((d,i)=>`<tr><td>${emEsc(d.fecha)}</td><td>${coEstadoTag(d.estado, d.diferencia, d.resuelta_en)}</td>${f.cuerpo[i].slice(1).map((v,j)=>`<td class="num">${f.formatos[j+1](v)}</td>`).join('')}<td><button type="button" class="btn-gris" data-co-det="${d.cierre_id}">Detalle</button></td></tr>`).join('')
+    + dias.map((d,i)=>`<tr style="background:#f6f8fb;"><td><b>${emEsc(d.fecha)}</b></td><td>${coEstadoTag(d.estado, d.diferencia, d.resuelta_en)}</td>${f.cuerpo[i].slice(1).map((v,j)=>`<td class="num"><b>${f.formatos[j+1](v)}</b></td>`).join('')}<td><button type="button" class="btn-gris" data-co-det="${d.cierre_id}">Detalle</button></td></tr>`
+        + coCajasDelDia(d.fecha).map(c=>{ const x = coFilaCaja(c, formas); return `<tr><td style="padding-left:22px;">↳ ${emEsc(x[0])}</td><td>${c.estado==='cerrada' ? '<span class="tag tag-ok">Cerrada</span>' : '<span class="tag tag-bajo">Abierta</span>'}</td>${x.slice(2).map((v,j)=>`<td class="num">${f.formatos[j+2](v)}</td>`).join('')}<td></td></tr>`; }).join('')).join('')
     + `<tr style="font-weight:700;background:#eef1f5;"><td>TOTAL</td><td></td>${f.total.slice(1).map((v,j)=>`<td class="num">${f.formatos[j+1](v)}</td>`).join('')}<td></td></tr></tbody></table>`;
   document.querySelectorAll('[data-co-det]').forEach(b=>b.addEventListener('click', ()=>coAbrirCierre(b.dataset.coDet)));
+}
+// Una línea por caja (sesión) de cada día, con sus propios totales — el día queda como resumen arriba.
+function coCajasDelDia(fecha){ return ((state.coSuc||{}).cajas||[]).filter(c=>c.fecha === fecha); }
+function coFilaCaja(c, formas){
+  const cerrada = c.estado === 'cerrada', hm = t=> t ? new Date(t).toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit', timeZone:'America/Mexico_City'}) : '';
+  return [`${c.caja} — ${c.cajero||''} (${hm(c.apertura)}${cerrada ? '–' + hm(c.cierre) : ' · abierta'})`, cerrada ? 'Cerrada' : 'Abierta', Number(c.num_ventas)||0, Number(c.ventas_total)||0, Number(c.credito)||0,
+    ...formas.map(fp=>Number((c.pagos||{})[fp])||0), cerrada ? Number(c.esperado)||0 : 0, cerrada ? Number(c.contado)||0 : 0, cerrada ? Number(c.diferencia)||0 : 0, 0, ''];
 }
 function coSucFilas(){
   const d = state.coSuc || { formas: [], dias: [] }, formas = d.formas || [];
@@ -2990,7 +3031,12 @@ $('co-suc-sucursal').addEventListener('change', coSucursalCargar);
 $('co-suc-exportar').addEventListener('click', async ()=>{
   if(!state.coSuc || !(state.coSuc.dias||[]).length){ $('co-suc-error').innerHTML = '<div class="msg-error">Primero consulta un rango con datos.</div>'; return; }
   const f = coSucFilas(), nom = $('co-suc-sucursal').selectedOptions[0]?.textContent || '', rango = `${$('co-suc-desde').value} a ${$('co-suc-hasta').value}`;
-  const filas = [...f.cuerpo, f.total], tipos = [...f.cuerpo.map(()=>'producto'), 'total'];
+  const filas = [], tipos = [];
+  (state.coSuc.dias||[]).forEach((d,i)=>{
+    filas.push(f.cuerpo[i]); tipos.push('subtotal');
+    coCajasDelDia(d.fecha).forEach(c=>{ const x = coFilaCaja(c, state.coSuc.formas||[]); x[0] = '   ' + x[0]; filas.push(x); tipos.push('producto'); });
+  });
+  filas.push(f.total); tipos.push('total');
   const monedas = f.encabezados.map((_,i)=>i).filter(i=>i>=3 && i<f.encabezados.length-1);
   const nombre = `cierres_${nom.replace(/[^A-Za-z0-9]+/g,'_')}_${$('co-suc-desde').value}_${$('co-suc-hasta').value}`;
   if($('co-suc-formato').value === 'pdf') await exportarPDFAgrupado(`${nombre}.pdf`, `Cierres diarios — ${nom}`, `${state.empresaNombre||''} — del ${rango} — generado ${new Date().toLocaleString('es-MX')}`, f.encabezados, filas, tipos, monedas, monedas.concat([1,2]));
@@ -4351,12 +4397,12 @@ function renderCatalogo(){
     const nombreCelda = `${p.imagenUrl?`<img src="${p.imagenUrl}" alt="" style="width:26px;height:26px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px;">`:''}${p.nombre}${p.codigoPrincipal?` <span class="nota">(${p.codigoPrincipal})</span>`:''}`;
     return `<tr class="fila-clic" data-variante="${p.varianteId}">
       <td>${nombreCelda}</td>
-      <td>${p.marca||'—'}</td>
-      <td class="num">${costoMostrado!=null ? money(costoMostrado) : '—'}</td>
-      <td class="num">${precioTxt}</td>
-      <td class="num">${p.inventariable ? p.stock : '—'}</td>
-      <td class="num">${p.inventariable ? `${p.minimo} / ${p.maximo}` : '—'}</td>
-      <td>${impuestosTxt}</td>
+      <td data-l="Marca">${p.marca||'—'}</td>
+      <td class="num" data-l="Costo">${costoMostrado!=null ? money(costoMostrado) : '—'}</td>
+      <td class="num" data-l="Precio">${precioTxt}</td>
+      <td class="num" data-l="Stock">${p.inventariable ? p.stock : '—'}</td>
+      <td class="num" data-l="Mín./Máx.">${p.inventariable ? `${p.minimo} / ${p.maximo}` : '—'}</td>
+      <td data-l="Impuestos">${impuestosTxt}</td>
       <td>${estadoTag}</td>
     </tr>`;
   }).join('');
@@ -4699,6 +4745,7 @@ function pvFilas(){
     const mult = Math.max(1, Number(p.multiploPedido) || 1);
     const cantBruta = modo === 'maximo' ? cantMaximo : cantReorden;
     const cantSugerida = Math.floor(cantBruta / mult) * mult; // solo empaques completos, sin pasarse
+    if(cantSugerida === 0 && !pv.cant.has(p.varianteId)) return; // sin nada que pedir con esta base (máximo / reorden): no se lista
     const cantPedir = pv.cant.has(p.varianteId) ? pv.cant.get(p.varianteId) : cantSugerida;
     filas.push({
       varianteId: p.varianteId, productoId: p.productoId, provId: prov.id, origen: prov.origen,
@@ -4734,13 +4781,13 @@ function pvRender(){
     const todos = g.filas.every(f=>f.incluido);
     return `<tbody><tr><td colspan="11" style="background:#eef1f5;font-weight:700;">
         <label style="display:inline-flex;gap:8px;align-items:center;"><input type="checkbox" class="pv-grp-inc" data-grupo="${g.key}" ${todos?'checked':''}> ${pvEsc(g.nombre)} — ${g.filas.length} artículo(s) · pedido ${money(sub)}</label></td></tr>
-      ${g.filas.map(f=>`<tr style="${f.incluido?'':'opacity:.45;'}">
+      ${g.filas.map(f=>`<tr class="pv-fila" style="${f.incluido?'':'opacity:.45;'}">
         <td><input type="checkbox" class="pv-inc" data-v="${f.varianteId}" ${f.incluido?'checked':''}></td>
-        <td style="white-space:normal;min-width:240px;">${pvEsc(f.nombre)}</td><td>${pvEsc(f.marca)}</td>
-        <td class="num">${f.stock}</td><td class="num">${f.minimo}</td><td class="num">${f.maximo}</td><td class="num">${f.mult>1 ? f.mult : '—'}</td><td class="num">${money(f.costo)}</td>
-        <td>${g.key==='__sin' ? `<select class="pv-asignar" data-p="${f.productoId}" style="max-width:170px;">${opcionesProv}</select>` : pvEsc(f.origen)}</td>
-        <td class="num"><input type="number" class="pv-cant" data-v="${f.varianteId}" min="0" step="${f.mult}" value="${f.cantPedir}" style="width:72px;text-align:right;"></td>
-        <td class="num">${money(f.incluido ? f.totalPedir : 0)}</td></tr>`).join('')}
+        <td style="white-space:normal;min-width:240px;">${pvEsc(f.nombre)}</td><td data-l="Marca">${pvEsc(f.marca)}</td>
+        <td class="num" data-l="Stock">${f.stock}</td><td class="num" data-l="Reorden">${f.minimo}</td><td class="num" data-l="Máx.">${f.maximo}</td><td class="num" data-l="Múlt.">${f.mult>1 ? f.mult : '—'}</td><td class="num" data-l="Costo">${money(f.costo)}</td>
+        <td data-l="Origen">${g.key==='__sin' ? `<select class="pv-asignar" data-p="${f.productoId}" style="max-width:170px;">${opcionesProv}</select>` : pvEsc(f.origen)}</td>
+        <td class="num" data-l="Cantidad"><input type="number" class="pv-cant" data-v="${f.varianteId}" min="0" step="${f.mult}" value="${f.cantPedir}" style="width:72px;text-align:right;"></td>
+        <td class="num" data-l="Total">${money(f.incluido ? f.totalPedir : 0)}</td></tr>`).join('')}
       </tbody>`;
   }).join('') + '</table>' : '';
   pvAjustarAlto();
