@@ -171,6 +171,7 @@
   <div class="acciones">
     <select id="hdr-empresa-sel" title="Cambiar de empresa" style="display:none;padding:8px 10px;border-radius:8px;border:1px solid #fff;font-weight:600;max-width:220px;"></select>
     <button class="btn-gris" id="btn-config-empresa">Configuración de empresa</button>
+    <button class="btn-gris" id="btn-cambiar-pass">Cambiar contraseña</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
 </header>
@@ -182,10 +183,38 @@
     <h1>Admin Kositas</h1>
     <p class="nota">Catálogo, precios e inventario — Mundo Kositas</p>
     <div class="campo"><label>Correo</label><input type="email" id="login-email" autocomplete="username"></div>
-    <div class="campo"><label>Contraseña</label><input type="password" id="login-password" autocomplete="current-password"></div>
+    <div class="campo"><label>Contraseña</label><input type="password" id="login-password" autocomplete="off"></div>
     <button class="btn-primario" style="width:100%;" id="btn-login">Entrar</button>
+    <p class="nota" style="text-align:center;margin:10px 0 0;"><a href="#" id="lnk-olvide">¿Olvidaste tu contraseña?</a></p>
     <div id="login-error"></div>
     <p class="nota" style="text-align:center;margin-top:16px;">v<span id="version-tag"></span></p>
+  </div>
+</div>
+
+<!-- RECUPERAR CONTRASEÑA (se llega desde el enlace del correo) -->
+<div class="pantalla" id="pantalla-recuperar">
+  <div class="centrado card" id="card-recuperar">
+    <h1>Nueva contraseña</h1>
+    <p class="nota">Captura la nueva contraseña para tu cuenta (mínimo 8 caracteres).</p>
+    <div class="campo"><label>Nueva contraseña</label><input type="password" id="rec-nueva" autocomplete="new-password"></div>
+    <div class="campo"><label>Confirmar contraseña</label><input type="password" id="rec-confirmar" autocomplete="new-password"></div>
+    <button class="btn-primario" style="width:100%;" id="rec-guardar">Guardar contraseña</button>
+    <div id="rec-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: cambiar mi contraseña -->
+<div class="modal-fondo" id="modal-pass">
+  <div class="modal">
+    <h2>Cambiar mi contraseña</h2>
+    <div class="campo"><label>Contraseña actual</label><input type="password" id="pass-actual" autocomplete="off"></div>
+    <div class="campo"><label>Nueva contraseña (mínimo 8 caracteres)</label><input type="password" id="pass-nueva" autocomplete="new-password"></div>
+    <div class="campo"><label>Confirmar nueva contraseña</label><input type="password" id="pass-confirmar" autocomplete="new-password"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="pass-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="pass-guardar">Guardar</button>
+    </div>
+    <div id="pass-error"></div>
   </div>
 </div>
 
@@ -2201,7 +2230,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.41.000';
+const APP_VERSION = '1.41.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2514,6 +2543,70 @@ $('prod-panel-kardex').addEventListener('keydown', e=>{
 $('prod-linea').addEventListener('change', ()=>{
   if($('modal-producto').classList.contains('activo')) recalcularPreciosModal();
 });
+
+
+// ---------- CONTRASEÑA: olvidé / cambiar (v1.41.001) ----------
+// Recuperar: sb.auth.resetPasswordForEmail manda un correo con un enlace que regresa a esta misma página;
+// al abrirlo, la URL trae type=recovery y aquí se pide la contraseña nueva (sin entrar a la app).
+// Importante: la URL de esta página debe estar en Supabase → Authentication → URL Configuration → Redirect URLs.
+const ES_RECUPERACION = /type=recovery/.test(location.hash) || /type=recovery/.test(location.search);
+const msgPass = (el, t, ok)=>{ $(el).innerHTML = `<div class="${ok?'msg-ok':'msg-error'}">${t}</div>`; };
+function validarPassNueva(a, b){
+  if(!a || a.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if(a !== b) return 'La confirmación no coincide con la nueva contraseña.';
+  return '';
+}
+$('lnk-olvide').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  const email = $('login-email').value.trim();
+  if(!email){ msgPass('login-error', 'Captura tu correo arriba y vuelve a pulsar "¿Olvidaste tu contraseña?".'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  if(error){ msgPass('login-error', 'No se pudo enviar el correo: ' + error.message); return; }
+  msgPass('login-error', 'Si ese correo está registrado, te enviamos un enlace para crear una nueva contraseña. Revisa tu bandeja (y spam).', true);
+});
+$('rec-guardar').addEventListener('click', async ()=>{
+  const m = validarPassNueva($('rec-nueva').value, $('rec-confirmar').value);
+  if(m){ msgPass('rec-error', m); return; }
+  const { error } = await sb.auth.updateUser({ password: $('rec-nueva').value });
+  if(error){ msgPass('rec-error', 'No se pudo guardar: ' + error.message); return; }
+  sesionAdminActiva = false;
+  try{ await sb.auth.signOut(); }catch(e){}
+  history.replaceState(null, '', location.pathname);
+  $('rec-nueva').value = ''; $('rec-confirmar').value = '';
+  mostrarPantalla('pantalla-login');
+  msgPass('login-error', 'Contraseña actualizada. Entra con tu nueva contraseña.', true);
+});
+$('btn-cambiar-pass').addEventListener('click', ()=>{
+  ['pass-actual','pass-nueva','pass-confirmar'].forEach(i=>$(i).value=''); $('pass-error').innerHTML = '';
+  $('modal-pass').classList.add('activo'); $('pass-actual').focus();
+});
+$('pass-cancelar').addEventListener('click', ()=>$('modal-pass').classList.remove('activo'));
+$('pass-guardar').addEventListener('click', async ()=>{
+  const m = validarPassNueva($('pass-nueva').value, $('pass-confirmar').value);
+  if(!$('pass-actual').value){ msgPass('pass-error', 'Captura tu contraseña actual.'); return; }
+  if(m){ msgPass('pass-error', m); return; }
+  $('pass-guardar').disabled = true;
+  const { data: u } = await sb.auth.getUser();
+  const correo = u && u.user && u.user.email;
+  const ver = await sb.auth.signInWithPassword({ email: correo, password: $('pass-actual').value });
+  if(ver.error){ $('pass-guardar').disabled = false; msgPass('pass-error', 'La contraseña actual no es correcta.'); return; }
+  const { error } = await sb.auth.updateUser({ password: $('pass-nueva').value });
+  $('pass-guardar').disabled = false;
+  if(error){ msgPass('pass-error', 'No se pudo guardar: ' + error.message); return; }
+  ['pass-actual','pass-nueva','pass-confirmar'].forEach(i=>$(i).value='');
+  msgPass('pass-error', 'Contraseña actualizada.', true);
+  setTimeout(()=>$('modal-pass').classList.remove('activo'), 1200);
+});
+// El navegador decide si ofrece guardar/rellenar contraseñas (no se puede prohibir desde la página), pero se
+// pide que no las rellene: sin autocompletar, campo "de solo lectura" hasta tocarlo y vacío al cargar.
+(function(){
+  const p = $('login-password'); if(!p) return;
+  p.setAttribute('autocomplete', 'off'); p.setAttribute('readonly', 'readonly');
+  const liberar = ()=>p.removeAttribute('readonly');
+  p.addEventListener('focus', liberar); p.addEventListener('pointerdown', liberar);
+  $('login-email').setAttribute('autocomplete', 'off');
+  setTimeout(()=>{ if(!p.value.length) return; }, 0);
+})();
 
 // ---------- LOGIN ----------
 $('btn-login').addEventListener('click', hacerLogin);
@@ -9571,6 +9664,7 @@ $('aud-acceso-filtrar').addEventListener('click', cargarYRenderAccesosSistema);
 
 // ---------- ARRANQUE ----------
 (async ()=>{
+  if(ES_RECUPERACION){ mostrarPantalla('pantalla-recuperar'); $('rec-nueva').focus(); return; } // llegó desde el enlace del correo
   const { data } = await sb.auth.getSession();
   if(data?.session){ await iniciarSesionApp(); }
 })();

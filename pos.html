@@ -149,6 +149,7 @@
     <button class="btn-secundario" id="btn-ventas-dia">Ventas del día</button>
     <button class="btn-secundario" id="btn-tickets-espera">🕓 Tickets en espera</button>
     <button class="btn-gris" id="btn-mi-pin" style="display:none;">PIN de supervisor</button>
+    <button class="btn-gris" id="btn-cambiar-pass">Cambiar contraseña</button>
     <button class="btn-peligro" id="btn-cerrar-caja">Cerrar caja</button>
     <button class="btn-gris" id="btn-logout">Salir</button>
   </div>
@@ -165,9 +166,10 @@
     </div>
     <div class="campo">
       <label>Contraseña</label>
-      <input type="password" id="login-password" autocomplete="current-password">
+      <input type="password" id="login-password" autocomplete="off">
     </div>
     <button class="btn-primario" style="width:100%" id="btn-login">Entrar</button>
+    <p class="nota" style="text-align:center;margin:10px 0 0;"><a href="#" id="lnk-olvide">¿Olvidaste tu contraseña?</a></p>
     <div id="login-error"></div>
     <p style="text-align:center;color:var(--gris);font-size:.75rem;margin-top:14px;margin-bottom:0;" id="version-tag"></p>
   </div>
@@ -577,7 +579,7 @@
     <h2>Movimiento de caja</h2>
     <div class="campo">
       <label>Tipo</label>
-      <select id="mov-tipo"><option value="entrada">Entrada (ingreso de efectivo)</option><option value="salida">Salida (retiro de efectivo)</option></select>
+      <select id="mov-tipo"><option value="">— Elige: ¿entra o sale dinero? —</option><option value="salida">SALIDA — sale dinero de la caja (retiro, pago, gasto)</option><option value="entrada">ENTRADA — entra dinero a la caja (fondo, depósito)</option></select>
     </div>
     <div class="campo"><label>Monto</label><input type="text" inputmode="decimal" id="mov-monto" class="money-input"></div>
     <div class="campo"><label>Motivo</label><input type="text" id="mov-motivo" placeholder="Ej. depósito al banco, cambio, etc."></div>
@@ -750,6 +752,34 @@
 
 <div id="ticket-imprimible"></div>
 
+
+<!-- RECUPERAR CONTRASEÑA (se llega desde el enlace del correo) -->
+<div class="pantalla" id="pantalla-recuperar">
+  <div class="centrado card" id="card-recuperar">
+    <h1>Nueva contraseña</h1>
+    <p class="nota">Captura la nueva contraseña para tu cuenta (mínimo 8 caracteres).</p>
+    <div class="campo"><label>Nueva contraseña</label><input type="password" id="rec-nueva" autocomplete="new-password"></div>
+    <div class="campo"><label>Confirmar contraseña</label><input type="password" id="rec-confirmar" autocomplete="new-password"></div>
+    <button class="btn-primario" style="width:100%;" id="rec-guardar">Guardar contraseña</button>
+    <div id="rec-error"></div>
+  </div>
+</div>
+
+<!-- MODAL: cambiar mi contraseña -->
+<div class="modal-fondo" id="modal-pass">
+  <div class="modal">
+    <h2>Cambiar mi contraseña</h2>
+    <div class="campo"><label>Contraseña actual</label><input type="password" id="pass-actual" autocomplete="off"></div>
+    <div class="campo"><label>Nueva contraseña (mínimo 8 caracteres)</label><input type="password" id="pass-nueva" autocomplete="new-password"></div>
+    <div class="campo"><label>Confirmar nueva contraseña</label><input type="password" id="pass-confirmar" autocomplete="new-password"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="pass-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="pass-guardar">Guardar</button>
+    </div>
+    <div id="pass-error"></div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL = "https://vsfzkktmdwqkfbecmfcj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs";
@@ -764,7 +794,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.11.002';
+const APP_VERSION = '1.11.003';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -4907,7 +4937,20 @@ $('dv-confirmar').addEventListener('click', async ()=>{
 
 // ---------- MOVIMIENTO DE CAJA ----------
 attachMoneyInput($('mov-monto'));
-$('btn-movimiento-caja').addEventListener('click', ()=>{ $('mov-confirmar').disabled=false; $('modal-movimiento').classList.add('activo'); $('mov-monto').focus(); });
+// v1.11.003: el tipo ya NO viene preseleccionado (antes arrancaba en "Entrada" y varios cajeros registraron como
+// entrada lo que era una salida). Hay que elegirlo cada vez, se pinta de color y se pide confirmar antes de guardar.
+function pintarTipoMovimiento(){
+  const t = $('mov-tipo').value, el = $('mov-tipo');
+  el.style.background = t === 'salida' ? '#fde8e8' : (t === 'entrada' ? '#e6f6ea' : '');
+  el.style.borderColor = t === 'salida' ? '#c0392b' : (t === 'entrada' ? '#1e8449' : '');
+  el.style.fontWeight = t ? '700' : '';
+}
+$('mov-tipo').addEventListener('change', pintarTipoMovimiento);
+$('btn-movimiento-caja').addEventListener('click', ()=>{
+  $('mov-confirmar').disabled=false; $('mov-error').innerHTML='';
+  $('mov-tipo').value=''; $('mov-monto').value=''; $('mov-motivo').value=''; pintarTipoMovimiento();
+  $('modal-movimiento').classList.add('activo'); $('mov-tipo').focus();
+});
 $('mov-cancelar').addEventListener('click', ()=>{ $('modal-movimiento').classList.remove('activo'); });
 $('mov-confirmar').addEventListener('click', async ()=>{
   if($('mov-confirmar').disabled) return; // evita doble registro por doble clic
@@ -4916,6 +4959,15 @@ $('mov-confirmar').addEventListener('click', async ()=>{
   const tipo = $('mov-tipo').value;
   const monto = moneyInputValue($('mov-monto'));
   const motivo = $('mov-motivo').value.trim();
+  if(!tipo){
+    $('mov-error').innerHTML='<div class="msg-error">Elige si es una SALIDA (sale dinero de la caja) o una ENTRADA (entra dinero).</div>';
+    $('mov-confirmar').disabled = false; $('mov-tipo').focus();
+    return;
+  }
+  if(monto>0 && motivo && !window.confirm(`${tipo==='salida' ? 'SALIDA — sale dinero de la caja' : 'ENTRADA — entra dinero a la caja'}\n\nMonto: ${money(monto)}\nMotivo: ${motivo}\n\n¿Es correcto?`)){
+    $('mov-confirmar').disabled = false;
+    return;
+  }
   if(monto<=0 || !motivo){
     $('mov-error').innerHTML='<div class="msg-error">Captura un monto y motivo válidos.</div>';
     $('mov-confirmar').disabled = false;
@@ -5663,8 +5715,73 @@ $('rep-generar').addEventListener('click', async ()=>{
   }
 });
 
+
+// ---------- CONTRASEÑA: olvidé / cambiar (v1.11.003) ----------
+// Recuperar: sb.auth.resetPasswordForEmail manda un correo con un enlace que regresa a esta misma página;
+// al abrirlo, la URL trae type=recovery y aquí se pide la contraseña nueva (sin entrar a la app).
+// Importante: la URL de esta página debe estar en Supabase → Authentication → URL Configuration → Redirect URLs.
+const ES_RECUPERACION = /type=recovery/.test(location.hash) || /type=recovery/.test(location.search);
+const msgPass = (el, t, ok)=>{ $(el).innerHTML = `<div class="${ok?'msg-ok':'msg-error'}">${t}</div>`; };
+function validarPassNueva(a, b){
+  if(!a || a.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if(a !== b) return 'La confirmación no coincide con la nueva contraseña.';
+  return '';
+}
+$('lnk-olvide').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  const email = $('login-email').value.trim();
+  if(!email){ msgPass('login-error', 'Captura tu correo arriba y vuelve a pulsar "¿Olvidaste tu contraseña?".'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  if(error){ msgPass('login-error', 'No se pudo enviar el correo: ' + error.message); return; }
+  msgPass('login-error', 'Si ese correo está registrado, te enviamos un enlace para crear una nueva contraseña. Revisa tu bandeja (y spam).', true);
+});
+$('rec-guardar').addEventListener('click', async ()=>{
+  const m = validarPassNueva($('rec-nueva').value, $('rec-confirmar').value);
+  if(m){ msgPass('rec-error', m); return; }
+  const { error } = await sb.auth.updateUser({ password: $('rec-nueva').value });
+  if(error){ msgPass('rec-error', 'No se pudo guardar: ' + error.message); return; }
+  sesionPosActiva = false;
+  try{ await sb.auth.signOut(); }catch(e){}
+  history.replaceState(null, '', location.pathname);
+  $('rec-nueva').value = ''; $('rec-confirmar').value = '';
+  mostrarPantalla('pantalla-login');
+  msgPass('login-error', 'Contraseña actualizada. Entra con tu nueva contraseña.', true);
+});
+$('btn-cambiar-pass').addEventListener('click', ()=>{
+  ['pass-actual','pass-nueva','pass-confirmar'].forEach(i=>$(i).value=''); $('pass-error').innerHTML = '';
+  $('modal-pass').classList.add('activo'); $('pass-actual').focus();
+});
+$('pass-cancelar').addEventListener('click', ()=>$('modal-pass').classList.remove('activo'));
+$('pass-guardar').addEventListener('click', async ()=>{
+  const m = validarPassNueva($('pass-nueva').value, $('pass-confirmar').value);
+  if(!$('pass-actual').value){ msgPass('pass-error', 'Captura tu contraseña actual.'); return; }
+  if(m){ msgPass('pass-error', m); return; }
+  $('pass-guardar').disabled = true;
+  const { data: u } = await sb.auth.getUser();
+  const correo = u && u.user && u.user.email;
+  const ver = await sb.auth.signInWithPassword({ email: correo, password: $('pass-actual').value });
+  if(ver.error){ $('pass-guardar').disabled = false; msgPass('pass-error', 'La contraseña actual no es correcta.'); return; }
+  const { error } = await sb.auth.updateUser({ password: $('pass-nueva').value });
+  $('pass-guardar').disabled = false;
+  if(error){ msgPass('pass-error', 'No se pudo guardar: ' + error.message); return; }
+  ['pass-actual','pass-nueva','pass-confirmar'].forEach(i=>$(i).value='');
+  msgPass('pass-error', 'Contraseña actualizada.', true);
+  setTimeout(()=>$('modal-pass').classList.remove('activo'), 1200);
+});
+// El navegador decide si ofrece guardar/rellenar contraseñas (no se puede prohibir desde la página), pero se
+// pide que no las rellene: sin autocompletar, campo "de solo lectura" hasta tocarlo y vacío al cargar.
+(function(){
+  const p = $('login-password'); if(!p) return;
+  p.setAttribute('autocomplete', 'off'); p.setAttribute('readonly', 'readonly');
+  const liberar = ()=>p.removeAttribute('readonly');
+  p.addEventListener('focus', liberar); p.addEventListener('pointerdown', liberar);
+  $('login-email').setAttribute('autocomplete', 'off');
+  setTimeout(()=>{ if(!p.value.length) return; }, 0);
+})();
+
 // ---------- ARRANQUE ----------
 (async function arrancar(){
+  if(ES_RECUPERACION){ mostrarPantalla('pantalla-recuperar'); $('rec-nueva').focus(); return; } // llegó desde el enlace del correo: pide la contraseña nueva, no entra a la app
   const { data } = await sb.auth.getSession();
   if(data?.session){ await iniciarSesionApp(); return; }
   // Ronda 59: sin sesión «viva» pero con una sesión guardada en el equipo y SIN conexión (el token
