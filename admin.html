@@ -2230,7 +2230,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.41.001';
+const APP_VERSION = '1.42.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3158,6 +3158,7 @@ async function coAbrirCierre(cierreId){
     h += '<h3 style="margin:14px 0 6px;">Cajas del día</h3><div style="overflow-x:auto;"><table><thead><tr><th>Caja</th><th>Cajero</th><th>Apertura</th><th>Cierre</th><th class="num">Fondo</th><th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th></tr></thead><tbody>'
       + (ses||[]).map(s=>`<tr><td>${emEsc(s.cajas?.nombre || s.cajas?.numero || '')}</td><td>${emEsc(nomU(s.usuario_id))}</td><td>${hora(s.fecha_apertura)}</td><td>${s.estado==='cerrada'?hora(s.fecha_cierre):'<span class="tag tag-bajo">Abierta</span>'}</td><td class="num">${money(s.fondo_inicial)}</td><td class="num">${s.estado==='cerrada'?money(s.efectivo_esperado):'—'}</td><td class="num">${s.estado==='cerrada'?money(s.efectivo_contado):'—'}</td><td class="num">${s.estado==='cerrada'?coDif(s.diferencia):'—'}</td></tr>${s.observaciones?`<tr><td colspan="8" class="nota">Observaciones: ${emEsc(s.observaciones)}</td></tr>`:''}`).join('') + '</tbody></table></div>';
     h += '<h3 style="margin:14px 0 6px;">Entradas y salidas de efectivo</h3>' + ((movs||[]).length ? '<div style="overflow-x:auto;"><table><thead><tr><th>Hora</th><th>Tipo</th><th class="num">Monto</th><th>Motivo</th><th>Usuario</th></tr></thead><tbody>' + movs.map(m=>`<tr><td>${hora(m.fecha_hora)}</td><td>${emEsc(m.tipo)}</td><td class="num">${money(m.monto)}</td><td style="white-space:normal;">${emEsc(m.motivo||'')}</td><td>${emEsc(nomU(m.usuario_id))}</td></tr>`).join('') + '</tbody></table></div>' : '<p class="nota">Sin entradas ni salidas registradas.</p>');
+    h += await coDistribucionHtml(cierreId, cs.fecha, suc);
     if(dif !== 0 && cs.estado === 'cerrado'){
       const pistas = [], abs = Math.abs(dif), canc = (vts||[]).filter(v=>v.estado==='cancelada');
       (movs||[]).filter(m=>Math.abs(Number(m.monto)-abs) < 0.01).forEach(m=>pistas.push(`Coincide con un movimiento de caja de ${money(m.monto)} (${emEsc(m.tipo)}${m.motivo?': '+emEsc(m.motivo):''}): revisa si se registró en el sentido correcto.`));
@@ -3185,6 +3186,62 @@ async function coAbrirCierre(cierreId){
       $('modal-cierre').classList.remove('activo'); coSucursalCargar();
     });
   }catch(err){ $('cierre-contenido').innerHTML = `<div class="msg-error">${emEsc(err.message||String(err))}</div>`; }
+}
+// ---- Distribución del día por proveedor + impuestos (dentro del detalle del cierre) ----
+// Venta sin impuestos de cada proveedor, su costo (lo que hay que reponerle) y la utilidad. El proveedor de cada
+// artículo se decide igual que en "Pedidos a proveedor": el que más veces se le ha comprado (si empatan, el de
+// menor costo); si no hay compras, el proveedor inicial; si no, "Sin proveedor". El costo es el de la última compra
+// a ese proveedor (o el costo actual del artículo): el sistema no guarda el costo del día de la venta.
+async function coDistribucionHtml(cierreId, fecha, sucNombre){
+  const { data, error } = await sb.rpc('rep_cierre_distribucion', { p_cierre_id: cierreId });
+  if(error) return `<h3 style="margin:14px 0 6px;">Distribución por proveedor</h3><div class="msg-error">${emEsc(error.message)}</div>`;
+  state.coDist = { data, fecha, sucNombre };
+  const provs = data.proveedores || [], imps = data.impuestos || [];
+  const venta = Number(data.venta_neta)||0, costo = Number(data.costo)||0, util = redondear2(venta - costo);
+  const pct = (u,v)=> Number(v) > 0 ? (Number(u)/Number(v)*100).toFixed(1) + '%' : '—';
+  if(!provs.length) return '';
+  const filas = provs.map((p,i)=>{
+    const sin = p.proveedor_id == null;
+    const det = (p.detalle||[]).map(d=>`<tr><td style="padding-left:18px;">${emEsc(d.producto)}</td><td class="num">${Number(d.cant)}</td><td class="num">${money(d.venta)}</td><td class="num">${money(d.costo)}</td><td class="num">${money(redondear2(d.venta - d.costo))}</td></tr>`).join('');
+    return `<tr style="${sin?'background:#fff8e6;':''}"><td><b>${emEsc(p.nombre)}</b>${p.sin_costo?` <span class="tag tag-bajo" title="Artículos sin costo capturado">${p.sin_costo} sin costo</span>`:''}</td>
+      <td class="num">${Number(p.articulos)}</td><td class="num">${Number(p.piezas)}</td><td class="num">${money(p.venta)}</td><td class="num"><b>${money(p.costo)}</b></td><td class="num">${money(p.utilidad)}</td><td class="num">${pct(p.utilidad,p.venta)}</td>
+      <td><button type="button" class="btn-gris" data-co-prov="${i}" style="padding:2px 8px;">Ver</button></td></tr>
+      <tr id="co-prov-det-${i}" style="display:none;"><td colspan="8"><table style="font-size:.82rem;width:100%;"><thead><tr><th>Artículo</th><th class="num">Cant.</th><th class="num">Venta</th><th class="num">Costo</th><th class="num">Utilidad</th></tr></thead><tbody>${det}</tbody></table></td></tr>`;
+  }).join('');
+  const conProv = provs.filter(p=>p.proveedor_id != null).reduce((s,p)=>s+Number(p.costo),0);
+  const impFilas = imps.map(x=>`<tr><td>${emEsc(x.nombre)}</td><td class="num">${(Number(x.tasa)*100).toFixed(0)}%</td><td class="num">${money(x.base)}</td><td class="num"><b>${money(x.monto)}</b></td></tr>`).join('');
+  const impTotal = redondear2(imps.reduce((s,x)=>s+Number(x.monto),0));
+  return `<h3 style="margin:16px 0 4px;">Distribución del día por proveedor</h3>
+    <p class="nota" style="margin:0 0 6px;">Lo vendido sin impuestos, separado por proveedor: el <b>costo</b> es lo que corresponde reponerle y la <b>utilidad</b> lo que queda libre para otros proveedores, productos nuevos o stock adicional. Incluye ventas de contado y a crédito de las cajas de este cierre.</p>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Proveedor</th><th class="num">Artículos</th><th class="num">Piezas</th><th class="num">Venta (sin imp.)</th><th class="num">Costo a reponer</th><th class="num">Utilidad</th><th class="num">% util.</th><th></th></tr></thead><tbody>${filas}
+      <tr style="font-weight:700;background:#eef1f5;"><td>TOTAL</td><td></td><td></td><td class="num">${money(venta)}</td><td class="num">${money(costo)}</td><td class="num">${money(util)}</td><td class="num">${pct(util,venta)}</td><td></td></tr></tbody></table></div>
+    <p class="nota" style="margin:6px 0 0;">Para reponer con proveedor registrado: <b>${money(conProv)}</b>${provs.some(p=>p.proveedor_id==null) ? ' · el renglón "Sin proveedor" se reparte solo cuando se asigne proveedor inicial a esos artículos' : ''}. El costo usa la última compra del artículo.</p>
+    <h3 style="margin:16px 0 4px;">Impuestos del día</h3>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Impuesto</th><th class="num">Tasa</th><th class="num">Base (venta sin imp.)</th><th class="num">Impuesto cobrado</th></tr></thead><tbody>${impFilas || '<tr><td colspan="4" class="nota">Sin impuestos en este día.</td></tr>'}
+      <tr style="font-weight:700;background:#eef1f5;"><td>TOTAL IMPUESTOS</td><td></td><td></td><td class="num">${money(impTotal)}</td></tr></tbody></table></div>
+    <p class="nota" style="margin:6px 0 0;">Venta sin impuestos ${money(venta)} + impuestos ${money(impTotal)} = ${money(redondear2(venta+impTotal))} (ventas del cierre: ${money(data.total_ventas)}).</p>
+    <div class="fila" style="gap:8px;margin-top:8px;"><button type="button" class="btn-gris" id="co-dist-exportar">Exportar distribución a Excel</button></div>`;
+}
+document.addEventListener('click', (e)=>{
+  const b = e.target.closest && e.target.closest('[data-co-prov]');
+  if(b){ const f = document.getElementById('co-prov-det-' + b.dataset.coProv); if(f){ const ab = f.style.display === 'none'; f.style.display = ab ? '' : 'none'; b.textContent = ab ? 'Ocultar' : 'Ver'; } return; }
+  if(e.target.id === 'co-dist-exportar') coDistExportar();
+});
+function coDistExportar(){
+  const d = state.coDist; if(!d) return;
+  const p = d.data.proveedores || [], i = d.data.impuestos || [];
+  const wb = XLSX.utils.book_new();
+  const venta = Number(d.data.venta_neta)||0, costo = Number(d.data.costo)||0;
+  const resumen = [['Proveedor','Artículos','Piezas','Venta (sin imp.)','Costo a reponer','Utilidad','% utilidad'],
+    ...p.map(x=>[x.nombre, Number(x.articulos), Number(x.piezas), Number(x.venta), Number(x.costo), Number(x.utilidad), Number(x.venta)>0 ? Number(x.utilidad)/Number(x.venta) : 0]),
+    ['TOTAL','','',venta,costo,redondear2(venta-costo), venta>0 ? (venta-costo)/venta : 0]];
+  const ws1 = XLSX.utils.aoa_to_sheet(resumen);
+  XLSX.utils.book_append_sheet(wb, ws1, 'Por proveedor');
+  const det = [['Proveedor','Artículo','Cantidad','Venta (sin imp.)','Costo','Utilidad']];
+  p.forEach(x=>(x.detalle||[]).forEach(r=>det.push([x.nombre, r.producto, Number(r.cant), Number(r.venta), Number(r.costo), redondear2(r.venta - r.costo)])));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), 'Detalle');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Impuesto','Tasa','Base (venta sin imp.)','Impuesto cobrado'], ...i.map(x=>[x.nombre, Number(x.tasa), Number(x.base), Number(x.monto)]), ['TOTAL','','', redondear2(i.reduce((s,x)=>s+Number(x.monto),0))]]), 'Impuestos');
+  XLSX.writeFile(wb, `distribucion_${(d.sucNombre||'sucursal').replace(/[^A-Za-z0-9]+/g,'_')}_${d.fecha}.xlsx`);
 }
 $('cierre-cerrar').addEventListener('click', ()=> $('modal-cierre').classList.remove('activo'));
 
