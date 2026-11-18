@@ -68,6 +68,7 @@
   .pago-linea .pago-nota{flex:1 1 100%;font-size:.78rem;color:var(--gris);}
   .modal-fondo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:50;padding:16px;}
   .modal-fondo.activo{display:flex;}
+  #modal-autorizacion{z-index:120;} /* el NIP del supervisor siempre va al frente de cualquier otra ventana (p. ej. Editar artículo) */
   .modal{background:#fff;border-radius:10px;padding:22px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto;}
   .quitar{color:var(--rojo);cursor:pointer;font-size:.85rem;background:none;border:none;padding:4px;}
   #ticket-imprimible{display:none;}
@@ -257,6 +258,7 @@
       <div class="card" style="margin-top:14px;" id="card-cobro">
         <h2>Cobro</h2>
         <div class="totales">
+          <div class="linea" id="fila-tot-conteo" style="font-size:.9rem;color:var(--gris);"><span>Artículos: <strong id="tot-articulos">0</strong></span><span>Piezas: <strong id="tot-piezas">0</strong></span></div>
           <div class="linea" id="fila-tot-subtotal"><span>Subtotal</span><span id="tot-subtotal">$0.00</span></div>
           <div id="tot-impuestos-lista"></div>
           <div class="linea total-final"><span>Total</span><span id="tot-total">$0.00</span></div>
@@ -762,7 +764,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.10.002';
+const APP_VERSION = '1.11.000';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1845,8 +1847,13 @@ async function entrarAlPOS(){
   // (consultaConRespaldo); pasada la carga inicial ya no se pisa lo que hay en memoria.
   state.arranqueCarga = true;
   try{
+    // v1.11.000: el catálogo (lo más pesado) arranca de inmediato y en paralelo; solo cargarClientes()
+    // espera a las condiciones de pago, como antes.
+    const cargasEnParalelo = Promise.all([cargarCatalogo(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
+    cargasEnParalelo.catch(()=>{});
     await cargarCondicionesPago();
-    await Promise.all([cargarCatalogo(), cargarClientes(), cargarFormasPago(), cargarCategoriasLineas(), cargarListasPrecio(), cargarPermisosPos()]);
+    await cargarClientes();
+    await cargasEnParalelo;
   } finally { state.arranqueCarga = false; }
   actualizarBloqueosPermisos();
   reiniciarVenta();
@@ -2105,17 +2112,17 @@ function abrirEditarLinea(idx){
 $('el-lista-autorizar').addEventListener('click', async ()=>{
   const l = state.carrito[editarLineaIdx];
   const resultado = await pedirAutorizacionSupervisor('pos.cambiar_lista_precio', `cambiar la lista de precios de "${l.nombre}"`);
-  if(resultado){ l.autorizaciones.listaPrecio = resultado; abrirEditarLinea(editarLineaIdx); }
+  if(resultado){ l.autorizaciones.listaPrecio = resultado; abrirEditarLinea(editarLineaIdx); setTimeout(()=>$('el-lista').focus(),0); }
 });
 $('el-desc-autorizar').addEventListener('click', async ()=>{
   const l = state.carrito[editarLineaIdx];
   const resultado = await pedirAutorizacionSupervisor('pos.aplicar_descuento', `aplicar un descuento a "${l.nombre}"`);
-  if(resultado){ l.autorizaciones.descuento = resultado; abrirEditarLinea(editarLineaIdx); }
+  if(resultado){ l.autorizaciones.descuento = resultado; abrirEditarLinea(editarLineaIdx); setTimeout(()=>$('el-desc-tipo').focus(),0); }
 });
 $('el-precio-autorizar').addEventListener('click', async ()=>{
   const l = state.carrito[editarLineaIdx];
   const resultado = await pedirAutorizacionSupervisor('pos.editar_precio_manual', `editar el precio manual de "${l.nombre}"`);
-  if(resultado){ l.autorizaciones.precioManual = resultado; abrirEditarLinea(editarLineaIdx); }
+  if(resultado){ l.autorizaciones.precioManual = resultado; abrirEditarLinea(editarLineaIdx); setTimeout(()=>{ const c=$('el-precio-manual'); c.focus(); c.select(); },0); }
 });
 $('el-cancelar').addEventListener('click', ()=>{ $('modal-editar-linea').classList.remove('activo'); });
 $('el-aplicar').addEventListener('click', ()=>{
@@ -2211,11 +2218,13 @@ async function cargarCatalogo(){
   const [{ data, error }, { data: combosData, error: errorCombos }, { data: componentesData, error: errorComponentes }, { data: listasData, error: errorListas }] = await Promise.all([
     consultaConRespaldo('catalogo_variantes', () => leerTodo(() => sb.from('variantes').select(`
       id, nombre_variante, activo, imagen_url,
-      producto:productos(id, nombre, marca, imagen_url, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, unidad:unidades_medida(clave), producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
+      producto:productos!inner(id, nombre, marca, imagen_url, activo, empresa_id, costo_ultima_compra, lleva_serie, inventariable, unidad:unidades_medida(clave), producto_impuestos(impuesto_id, impuestos(nombre, tasa))),
       precios:variante_precios(precio, lista_precio_id),
       stock:existencias(cantidad, almacen_id),
       codigos:codigos_barra(codigo, tipo, factor_unidades_base)
-    `))),
+    `).eq('activo', true).eq('producto.empresa_id', state.empresaId).eq('producto.activo', true))),
+    // (v1.11.000) el filtro por empresa/activos se hace en el servidor: antes se descargaba el catálogo de TODAS
+    // las empresas (un Super Admin ve todo) y se descartaba aquí, lo que hacía lenta la carga inicial.
     // Ronda 55: combos/paquetes — un combo es una variante más (ya viene en la consulta de arriba con
     // su propio nombre/precio/código de barras), pero NO tiene existencia propia: su "stock" se calcula
     // a partir de sus componentes (recalcularStockCombos, más abajo) y su venta se filtra por vigencia
@@ -2758,6 +2767,12 @@ function notaLineaEditada(l){
   return partes.length ? `<div class="nota" style="margin:2px 0 0;">${partes.join(' · ')}</div>` : '';
 }
 let _carritoLenPrev = 0;
+// Conteos del ticket: "Artículos" = productos distintos (renglones) y "Piezas" = suma de cantidades.
+function conteoCarrito(items){
+  const l = items || state.carrito;
+  const piezas = l.reduce((s,x)=>s+(Number(x.cantidad)||0),0);
+  return { articulos: l.length, piezas: Math.round(piezas*1000)/1000 };
+}
 function renderCarrito(){
   const body = $('carrito-body');
   const _crecio = state.carrito.length > _carritoLenPrev; _carritoLenPrev = state.carrito.length;
@@ -3252,6 +3267,7 @@ function recalcularTotales(){
   // de empresa.
   $('fila-tot-subtotal').style.display = state.desglosarImpuestos ? 'flex' : 'none';
   $('tot-subtotal').textContent = money(subtotal);
+  { const c = conteoCarrito(); $('tot-articulos').textContent = c.articulos; $('tot-piezas').textContent = c.piezas; }
   $('tot-impuestos-lista').style.display = state.desglosarImpuestos ? '' : 'none';
   $('tot-impuestos-lista').innerHTML = Object.values(desglose).map(d=>
     `<div class="linea"><span>${d.nombre}</span><span>${money(d.monto)}</span></div>`
@@ -3605,6 +3621,7 @@ function mostrarTicket(ventaId, venta, desglose, folioProvisional){
     <div style="border-top:2px solid #000;margin:4px 0 6px;"></div>
     ${state.domicilio ? `<p style="margin-top:0;"><strong>🛵 Pedido a domicilio${state.domicilio.codigo ? ' ' + domEsc(state.domicilio.codigo) : ''}</strong><br>Entregar en: ${domEsc(state.domicilio.domicilio)}${state.domicilio.colonia ? ', ' + domEsc(state.domicilio.colonia) : ''}<br>Tel. cliente: ${domEsc(state.domicilio.telefono)}<br>Repartidor: ${domEsc(state.domicilio.repartidorNombre)}${state.domicilio.fecha ? '<br>Fecha: ' + domEsc(state.domicilio.fecha) + (state.domicilio.horaDesde ? ' · ' + domEsc(state.domicilio.horaDesde) + '–' + domEsc(state.domicilio.horaHasta || '') : '') : ''}${state.domicilio.notas ? '<br>Notas: ' + domEsc(state.domicilio.notas) : ''}</p>` : ''}
     <table><tbody>${filasItems}</tbody></table>
+    <p class="nota" style="margin:6px 0 2px;display:flex;justify-content:space-between;"><span>Artículos: <strong>${conteoCarrito().articulos}</strong></span><span>Piezas: <strong>${conteoCarrito().piezas}</strong></span></p>
     <div class="totales">
       ${state.desglosarImpuestos ? `
       <div class="linea"><span>Subtotal</span><span>${money(venta.subtotal)}</span></div>
@@ -4343,6 +4360,7 @@ function htmlTicketDesdeDatos(datos, deltasPorVariante){
     <p>Folio: ${datos.folio}<br>Cliente: ${datos.cliente}<br>Atendió: ${datos.cajero}</p>
     <div style="border-top:2px solid #000;margin:4px 0 6px;"></div>
     <table><tbody>${filasItems}</tbody></table>
+    ${(()=>{ const c = conteoCarrito((datos.lineas||[]).map(l=>({cantidad:l.cantidad}))); return `<p class="nota" style="margin:6px 0 2px;display:flex;justify-content:space-between;"><span>Artículos: <strong>${c.articulos}</strong></span><span>Piezas: <strong>${c.piezas}</strong></span></p>`; })()}
     <div class="totales">
       ${state.desglosarImpuestos ? `<div class="linea"><span>Subtotal</span><span>${money(datos.subtotal)}</span></div>` : ''}
       <div class="linea total-final"><span>Total${state.desglosarImpuestos ? '' : ' (impuestos incluidos)'}</span><span>${money(datos.total)}</span></div>
