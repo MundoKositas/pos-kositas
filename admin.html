@@ -303,6 +303,7 @@
         </select>
         <button type="button" class="btn-gris" id="cat-exportar-existencias">Reporte de existencias</button>
         <button type="button" class="btn-gris" id="cat-exportar-resurtido">Reporte de resurtido</button>
+        <button type="button" class="btn-gris" id="cat-exportar-sin-costo" title="Artículos activos sin existencia y sin costo de compra registrado">Sin existencia y sin costo</button>
       </div>
     </div>
   </div>
@@ -2230,7 +2231,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.42.000';
+const APP_VERSION = '1.42.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4771,6 +4772,29 @@ $('cat-exportar-existencias').addEventListener('click', async ()=>{
     );
   } else {
     exportarExcelAgrupado(`reporte_existencias_${fecha}.xlsx`, 'Existencias', encabezados, filas, tipos, [3, 4, 5]);
+  }
+});
+
+// ---------- REPORTE: SIN EXISTENCIA Y SIN COSTO (Catálogo) ----------
+// Artículos activos (que llevan inventario) con stock en 0 o menos Y sin costo de compra registrado (costo vacío o 0).
+// Respeta los filtros activos del Catálogo (búsqueda, categoría y línea). Lista plana para filtrar/ordenar en Excel.
+$('cat-exportar-sin-costo').addEventListener('click', async ()=>{
+  const items = itemsFiltradosCatalogo().filter(p=>p.activo && p.inventariable && Number(p.stock) <= 0 && !(Number(p.costo) > 0));
+  if(!items.length){ alert('No hay artículos sin existencia y sin costo con los filtros actuales.'); return; }
+  const listaPublica = obtenerListaPublica();
+  const provNombre = id => (state.proveedores||[]).find(x=>x.id===id)?.nombre || '';
+  const filas = items.map(p=>{
+    const linea = state.lineas.find(l=>l.id===p.lineaArticuloId);
+    const categoria = linea ? state.categorias.find(c=>c.id===linea.categoria_id) : null;
+    const precioPub = listaPublica ? p.precios.find(pr=>pr.listaPrecioId===listaPublica.id) : null;
+    return [categoria?.nombre || 'Sin categoría', linea?.nombre || 'Sin línea', p.codigoPrincipal || '', p.nombre, p.marca || '', provNombre(p.proveedorInicialId), Number(p.stock) || 0, precioPub ? Number(precioPub.precio) : 0];
+  }).sort((a,b)=> a[0].localeCompare(b[0],'es') || a[1].localeCompare(b[1],'es') || a[3].localeCompare(b[3],'es'));
+  const encabezados = ['Categoría', 'Línea', 'Código', 'Artículo', 'Marca', 'Proveedor inicial', 'Existencia', 'Precio público (sin imp.)'];
+  const fecha = fechaLocalISO();
+  if($('cat-formato-exportar').value === 'pdf'){
+    await exportarPDFAgrupado(`sin_existencia_sin_costo_${fecha}.pdf`, `Artículos sin existencia y sin costo — ${state.empresaNombre || ''}`, `Generado: ${new Date().toLocaleString('es-MX')} — ${filas.length} artículo(s)`, encabezados, filas, filas.map(()=>'producto'), [7], []);
+  } else {
+    exportarExcelAgrupado(`sin_existencia_sin_costo_${fecha}.xlsx`, 'Sin existencia y sin costo', encabezados, filas, filas.map(()=>'producto'), [7]);
   }
 });
 
