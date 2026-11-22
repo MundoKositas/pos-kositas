@@ -774,7 +774,7 @@
         <div class="campo"><label>Almacén que recibe</label><select id="compra-almacen"></select></div>
       </div>
       <div class="grid-2">
-        <div class="campo"><label>Folio del documento (factura/remisión)</label><input type="text" id="compra-folio"></div>
+        <div class="campo"><label>Folio del documento (factura/remisión) *</label><input type="text" id="compra-folio"></div>
         <div class="campo"><label>Fecha de compra</label><input type="date" id="compra-fecha"></div>
       </div>
       <div class="grid-2">
@@ -878,8 +878,10 @@
       <div class="fila" style="align-items:flex-end;">
         <div class="col" style="min-width:150px;"><label>Desde</label><input type="date" id="compras-lista-desde"></div>
         <div class="col" style="min-width:150px;"><label>Hasta</label><input type="date" id="compras-lista-hasta"></div>
+        <div class="col" style="min-width:200px;"><label>Proveedor</label><select id="compras-lista-proveedor"><option value="">Todos los proveedores</option></select></div>
         <button type="button" class="btn-secundario" id="compras-lista-buscar">Buscar</button>
       </div>
+      <p class="nota" id="compras-lista-resumen" style="margin-top:8px;"></p>
       <div class="tabla-scroll" style="margin-top:10px;">
         <table>
           <thead><tr><th>Fecha</th><th>Folio</th><th>Proveedor</th><th>Almacén</th><th>Capturó</th><th class="num">Total (con impuestos)</th><th></th></tr></thead>
@@ -2091,6 +2093,21 @@
   </div>
 </div>
 
+<!-- MODAL: cambiar proveedor de una compra (requiere PIN de supervisor) -->
+<div class="modal-fondo" id="modal-cd-prov" style="z-index:130;">
+  <div class="modal">
+    <h2>Cambiar proveedor de la compra</h2>
+    <p class="nota" id="cdp-actual"></p>
+    <div class="campo"><label>Nuevo proveedor</label><select id="cdp-proveedor"></select></div>
+    <div class="campo"><label>PIN del supervisor</label><input type="password" inputmode="numeric" id="cdp-pin" maxlength="6" autocomplete="off"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-gris" style="flex:1;" id="cdp-cancelar">Cancelar</button>
+      <button class="btn-primario" style="flex:1;" id="cdp-confirmar">Cambiar proveedor</button>
+    </div>
+    <div id="cdp-error"></div>
+  </div>
+</div>
+
 <!-- MODAL: detalle de una compra registrada (Ronda 24; edición + historial en Ronda 25) -->
 <div class="modal-fondo" id="modal-compra-detalle">
   <div class="modal" id="card-compra-detalle">
@@ -2098,6 +2115,7 @@
       <div class="cd-barra">
         <h2 style="margin:0;">Detalle de la compra</h2>
         <div class="cd-botones">
+          <button class="btn-gris" id="cd-cambiar-prov">Cambiar proveedor</button>
           <button class="btn-primario" id="cd-editar">Editar</button>
           <button class="btn-primario" style="display:none;" id="cd-guardar">Guardar cambios</button>
           <button class="btn-gris" style="display:none;" id="cd-cancelar-edicion">Cancelar edición</button>
@@ -2232,7 +2250,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.42.002';
+const APP_VERSION = '1.43.000';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -6844,6 +6862,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
   $('compra-error').innerHTML = '';
   if(!state.compraLineas.length){ $('compra-error').innerHTML = '<div class="msg-error">Agrega al menos un producto a la compra.</div>'; return; }
   if(!$('compra-fecha').value){ $('compra-error').innerHTML = '<div class="msg-error">Captura la fecha de compra.</div>'; return; }
+  if(!$('compra-folio').value.trim()){ $('compra-error').innerHTML = '<div class="msg-error">Captura el folio del documento (factura o remisión): es obligatorio para registrar la compra.</div>'; $('compra-folio').focus(); return; }
   const tipoCompra = $('compra-tipo').value;
   if((tipoCompra === 'credito' || tipoCompra === 'anticipo' || tipoCompra === 'mixto') && !$('compra-proveedor').value){
     $('compra-error').innerHTML = '<div class="msg-error">Una compra a crédito, con anticipo o mixta debe tener un proveedor asignado.</div>';
@@ -6873,7 +6892,7 @@ $('compra-registrar').addEventListener('click', async ()=>{
     sucursal_id: (state.almacenes.find(a=>a.id===$('compra-almacen').value)||{}).sucursal_id,
     almacen_id: $('compra-almacen').value,
     proveedor_id: $('compra-proveedor').value || null,
-    folio_documento: $('compra-folio').value.trim() || null,
+    folio_documento: $('compra-folio').value.trim(),
     fecha_compra: $('compra-fecha').value,
     usuario_id: state.usuario.id,
     origen: 'manual',
@@ -6924,7 +6943,20 @@ async function cargarComprasLista(){
   const hasta = $('compras-lista-hasta').value || fechaLocalISO();
   const { data, error } = await sb.rpc('compras_periodo', { p_fecha_desde: desde, p_fecha_hasta: hasta });
   if(error){ console.error(error); return; }
-  const compras = data || [];
+  state.comprasLista = data || [];
+  const sel = $('compras-lista-proveedor');
+  const previo = sel.value;
+  const nombres = [...new Set(state.comprasLista.map(c=>c.proveedor))].sort((a,b)=>a.localeCompare(b,'es'));
+  sel.innerHTML = '<option value="">Todos los proveedores</option>' + nombres.map(n=>`<option value="${rpEsc(n)}">${rpEsc(n)}</option>`).join('');
+  if(previo && nombres.includes(previo)) sel.value = previo;
+  renderComprasLista();
+}
+$('compras-lista-proveedor').addEventListener('change', ()=>renderComprasLista());
+function renderComprasLista(){
+  const prov = $('compras-lista-proveedor').value;
+  const compras = (state.comprasLista || []).filter(c=>!prov || c.proveedor === prov);
+  const suma = compras.reduce((t,c)=>t+Number(c.total_con_impuestos||0),0);
+  $('compras-lista-resumen').textContent = compras.length ? `${compras.length} compra${compras.length===1?'':'s'} · Total (con impuestos): ${money(suma)}` : '';
   $('compras-lista-vacio').style.display = compras.length ? 'none' : 'block';
   $('compras-lista-body').innerHTML = compras.map(c=>`
     <tr>
@@ -6980,7 +7012,7 @@ async function cargarCompraDetalle(compraId){
   const [{ data: compra, error: errCompra }, { data: lineas, error: errLineas }, { data: historial, error: errHist }] = await Promise.all([
     sb.from('compras').select('*, proveedores(nombre), almacenes(nombre), usuarios(nombre)').eq('id', compraId).single(),
     sb.from('compra_detalle').select('id, variante_id, cantidad, costo_unitario, importe, variantes(nombre_variante, productos(nombre, unidad_medida_id))').eq('compra_id', compraId),
-    sb.from('auditoria').select('creado_en, usuarios(nombre), datos_nuevos').eq('tabla', 'compras').eq('registro_id', compraId).eq('accion', 'editar').order('creado_en', { ascending: true }),
+    sb.from('auditoria').select('creado_en, usuarios(nombre), datos_nuevos').eq('tabla', 'compras').eq('registro_id', compraId).in('accion', ['editar','cambiar_proveedor']).order('creado_en', { ascending: true }),
   ]);
   if(errCompra || errLineas){
     $('cd-resumen').textContent = `Error al cargar el detalle: ${(errCompra||errLineas).message}`;
@@ -7001,6 +7033,9 @@ async function cargarCompraDetalle(compraId){
       + historial.map(h=>{
           const fecha = new Date(h.creado_en).toLocaleString('es-MX');
           const cambios = h.datos_nuevos?.cambios || [];
+          if(h.datos_nuevos?.proveedor_despues){
+            return `<p class="nota" style="margin:2px 0;">• ${h.usuarios?.nombre || '—'} — ${fecha} — cambió proveedor: ${rpEsc(h.datos_nuevos.proveedor_antes)} → ${rpEsc(h.datos_nuevos.proveedor_despues)} (autorizó ${rpEsc(h.datos_nuevos.autorizo || '—')})</p>`;
+          }
           const resumen = cambios.map(c=>`${c.producto}: cant. ${c.cantidad_antes}→${c.cantidad_despues}, costo ${money(c.costo_antes)}→${money(c.costo_despues)}`).join('; ');
           return `<p class="nota" style="margin:2px 0;">• ${h.usuarios?.nombre || '—'} — ${fecha}${resumen ? ' — ' + resumen : ''}</p>`;
         }).join('');
@@ -7146,6 +7181,31 @@ $('cd-guardar').addEventListener('click', async ()=>{
 });
 
 $('cd-cerrar').addEventListener('click', ()=>{ $('modal-compra-detalle').classList.remove('activo'); });
+
+// Cambiar de proveedor toda una compra: solo con PIN de supervisor (RPC cambiar_proveedor_compra)
+$('cd-cambiar-prov').addEventListener('click', ()=>{
+  const c = state.cdCompraActual; if(!c) return;
+  $('cdp-actual').textContent = `Compra folio ${c.folio_documento || '(sin folio)'} — proveedor actual: ${c.proveedores?.nombre || '(sin proveedor)'}`;
+  $('cdp-proveedor').innerHTML = '<option value="">Elige el proveedor correcto…</option>' +
+    state.proveedores.filter(p=>p.id !== c.proveedor_id).map(p=>`<option value="${p.id}">${rpEsc(p.nombre)}</option>`).join('');
+  $('cdp-pin').value = ''; $('cdp-error').innerHTML = '';
+  $('modal-cd-prov').classList.add('activo');
+  setTimeout(()=>$('cdp-proveedor').focus(), 50);
+});
+$('cdp-cancelar').addEventListener('click', ()=>{ $('modal-cd-prov').classList.remove('activo'); });
+$('cdp-confirmar').addEventListener('click', async ()=>{
+  $('cdp-error').innerHTML = '';
+  const prov = $('cdp-proveedor').value, pin = $('cdp-pin').value.trim();
+  if(!prov){ $('cdp-error').innerHTML = '<div class="msg-error">Elige el nuevo proveedor.</div>'; return; }
+  if(!/^[0-9]{4,6}$/.test(pin)){ $('cdp-error').innerHTML = '<div class="msg-error">Captura el PIN del supervisor (4 a 6 dígitos).</div>'; return; }
+  $('cdp-confirmar').disabled = true;
+  const { error } = await sb.rpc('cambiar_proveedor_compra', { p_compra_id: state.cdCompraActual.id, p_proveedor_id: prov, p_pin: pin });
+  $('cdp-confirmar').disabled = false;
+  if(error){ $('cdp-error').innerHTML = `<div class="msg-error">${rpEsc(error.message)}</div>`; return; }
+  $('modal-cd-prov').classList.remove('activo');
+  await cargarCompraDetalle(state.cdCompraActual.id);
+  await cargarComprasLista();
+});
 
 // ---------------------------------------------------------------------------------------------
 // XML DE FACTURA (CFDI) — carga automática de proveedor/folio/fecha/líneas
