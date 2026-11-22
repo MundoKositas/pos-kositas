@@ -1745,8 +1745,8 @@
 
     <h3 style="margin-bottom:6px;">Precio</h3>
     <div class="fila" style="gap:16px;">
-      <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="combo-modo-precio" id="combo-modo-manual" value="manual" checked style="width:auto;"> Precio manual (lo capturo yo)</label>
-      <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="combo-modo-precio" id="combo-modo-calculado" value="calculado" style="width:auto;"> Calculado (suma de componentes menos %)</label>
+      <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="combo-modo-precio" id="combo-modo-manual" value="manual" checked style="width:auto;"> Precio fijo del combo (lo capturo yo, en pesos)</label>
+      <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="combo-modo-precio" id="combo-modo-calculado" value="calculado" style="width:auto;"> Descuento en % (suma de componentes menos %)</label>
     </div>
     <div class="campo" id="combo-descuento-campo" style="display:none;">
       <label>% de descuento sobre la suma de componentes</label>
@@ -2250,7 +2250,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.43.000';
+const APP_VERSION = '1.43.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3795,7 +3795,7 @@ function renderCombosTabla(){
       const p = state.productos.find(pp=>pp.varianteId===comp.varianteId);
       return `${comp.cantidad} × ${p?.nombre || '?'}`;
     }).join(', ');
-    const precioTexto = c.modoPrecio==='manual' ? 'Manual' : `Calculado (−${c.descuentoPct||0}%)`;
+    const precioTexto = c.modoPrecio==='manual' ? 'Precio fijo' : `Descuento ${c.descuentoPct||0}%`;
     const vigenciaTexto = (c.vigenteDesde || c.vigenteHasta)
       ? `${c.vigenteDesde || '…'} a ${c.vigenteHasta || '…'}` : 'Sin límite';
     const listasTexto = c.listaIds.map(id => state.listasPrecio.find(l=>l.id===id)?.nombre || '?').join(', ') || '(ninguna)';
@@ -3919,7 +3919,21 @@ function renderComboListasChecks(){
 function renderComboPreciosManual(){
   const cont = $('combo-precios-manual');
   if($('combo-modo-manual').checked && state.comboListasSeleccionadas.length){
-    cont.innerHTML = '<label>Precio por lista</label>' + state.comboListasSeleccionadas.map(listaId=>{
+    const sumaLista = (listaId)=>{
+      let suma = 0;
+      for(const comp of state.comboComponentes){
+        const pr = state.productos.find(pp=>pp.varianteId===comp.varianteId)?.precios.find(x=>x.listaPrecioId===listaId)?.precio;
+        if(pr==null) return null;
+        suma += pr * comp.cantidad;
+      }
+      return redondear2(suma);
+    };
+    cont.innerHTML = `<label>Precio fijo del combo</label>
+      <div class="fila" style="align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="min-width:160px;">Mismo precio en todas las listas</span>
+        <input type="text" inputmode="decimal" id="combo-precio-todas" placeholder="$0.00" style="width:140px;">
+        <button type="button" class="btn-gris" id="combo-precio-todas-aplicar">Aplicar a todas</button>
+      </div>` + state.comboListasSeleccionadas.map(listaId=>{
       const lista = state.listasPrecio.find(l=>l.id===listaId);
       const precioActual = state.comboEditandoVarianteId
         ? (state.productos.find(p=>p.varianteId===state.comboEditandoVarianteId)?.precios||[]).find(p=>p.listaPrecioId===listaId)?.precio
@@ -3927,8 +3941,14 @@ function renderComboPreciosManual(){
       return `<div class="fila" style="align-items:center;gap:8px;margin-bottom:6px;">
         <span style="min-width:160px;">${lista?.nombre || '?'}</span>
         <input type="text" inputmode="decimal" class="precio-combo-manual" data-lista="${listaId}" value="${precioActual!=null ? money(precioActual) : ''}" placeholder="$0.00" style="width:140px;">
+        <span class="nota combo-ref" data-lista="${listaId}">${sumaLista(listaId)!=null ? 'Suma de componentes: '+money(sumaLista(listaId)) : ''}</span>
       </div>`;
     }).join('');
+    $('combo-precio-todas-aplicar').addEventListener('click', ()=>{
+      const v = parseMoney($('combo-precio-todas').value) || 0;
+      if(!v) return;
+      document.querySelectorAll('.precio-combo-manual').forEach(inp=>{ inp.value = money(v); });
+    });
   } else {
     cont.innerHTML = '';
   }
