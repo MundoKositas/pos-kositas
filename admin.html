@@ -260,6 +260,7 @@
           <div class="col" style="min-width:150px;justify-content:flex-end;">
             <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="cat-ver-activos" checked style="width:auto;"> Activos</label>
             <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="cat-ver-inactivos" checked style="width:auto;"> Inactivos</label>
+            <label style="display:inline-flex;align-items:center;gap:6px;color:#b3261e;font-weight:600;"><input type="checkbox" id="cat-solo-negativo" style="width:auto;"> Solo stock en negativo</label>
           </div>
           <div class="col" style="min-width:170px;justify-content:flex-end;">
             <label style="display:inline-flex;align-items:center;gap:6px;">
@@ -2231,7 +2232,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.42.001';
+const APP_VERSION = '1.42.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -4490,11 +4491,13 @@ function itemsFiltradosCatalogo(){
   const filtroLinea = $('cat-filtro-linea').value;
   // v1.35.011: filtro Activos / Inactivos (marcados los dos = todos; solo uno = solo ese; ninguno = todos).
   const verAct = $('cat-ver-activos').checked, verIna = $('cat-ver-inactivos').checked;
+  const soloNeg = $('cat-solo-negativo').checked; // v1.42.002: solo artículos con existencia menor a 0
   return state.productos.filter(p=>{
     if(verAct !== verIna){
       if(verAct && !p.activo) return false;
       if(verIna && p.activo) return false;
     }
+    if(soloNeg && !(p.inventariable && Number(p.stock) < 0)) return false;
     if(palabras.length){
       const txt = norm(p.nombre) + ' ' + norm(p.marca) + ' ' + p.codigos.map(c=>norm(c.codigo)).join(' ');
       if(!palabras.every(w=>txt.includes(w))) return false;
@@ -4509,7 +4512,7 @@ function itemsFiltradosCatalogo(){
   }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 }
 $('cat-con-impuestos').addEventListener('change', renderCatalogo);
-['cat-ver-activos','cat-ver-inactivos'].forEach(id=>$(id).addEventListener('change', ()=>{ state.catalogoPagina = 1; renderCatalogo(); }));
+['cat-ver-activos','cat-ver-inactivos','cat-solo-negativo'].forEach(id=>$(id).addEventListener('change', ()=>{ state.catalogoPagina = 1; renderCatalogo(); }));
 
 // Paginación: pensada para un inventario de miles de productos — el Catálogo completo (filtrado)
 // solo se usa para armar el orden de Anterior/Siguiente de la ficha de producto (state.catalogoOrden);
@@ -4551,7 +4554,7 @@ function renderCatalogo(){
       <td data-l="Marca">${p.marca||'—'}</td>
       <td class="num" data-l="Costo">${costoMostrado!=null ? money(costoMostrado) : '—'}</td>
       <td class="num" data-l="Precio">${precioTxt}</td>
-      <td class="num" data-l="Stock">${p.inventariable ? p.stock : '—'}</td>
+      <td class="num" data-l="Stock" ${p.inventariable && Number(p.stock) < 0 ? 'style="color:#b3261e;font-weight:700;"' : ''}>${p.inventariable ? p.stock : '—'}</td>
       <td class="num" data-l="Mín./Máx.">${p.inventariable ? `${p.minimo} / ${p.maximo}` : '—'}</td>
       <td data-l="Impuestos">${impuestosTxt}</td>
       <td>${estadoTag}</td>
