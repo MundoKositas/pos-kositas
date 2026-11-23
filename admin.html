@@ -2250,7 +2250,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.43.001';
+const APP_VERSION = '1.43.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -5079,10 +5079,10 @@ $('pv-plantilla').addEventListener('click', ()=>{
   const vistos = new Set();
   const filas = state.productos.filter(p=>p.activo && p.codigoPrincipal && !vistos.has(p.productoId) && vistos.add(p.productoId))
     .map(p=>{ const [c,l] = nombreCat(p); const h = pv.hist.get(p.varianteId);
-      return [c, l, p.codigoPrincipal, p.nombreBase, p.marca, p.proveedorInicialId ? pvNombreProveedor(p.proveedorInicialId) : '', p.multiploPedido || 1, h ? pvNombreProveedor(h.proveedor_id) : ''];
+      return [c, l, p.codigoPrincipal, p.nombreBase, p.marca, p.proveedorInicialId ? pvNombreProveedor(p.proveedorInicialId) : '', p.multiploPedido || 1, p.inventariable ? Number(p.minimo)||0 : '', p.inventariable ? Number(p.maximo)||0 : '', h ? pvNombreProveedor(h.proveedor_id) : ''];
     }).sort((a,b)=>a[0].localeCompare(b[0],'es') || a[1].localeCompare(b[1],'es') || a[3].localeCompare(b[3],'es'));
-  const ws = XLSX.utils.aoa_to_sheet([['Categoría','Línea','Código de barras','Producto','Marca','Proveedor inicial','Múltiplo de pedido','Proveedor por historial (solo informativo)'], ...filas]);
-  ws['!cols'] = [{wch:22},{wch:24},{wch:18},{wch:48},{wch:18},{wch:30},{wch:12},{wch:30}];
+  const ws = XLSX.utils.aoa_to_sheet([['Categoría','Línea','Código de barras','Producto','Marca','Proveedor inicial','Múltiplo de pedido','Mínimo (punto de reorden)','Máximo','Proveedor por historial (solo informativo)'], ...filas]);
+  ws['!cols'] = [{wch:22},{wch:24},{wch:18},{wch:48},{wch:18},{wch:30},{wch:12},{wch:14},{wch:10},{wch:30}];
   const wsP = XLSX.utils.aoa_to_sheet([['Proveedores válidos'], ...state.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>[p.nombre])]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Proveedor inicial'); XLSX.utils.book_append_sheet(wb, wsP, 'Proveedores válidos');
@@ -5096,16 +5096,17 @@ $('pv-archivo').addEventListener('change', async (e)=>{
   try{
     const wb = XLSX.read(await archivo.arrayBuffer(), { type:'array' });
     const hoja = wb.Sheets['Proveedor inicial'] || wb.Sheets[wb.SheetNames[0]];
-    const filas = XLSX.utils.sheet_to_json(hoja, { defval:'' }).map(r=>({ codigo: String(r['Código de barras']||'').trim(), proveedor: String(r['Proveedor inicial']||'').trim(), multiplo: String(r['Múltiplo de pedido']||'').trim() })).filter(r=>r.codigo && (r.proveedor || (r.multiplo && r.multiplo !== '1')));
-    if(!filas.length){ out.innerHTML = '<div class="msg-error">No encontré renglones con "Código de barras" y "Proveedor inicial" (o "Múltiplo de pedido" distinto de 1) llenos.</div>'; return; }
-    let ok = 0, okMult = 0; const sinCod = [], sinProv = new Set();
+    const filas = XLSX.utils.sheet_to_json(hoja, { defval:'' }).map(r=>({ codigo: String(r['Código de barras']||'').trim(), proveedor: String(r['Proveedor inicial']||'').trim(), multiplo: String(r['Múltiplo de pedido']||'').trim(), minimo: String(r['Mínimo (punto de reorden)']??'').trim(), maximo: String(r['Máximo']??'').trim(), almacen_id: state.almacenId })).filter(r=>r.codigo && (r.proveedor || (r.multiplo && r.multiplo !== '1') || r.minimo !== '' || r.maximo !== ''));
+    if(!filas.length){ out.innerHTML = '<div class="msg-error">No encontré renglones con "Código de barras" y datos en "Proveedor inicial", "Múltiplo de pedido", "Mínimo" o "Máximo".</div>'; return; }
+    let ok = 0, okMult = 0, okMM = 0; const sinCod = [], sinProv = new Set(), mmMal = [];
     for(let i=0; i<filas.length; i+=500){
       const { data, error } = await sb.rpc('importar_proveedor_inicial', { p_empresa_id: state.empresaId, p_filas: filas.slice(i, i+500) });
       if(error) throw error;
-      ok += data.actualizados; okMult += data.multiplos; sinCod.push(...data.codigos_no_encontrados); data.proveedores_no_encontrados.forEach(x=>sinProv.add(x));
+      ok += data.actualizados; okMult += data.multiplos; okMM += (data.minmax||0); mmMal.push(...(data.minmax_invalidos||[])); sinCod.push(...data.codigos_no_encontrados); data.proveedores_no_encontrados.forEach(x=>sinProv.add(x));
     }
     await pvEntrar();
-    out.innerHTML = `<div class="msg-ok">Proveedor inicial asignado a ${ok} artículo(s); múltiplo de pedido actualizado en ${okMult}.</div>` +
+    out.innerHTML = `<div class="msg-ok">Proveedor inicial asignado a ${ok} artículo(s); múltiplo de pedido actualizado en ${okMult}; mínimo/máximo actualizado en ${okMM}.</div>` +
+      (mmMal.length ? `<div class="msg-error">Máximo menor que el mínimo (no se cambió) en ${mmMal.length} código(s): ${pvEsc(mmMal.slice(0,15).join(', '))}</div>` : '') +
       (sinProv.size ? `<div class="msg-error">Proveedores que no existen (escríbelos igual que en el catálogo): ${pvEsc([...sinProv].join(', '))}</div>` : '') +
       (sinCod.length ? `<div class="msg-error">Códigos no encontrados (${sinCod.length}): ${pvEsc(sinCod.slice(0,15).join(', '))}${sinCod.length>15?'…':''}</div>` : '');
   }catch(err){ out.innerHTML = `<div class="msg-error">${pvEsc(err.message||String(err))}</div>`; }
