@@ -8,7 +8,8 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--texto);background:var(--fondo);line-height:1.55}
 .cont{max-width:980px;margin:0 auto;padding:0 20px}
-header{border-bottom:1px solid var(--borde);background:#fff}
+html{scroll-padding-top:72px}
+header{border-bottom:1px solid var(--borde);background:#fff;position:sticky;top:0;z-index:50}
 header .cont{display:flex;align-items:center;justify-content:space-between;height:60px}
 .marca{display:inline-flex;align-items:center}
 .marca img{height:38px;width:auto;display:block}
@@ -58,7 +59,13 @@ h2{font-size:1.4rem;margin:0 0 6px;letter-spacing:-.3px}
 #lead-msg .err{background:#fdecea;border:1px solid #f3c2bd;border-radius:8px;padding:10px;color:#a12b20}
 #lead-msg .ok .btn{margin-top:10px;display:block;text-align:center}
 .contacto-dir h3{margin:0 0 6px}.contacto-dir p{color:var(--gris);margin:0 0 14px}.contacto-dir .det{margin:18px 0 0;font-size:.93rem;line-height:1.8}
-footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-size:.88rem;text-align:center}
+body{padding-bottom:56px}
+footer{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;border-top:1px solid var(--borde);color:var(--gris);font-size:.8rem;box-shadow:0 -2px 8px rgba(0,0,0,.04)}
+footer .cont{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:46px;padding-top:6px;padding-bottom:6px}
+footer .marcas{margin:0;gap:16px;flex-wrap:nowrap}
+footer .marcas img{height:22px}
+footer .legal{text-align:right;line-height:1.35}
+@media(max-width:600px){footer .marcas{display:none}footer .cont{justify-content:center}footer .legal{text-align:center;font-size:.75rem}footer .tag{display:none}}
 </style></head><body>
 <header><div class="cont"><span class="marca"><img id="marca" src="ofertienda-logo.png" alt="Ofertienda"></span><a class="btn" id="wa-top" href="#">Escríbenos</a></div></header>
 <main class="cont">
@@ -113,7 +120,7 @@ footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-s
         <label>Cuéntanos de tu negocio (opcional)<textarea name="mensaje" rows="3" maxlength="500"></textarea></label>
         <input name="web" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
         <button class="btn" type="submit" id="lead-enviar">Quiero que me contacten</button>
-        <p class="nota-priv">Usaremos tus datos solo para contactarte sobre Ofertienda · Desde Casa.</p>
+        <p class="nota-priv">Usaremos tus datos solo para contactarte sobre Ofertienda · Desde Casa. Consulta nuestro <a href="aviso-privacidad.html?t=Ofertienda%20%C2%B7%20Desde%20Casa" style="color:inherit">aviso de privacidad</a>.</p>
         <div id="lead-msg" role="status"></div>
       </form>
       <div class="card contacto-dir">
@@ -125,7 +132,7 @@ footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-s
     </div>
   </section>
 </main>
-<footer><div class="cont"><div class="marcas"><a href="https://ofertienda.mx"><img src="ofertienda-logo.png" alt="Ofertienda"></a><a href="https://desdecasa.mx"><img src="desdecasa-logo.png" alt="Desde Casa"></a></div>Ofertienda · Desde Casa — Durango, México. Probado a diario en una tienda real.</div></footer>
+<footer><div class="cont"><div class="marcas"><a href="https://ofertienda.mx"><img src="ofertienda-logo.png" alt="Ofertienda"></a><a href="https://desdecasa.mx"><img src="desdecasa-logo.png" alt="Desde Casa"></a></div><div class="legal"><span class="tag">Durango, México · Probado a diario en una tienda real<br></span>D.R. © <span id="anio">2026</span> Ofertienda · Desde Casa · <a href="aviso-privacidad.html?t=Ofertienda%20%C2%B7%20Desde%20Casa" style="color:inherit">Aviso de privacidad</a></div></div></footer>
 <script>
 // Cambia este número (con lada de país, sin signos) si quieres que lleguen a otro WhatsApp.
 var WHATSAPP='526182597230';
@@ -139,6 +146,7 @@ if(esCatalogo){
   document.getElementById('h1').textContent='Tu tienda en línea, con entrega a domicilio';
   document.getElementById('lema').textContent='Muestra tus productos en un catálogo con tu marca, recibe pedidos desde el celular y organiza tus entregas. Todo conectado a tu punto de venta.';
 }
+document.getElementById('anio').textContent=new Date().getFullYear();
 var msg=encodeURIComponent(esCatalogo?'Hola, me interesa una tienda en línea con entrega a domicilio para mi negocio.':'Hola, me interesa el punto de venta y la tienda en línea para mi negocio.');
 ['wa-top','wa-cta'].forEach(function(id){document.getElementById(id).href='https://wa.me/'+WHATSAPP+'?text='+msg;});
 document.getElementById('wa-hero').href='#contacto';
