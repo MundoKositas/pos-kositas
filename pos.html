@@ -794,7 +794,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.11.003';
+const APP_VERSION = '1.11.004';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -1757,6 +1757,7 @@ async function iniciarSesionApp(){
   state.empresaNombre = empresa.nombre_comercial;
   state.desglosarImpuestos = empresa.desglosar_impuestos_ticket !== false;
   state.logoUrl = empresa.logo_url || '';
+  state.logoSinImagen = empresa.logo_sin_imagen_url || empresa.logo_url || '';
   state.textoPagare = empresa.texto_pagare || '';
   state.empresaDomicilio = empresa.domicilio || '';
   state.empresaTelefono = empresa.telefono || '';
@@ -2535,7 +2536,7 @@ function abrirSelectorModelo(codigo, lista){
   $('selmod-lista').innerHTML = ordenada.map(p=>{
     const sin = !p.esServicio && p.stock <= 0;
     return `<button type="button" class="selmod-op ${sin?'selmod-sin':''}" data-v="${p.varianteId}">
-      ${p.imagen ? `<img src="${esc(p.imagen)}" alt="" loading="lazy">` : '<div class="selmod-ph">📦</div>'}
+      ${p.imagen ? `<img src="${esc(p.imagen)}" alt="" loading="lazy">` : (state.logoSinImagen ? `<img src="${esc(state.logoSinImagen)}" alt="" style="object-fit:contain;padding:8px;box-sizing:border-box;">` : '<div class="selmod-ph">📦</div>')}
       <span class="selmod-n">${esc(p.nombre)}</span>
       <span class="selmod-s">${p.esServicio ? '' : (sin ? 'Sin existencia' : 'Existencia: ' + p.stock)}</span>
     </button>`;
