@@ -21,6 +21,12 @@ header .cont{display:flex;align-items:center;justify-content:space-between;heigh
 .hero h1{font-size:clamp(1.8rem,5vw,2.7rem);line-height:1.15;margin:0 0 14px;letter-spacing:-.8px}
 .hero p{font-size:1.08rem;color:var(--gris);max-width:620px;margin:0 0 24px}
 .hero .acc{display:flex;gap:12px;flex-wrap:wrap}
+.stats{display:none;margin:0 0 44px}
+.stats .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:#fff;border:1px solid var(--borde);border-radius:12px;padding:16px 14px;text-align:center}
+.stat b{display:block;font-size:clamp(1.5rem,5vw,2rem);line-height:1.1;color:var(--verde-osc);letter-spacing:-.5px}
+.stat span{display:block;margin-top:4px;font-size:.85rem;color:var(--gris)}
+.stats .al{margin:10px 0 0;text-align:center;font-size:.78rem;color:var(--gris)}
 h2{font-size:1.4rem;margin:0 0 6px;letter-spacing:-.3px}
 .sub{color:var(--gris);margin:0 0 22px}
 .paq{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:44px}
@@ -61,6 +67,16 @@ footer{border-top:1px solid var(--borde);padding:22px 0;color:var(--gris);font-s
     <h1 id="h1">Tu negocio con punto de venta y tienda en línea, en un solo lugar</h1>
     <p id="lema">Cobra en caja, controla tu inventario y recibe pedidos a domicilio de tus clientes. Sencillo, en español y hecho en Durango.</p>
     <div class="acc"><a class="btn" id="wa-hero" href="#">Quiero información</a><a class="btn sec" href="#paquetes">Ver qué incluye</a></div>
+  </section>
+
+  <section class="stats" id="stats" aria-label="Cifras de la plataforma">
+    <div class="grid">
+      <div class="stat"><b id="st-articulos">—</b><span>artículos administrados</span></div>
+      <div class="stat"><b id="st-ventas">—</b><span>ventas registradas</span></div>
+      <div class="stat"><b id="st-codigos">—</b><span>códigos de barras activos</span></div>
+      <div class="stat"><b id="st-desde">—</b><span>en operación desde</span></div>
+    </div>
+    <p class="al" id="st-al"></p>
   </section>
 
   <section id="paquetes">
@@ -130,6 +146,24 @@ document.getElementById('wa-hero').href='#contacto';
 // ---- Formulario de contacto: guarda el registro en la base y ofrece abrir WhatsApp con el mensaje listo ----
 var SB_URL='https://vsfzkktmdwqkfbecmfcj.supabase.co', SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs';
 function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+// ---- Cifras reales (suma de empresas activas), se actualizan cada vez que alguien abre la página ----
+(function(){
+  var fmt=function(n){return Number(n).toLocaleString('es-MX');};
+  fetch(SB_URL+'/rest/v1/rpc/estadisticas_plataforma',{method:'POST',headers:{'Content-Type':'application/json',apikey:SB_KEY,Authorization:'Bearer '+SB_KEY},body:'{}'})
+  .then(function(r){if(!r.ok)throw new Error('x');return r.json();})
+  .then(function(j){
+    if(!j||!(j.ventas>0)||!(j.articulos>0))return;
+    document.getElementById('st-articulos').textContent=fmt(j.articulos);
+    document.getElementById('st-ventas').textContent=fmt(j.ventas);
+    document.getElementById('st-codigos').textContent=fmt(j.codigos);
+    var d=j.desde?new Date(j.desde+'T12:00:00'):null;
+    document.getElementById('st-desde').textContent=d?d.toLocaleDateString('es-MX',{month:'short',year:'numeric'}).replace('.',''):'—';
+    var a=j.al?new Date(j.al):new Date();
+    document.getElementById('st-al').textContent='Cifras reales de la plataforma · actualizadas al '+a.toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+    document.getElementById('stats').style.display='block';
+  }).catch(function(){});
+})();
+
 document.getElementById('form-lead').addEventListener('submit',function(e){
   e.preventDefault();
   var f=e.target, out=document.getElementById('lead-msg'), btn=document.getElementById('lead-enviar');
