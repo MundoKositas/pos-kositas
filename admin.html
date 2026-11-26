@@ -2285,7 +2285,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.002';
+const APP_VERSION = '1.45.003';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -8924,9 +8924,10 @@ const CATALOGOS_SIMPLES = {
       { id:'nombre', label:'Nombre', tipo:'texto', requerido:true },
       { id:'orden', label:'Orden en el catálogo en línea (1 = primero; vacío = al final, alfabético)', tipo:'numero' },
       { id:'imagen_url', label:'Imagen en el catálogo en línea (opcional; si no hay, se usa la de un artículo)', tipo:'imagen' },
+      { id:'categoria_meta', label:'Categoría para Facebook/Instagram (opcional; ej. Hardware > Plumbing, Home & Garden > Kitchen & Dining, Toys & Games)', tipo:'texto' },
     ],
     tieneActivo: true, orden: 'orden',
-    columnas: [{ label:'Orden', valor:r=>r.orden ?? '—' }, { label:'Nombre', valor:r=>r.nombre }, { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' }],
+    columnas: [{ label:'Orden', valor:r=>r.orden ?? '—' }, { label:'Nombre', valor:r=>r.nombre }, { label:'Imagen', valor:r=>r.imagen_url ? 'Sí' : '—' }, { label:'Categoría Facebook', valor:r=>r.categoria_meta || '—' }],
   },
   lineas: {
     tabla: 'lineas_articulo', tituloPlural: 'Líneas de artículo', tituloSingular: 'línea de artículo',
