@@ -2086,8 +2086,10 @@
     <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="fb-activo" style="width:auto;"> Publicar mi catálogo para Facebook e Instagram</label></div>
     <div class="grid-2">
       <div class="campo"><label>Lista de precios que se publica</label><select id="fb-lista"></select></div>
-      <div class="campo"><label>Existencia mínima para publicar</label><input type="number" id="fb-min" min="1" step="1" value="2"></div>
+      <div class="campo"><label>Existencia mínima para publicar</label><input type="number" id="fb-min" min="0" step="1" value="2"></div>
     </div>
+    <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="fb-sinex" style="width:auto;"> Publicar también los productos sin existencia (se venden sobre pedido)</label>
+      <p class="nota" style="margin:2px 0 0 26px;">Los productos con existencia suficiente salen como "disponible" y los demás como "disponible por pedido", sin cantidad. No cambia tu inventario.</p></div>
     <button type="button" class="btn-secundario" id="fb-guardar">Guardar</button>
     <div id="fb-estado"></div>
     <div id="fb-url-wrap" style="display:none;margin-top:12px;">
@@ -2283,7 +2285,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.000';
+const APP_VERSION = '1.45.001';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2849,6 +2851,7 @@ async function cargarFacebookConfig(){
   $('fb-lista').innerHTML = '<option value="">Público General (predeterminada)</option>' + (data.listas||[]).map(l=>`<option value="${l.id}">${l.nombre}</option>`).join('');
   $('fb-lista').value = data.lista_precio_id || '';
   $('fb-min').value = data.existencia_minima ?? 2;
+  $('fb-sinex').checked = !!data.publicar_sin_existencia;
   fbMostrarUrl();
 }
 function fbMostrarUrl(){
@@ -2860,7 +2863,7 @@ function fbMostrarUrl(){
 async function fbGuardar(extra){
   $('fb-estado').innerHTML = '<p class="nota">Guardando…</p>';
   const { error } = await sb.rpc('facebook_guardar_config', { p_empresa: state.empresaId, p: Object.assign({
-    activo: $('fb-activo').checked, lista_precio_id: $('fb-lista').value || '', existencia_minima: $('fb-min').value || '2' }, extra||{}) });
+    activo: $('fb-activo').checked, lista_precio_id: $('fb-lista').value || '', existencia_minima: $('fb-min').value || '2', publicar_sin_existencia: $('fb-sinex').checked }, extra||{}) });
   if(error){ $('fb-estado').innerHTML = `<div class="msg-error">${error.message}</div>`; return false; }
   await cargarFacebookConfig();
   $('fb-estado').innerHTML = '<p class="nota">Guardado.</p>';
