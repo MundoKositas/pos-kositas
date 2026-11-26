@@ -233,6 +233,7 @@
     <button class="tab-btn" data-tab="tab-cortes">Cortes</button>
     <button class="tab-btn" data-tab="tab-clientes">Clientes</button>
     <button class="tab-btn" data-tab="tab-reparto">Reparto</button>
+    <button class="tab-btn" data-tab="tab-publicar">Publicar</button>
     <button class="tab-btn" data-tab="tab-compras" id="tabbtn-compras" style="display:none;">Compras</button>
     <button class="tab-btn" data-tab="tab-pedidos" id="tabbtn-pedidos" style="display:none;">Pedidos a proveedor</button>
     <button class="tab-btn" data-tab="tab-inventario" id="tabbtn-inventario" style="display:none;">Inventario</button>
@@ -1124,6 +1125,39 @@
           </table>
         </div>
         <p class="nota" id="trasp-lista-vacio" style="display:none;">No hay traspasos en ese rango.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PUBLICAR (imágenes con marco para redes) -->
+  <div class="tab-panel" id="tab-publicar" style="display:none;">
+    <h2>Imágenes para publicar</h2>
+    <p class="nota">Elige un producto y genera la imagen cuadrada (1080×1080) con tu marco, lista para Facebook, Instagram o Marketplace. Los colores, logo, teléfono y dirección salen de la configuración de tu empresa.</p>
+    <div style="display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:18px;align-items:start;">
+      <div>
+        <div class="campo"><label>Buscar producto</label><input type="text" id="pub-buscar" placeholder="Nombre, marca o código"></div>
+        <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="pub-solofoto" checked style="width:auto;"> Solo productos con foto</label></div>
+        <div id="pub-lista" style="max-height:340px;overflow:auto;border:1px solid var(--borde);border-radius:8px;"></div>
+      </div>
+      <div id="pub-editor" style="display:none;">
+        <div class="grid-2">
+          <div class="campo"><label>Modelo</label><select id="pub-modelo"><option value="A">A · Foto grande con precio</option><option value="B">B · Foto + características</option></select></div>
+          <div class="campo"><label>Lista de precios</label><select id="pub-lista-precio"></select></div>
+        </div>
+        <div class="campo"><label>Título (arriba)</label><input type="text" id="pub-titulo" maxlength="80"></div>
+        <div class="campo"><label>Texto adicional (abajo, opcional)</label><input type="text" id="pub-extra" maxlength="70" placeholder="Ej. Entrega a domicilio en Durango"></div>
+        <div class="campo" id="pub-carac-wrap"><label>Características (modelo B, una por renglón)</label><textarea id="pub-carac" rows="4"></textarea></div>
+        <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="pub-precio" checked style="width:auto;"> Mostrar precio en la imagen</label></div>
+        <canvas id="pub-canvas" width="1080" height="1080" style="width:100%;max-width:540px;border:1px solid var(--borde);border-radius:8px;background:#fff;"></canvas>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+          <button type="button" class="btn-primario" id="pub-descargar">⬇ Descargar imagen</button>
+        </div>
+        <div class="campo"><label>Texto para la publicación (Facebook / Instagram / WhatsApp)</label><textarea id="pub-texto" rows="9"></textarea>
+          <button type="button" id="pub-copiar-texto" style="margin-top:6px;">📋 Copiar texto</button></div>
+        <div class="campo"><label>Para Marketplace (copiar y pegar)</label><textarea id="pub-mkt" rows="6"></textarea>
+          <button type="button" id="pub-copiar-mkt" style="margin-top:6px;">📋 Copiar</button></div>
+        <p class="nota">Mejor horario sugerido: de 12:00 a 2:00 pm o de 7:00 a 9:00 pm. Si el producto no tiene foto, súbela primero en el producto.</p>
+        <div id="pub-estado"></div>
       </div>
     </div>
   </div>
@@ -2286,7 +2320,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.004';
+const APP_VERSION = '1.45.005';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -10185,6 +10219,180 @@ document.querySelectorAll('#rp-tabs .tab-btn').forEach(btn=>btn.addEventListener
   if(btn.dataset.rptab === 'rp-campanas') cpPreparar();
 }));
 document.querySelector('[data-tab="tab-reparto"]').addEventListener('click', ()=>{ rpCargarRepartidores().then(rpCargarPedidos); rpCargarZonas(); rpCargarConfig(); rpCargarMensajes(); });
+
+// ---------- PUBLICAR: imágenes con marco para redes (1080x1080) ----------
+const PUB = { marca: null, cfg: null, sel: null, logoImg: null, fotoImg: null, listo: false };
+function pubDinero(n){ return '$' + Number(n||0).toLocaleString('es-MX', { minimumFractionDigits: (Number(n)%1?2:0), maximumFractionDigits: 2 }); }
+function pubTel(t){ const d = String(t||'').replace(/\D/g,''); return d.length===10 ? `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6)}` : d; }
+async function pubCargarBase(){
+  if(PUB.listo && PUB.empresa === state.empresaId) return;
+  const [{ data: m }, { data: c }] = await Promise.all([
+    sb.from('empresa_marca').select('*').eq('empresa_id', state.empresaId).maybeSingle(),
+    sb.from('config_reparto').select('*').eq('empresa_id', state.empresaId).maybeSingle(),
+  ]);
+  PUB.marca = m || {}; PUB.cfg = c || {}; PUB.empresa = state.empresaId; PUB.listo = true;
+  const logo = state.logoUrl || m?.logo_url || '';
+  PUB.logoImg = null;
+  if(logo){ PUB.logoImg = await pubImg(logo); }
+  $('pub-lista-precio').innerHTML = (state.listasPrecio||[]).filter(l=>l.activo!==false).map(l=>`<option value="${l.id}">${rpEsc(l.nombre)}</option>`).join('');
+  const pub = (state.listasPrecio||[]).find(l=>/blico/i.test(l.nombre)); if(pub) $('pub-lista-precio').value = pub.id;
+}
+function pubImg(url){
+  return new Promise(res=>{ const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = ()=>res(i); i.onerror = ()=>res(null); i.src = url + (url.includes('?')?'&':'?') + 'cb=' + (Date.now()%100000); });
+}
+function pubPrecioDe(p){
+  const lid = $('pub-lista-precio').value;
+  const pr = (p.precios||[]).find(x=>x.listaPrecioId===lid)?.precio;
+  const base = pr ?? (p.precios||[])[0]?.precio ?? 0;
+  const tasa = (p.impuestos||[]).reduce((s,i)=>s+i.tasa,0);
+  return Math.round(base*(1+tasa)*100)/100;
+}
+function pubRenderLista(){
+  const q = normalizarTexto($('pub-buscar').value||'');
+  const soloFoto = $('pub-solofoto').checked;
+  const arr = (state.productos||[]).filter(p=>p.activo && p.activoVariante!==false && (!soloFoto || p.imagenVariante || p.imagenUrl)
+    && (!q || normalizarTexto(p.nombre+' '+p.marca+' '+p.codigoPrincipal).includes(q))).slice(0,40);
+  $('pub-lista').innerHTML = arr.length ? arr.map(p=>`<div class="pub-item" data-v="${p.varianteId}" style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--borde);cursor:pointer;">
+    <img src="${rpEsc(p.imagenVariante||p.imagenUrl||'')}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:6px;background:#eee;" loading="lazy">
+    <span style="font-size:13px;">${rpEsc(p.nombre)}</span></div>`).join('') : '<p class="nota" style="padding:8px;">Sin resultados.</p>';
+}
+$('pub-buscar').addEventListener('input', pubRenderLista);
+$('pub-solofoto').addEventListener('change', pubRenderLista);
+$('pub-lista').addEventListener('click', async (e)=>{
+  const it = e.target.closest('.pub-item'); if(!it) return;
+  const p = state.productos.find(x=>x.varianteId===it.dataset.v); if(!p) return;
+  PUB.sel = p;
+  $('pub-editor').style.display = '';
+  $('pub-titulo').value = p.nombre;
+  $('pub-carac').value = (p.caracteristicas||'').trim();
+  $('pub-extra').value = (PUB.cfg?.envio_base!=null ? 'Entrega a domicilio en Durango' : '');
+  $('pub-modelo').value = ($('pub-carac').value ? 'B' : 'A');
+  const url = p.imagenVariante || p.imagenUrl;
+  PUB.fotoImg = url ? await pubImg(url) : null;
+  pubRedibujar(); pubTextos();
+});
+['pub-modelo','pub-lista-precio','pub-titulo','pub-extra','pub-carac','pub-precio'].forEach(id=>{
+  $(id).addEventListener('input', ()=>{ pubRedibujar(); pubTextos(); }); $(id).addEventListener('change', ()=>{ pubRedibujar(); pubTextos(); });
+});
+function pubAjustarTexto(ctx, txt, ancho, tamMax, tamMin, lineasMax, fuente){
+  for(let t=tamMax; t>=tamMin; t-=2){
+    ctx.font = `800 ${t}px ${fuente}`;
+    const pal = String(txt).split(/\s+/); const lin = []; let cur = '';
+    pal.forEach(w=>{ const prueba = cur ? cur+' '+w : w; if(ctx.measureText(prueba).width <= ancho) cur = prueba; else { if(cur) lin.push(cur); cur = w; } });
+    if(cur) lin.push(cur);
+    if(lin.length <= lineasMax) return { t, lin };
+  }
+  ctx.font = `800 ${tamMin}px ${fuente}`;
+  const pal = String(txt).split(/\s+/); const lin = []; let cur = '';
+  pal.forEach(w=>{ const prueba = cur ? cur+' '+w : w; if(ctx.measureText(prueba).width <= ancho) cur = prueba; else { lin.push(cur); cur = w; } }); lin.push(cur);
+  const rec = lin.slice(0, lineasMax); if(lin.length > lineasMax) rec[lineasMax-1] = rec[lineasMax-1].replace(/.{0,3}$/, '…');
+  return { t: tamMin, lin: rec };
+}
+function pubRedibujar(){
+  const p = PUB.sel; if(!p) return;
+  const cv = $('pub-canvas'), ctx = cv.getContext('2d'), W = 1080;
+  const col = PUB.marca?.catalogo || {}; const barra = col.barra || '#2f7d4f', acento = col.acento || barra, txtBarra = col.barra_texto || '#ffffff';
+  const F = 'Montserrat, "Arial Black", Arial, sans-serif';
+  const HH = 190, FY = 790;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,W);
+  // encabezado
+  ctx.fillStyle = barra; ctx.fillRect(0,0,W,HH);
+  ctx.fillStyle = txtBarra; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const ajuste = pubAjustarTexto(ctx, $('pub-titulo').value || p.nombre, 680, 60, 34, 2, F);
+  ctx.font = `800 ${ajuste.t}px ${F}`;
+  const alto = ajuste.t*1.12, y0 = HH/2 - (ajuste.lin.length-1)*alto/2;
+  ajuste.lin.forEach((l,i)=>ctx.fillText(l, 50, y0 + i*alto));
+  // logo en una cápsula blanca (se ve con cualquier logo)
+  if(PUB.logoImg){
+    const bw = 270, bh = 130, bx = W-50-bw, by = (HH-bh)/2;
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 26); ctx.fill();
+    const r = Math.min((bw-30)/PUB.logoImg.width, (bh-24)/PUB.logoImg.height);
+    const lw = PUB.logoImg.width*r, lh = PUB.logoImg.height*r;
+    ctx.drawImage(PUB.logoImg, bx+(bw-lw)/2, by+(bh-lh)/2, lw, lh);
+  }
+  // cuerpo
+  const modelo = $('pub-modelo').value, mostrarPrecio = $('pub-precio').checked, precio = pubPrecioDe(p);
+  $('pub-carac-wrap').style.display = modelo==='B' ? '' : 'none';
+  const bodyH = FY - HH;
+  const foto = (x, y, w, h)=>{
+    if(!PUB.fotoImg){ ctx.fillStyle = '#f1f1f1'; ctx.fillRect(x,y,w,h); return; }
+    const r = Math.min(w/PUB.fotoImg.width, h/PUB.fotoImg.height);
+    const iw = PUB.fotoImg.width*r, ih = PUB.fotoImg.height*r;
+    ctx.drawImage(PUB.fotoImg, x+(w-iw)/2, y+(h-ih)/2, iw, ih);
+  };
+  const etiquetaPrecio = (cx, cy, rad)=>{
+    ctx.fillStyle = acento; ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth = 8; ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const s = pubDinero(precio); let t = rad*0.62; ctx.font = `900 ${t}px ${F}`;
+    while(ctx.measureText(s).width > rad*1.55 && t>20){ t-=2; ctx.font = `900 ${t}px ${F}`; }
+    ctx.fillText(s, cx, cy); ctx.textAlign = 'left';
+  };
+  if(modelo==='A'){
+    foto(40, HH+20, W-80, bodyH-40);
+    if(mostrarPrecio) etiquetaPrecio(W-150, FY-150, 115);
+  } else {
+    foto(30, HH+20, 600, bodyH-40);
+    const x0 = 650, ancho = W-x0-40;
+    ctx.fillStyle = '#222'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    const items = ($('pub-carac').value||'').split(/\n+/).map(s=>s.trim()).filter(Boolean).slice(0,6);
+    let y = HH+40;
+    ctx.font = `800 34px ${F}`; ctx.fillStyle = barra; ctx.fillText('Características', x0, y); y += 56;
+    ctx.fillStyle = '#222';
+    items.forEach(it=>{
+      const aj = pubAjustarTexto(ctx, it, ancho-34, 30, 22, 3, F); ctx.font = `600 ${aj.t}px ${F}`;
+      ctx.fillStyle = acento; ctx.fillText('✔', x0, y); ctx.fillStyle = '#222';
+      aj.lin.forEach((l,i)=>{ ctx.fillText(l, x0+38, y + i*(aj.t*1.25)); });
+      y += aj.lin.length*aj.t*1.25 + 14;
+    });
+    if(mostrarPrecio) etiquetaPrecio(x0+ancho/2, FY-110, 90);
+  }
+  // pie
+  ctx.fillStyle = barra; ctx.fillRect(0, FY, W, W-FY);
+  ctx.fillStyle = txtBarra; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const extra = $('pub-extra').value.trim();
+  let y = FY + 40;
+  if(extra){ const ae = pubAjustarTexto(ctx, extra, 960, 38, 24, 1, F); ctx.font = `800 ${ae.t}px ${F}`; ctx.fillText(ae.lin[0], W/2, y); }
+  y = FY + 112;
+  const tel = pubTel(PUB.cfg?.telefono || '');
+  if(tel){
+    ctx.font = `900 60px ${F}`; const tw = ctx.measureText(tel).width, ico = 64, gap = 18, x = (W - (ico+gap+tw))/2;
+    ctx.fillStyle = '#25D366'; ctx.beginPath(); ctx.arc(x+ico/2, y, ico/2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `700 40px ${F}`; ctx.fillText('✆', x+ico/2, y+2);
+    ctx.fillStyle = txtBarra; ctx.font = `900 60px ${F}`; ctx.textAlign = 'left'; ctx.fillText(tel, x+ico+gap, y+2); ctx.textAlign = 'center';
+  }
+  ctx.fillStyle = txtBarra;
+  const dir = PUB.cfg?.direccion || '';
+  if(dir){ const ad = pubAjustarTexto(ctx, dir, 1000, 28, 18, 1, F); ctx.font = `700 ${ad.t}px ${F}`; ctx.fillText(ad.lin[0], W/2, FY+178); }
+  const env = Number(PUB.cfg?.envio_base);
+  ctx.font = `600 22px ${F}`; ctx.fillText(`Servicio a domicilio en Durango. Pregunta por tu zona de cobertura.${env? ' Desde '+pubDinero(env)+' por pedido.':''}`, W/2, FY+222);
+  ctx.font = `500 20px ${F}`; ctx.fillText('Imágenes y colores ilustrativos. Hasta agotar existencias.', W/2, FY+256);
+  ctx.textAlign = 'left';
+}
+function pubTextos(){
+  const p = PUB.sel; if(!p) return;
+  const precio = pubDinero(pubPrecioDe(p)), emp = state.empresaNombre || '';
+  const tel = pubTel(PUB.cfg?.telefono||''), dir = PUB.cfg?.direccion || '';
+  const car = ($('pub-carac').value||'').split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  const tag = s=>'#'+normalizarTexto(s).replace(/[^a-z0-9]/g,'');
+  const lin = state.lineas.find(l=>l.id===p.lineaArticuloId);
+  const tags = ['#Durango','#DurangoMx','#ComprasDurango', tag(emp), lin?tag(lin.nombre):'', p.marca?tag(p.marca):''].filter(t=>t.length>2);
+  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
+  $('pub-mkt').value = [`Título: ${p.nombre}`, `Precio: ${precio.replace('$','')}`, 'Estado: Nuevo', 'Descripción:', [p.nombre, p.marca, ...car, 'Entrega a domicilio en Durango.', tel?`Pedidos por WhatsApp ${tel}.`:''].filter(Boolean).join('. ')].join('\n');
+}
+async function pubCopiar(id){ try{ await navigator.clipboard.writeText($(id).value); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; }catch(e){ $(id).select(); document.execCommand('copy'); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; } }
+$('pub-copiar-texto').addEventListener('click', ()=>pubCopiar('pub-texto'));
+$('pub-copiar-mkt').addEventListener('click', ()=>pubCopiar('pub-mkt'));
+$('pub-descargar').addEventListener('click', ()=>{
+  try{
+    $('pub-canvas').toBlob(b=>{
+      if(!b){ $('pub-estado').innerHTML = '<div class="msg-error">No se pudo generar la imagen (la foto no permite descargarse). Vuelve a subir la foto del producto.</div>'; return; }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+      a.download = (normalizarTexto(PUB.sel?.nombre||'producto').replace(/[^a-z0-9]+/g,'-').slice(0,60) || 'producto') + '.png'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  }catch(e){ $('pub-estado').innerHTML = '<div class="msg-error">No se pudo descargar: '+rpEsc(e.message)+'</div>'; }
+});
+document.querySelector('[data-tab="tab-publicar"]').addEventListener('click', async ()=>{ await pubCargarBase(); pubRenderLista(); });
 
 // ----- Clientes y promociones (WhatsApp) -----
 let cpClientes = [], cpContactos = {}, cpLista = [];
