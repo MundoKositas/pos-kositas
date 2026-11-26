@@ -1152,7 +1152,9 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
           <button type="button" class="btn-primario" id="pub-descargar">⬇ Descargar imagen</button>
         </div>
-        <div class="campo"><label>Texto para la publicación (Facebook / Instagram / WhatsApp)</label><textarea id="pub-texto" rows="9"></textarea>
+        <div class="campo"><label>Texto para la publicación (Facebook / Instagram / WhatsApp)</label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="pub-enlace" checked style="width:auto;"> Incluir el enlace del artículo en el catálogo</label>
+          <textarea id="pub-texto" rows="10"></textarea>
           <button type="button" id="pub-copiar-texto" style="margin-top:6px;">📋 Copiar texto</button></div>
         <div class="campo"><label>Para Marketplace (copiar y pegar)</label><textarea id="pub-mkt" rows="6"></textarea>
           <button type="button" id="pub-copiar-mkt" style="margin-top:6px;">📋 Copiar</button></div>
@@ -2320,7 +2322,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.006';
+const APP_VERSION = '1.45.007';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -10233,6 +10235,7 @@ async function pubCargarBase(){
     sb.from('config_reparto').select('*').eq('empresa_id', state.empresaId).maybeSingle(),
   ]);
   PUB.marca = m || {}; PUB.cfg = c || {}; PUB.empresa = state.empresaId; PUB.listo = true;
+  try{ const { data: fb } = await sb.rpc('facebook_config', { p_empresa: state.empresaId }); PUB.host = fb?.host || ''; }catch(e){ PUB.host = ''; }
   const logo = state.logoUrl || m?.logo_url || '';
   PUB.logoImg = null;
   if(logo){ PUB.logoImg = await pubImg(logo); }
@@ -10273,7 +10276,7 @@ $('pub-lista').addEventListener('click', async (e)=>{
   PUB.fotoImg = url ? await pubImg(url) : null;
   pubRedibujar(); pubTextos();
 });
-['pub-modelo','pub-lista-precio','pub-titulo','pub-extra','pub-carac','pub-precio'].forEach(id=>{
+['pub-modelo','pub-lista-precio','pub-titulo','pub-extra','pub-carac','pub-precio','pub-enlace'].forEach(id=>{
   $(id).addEventListener('input', ()=>{ pubRedibujar(); pubTextos(); }); $(id).addEventListener('change', ()=>{ pubRedibujar(); pubTextos(); });
 });
 function pubAjustarTexto(ctx, txt, ancho, tamMax, tamMin, lineasMax, fuente){
@@ -10379,7 +10382,8 @@ function pubTextos(){
   const tag = s=>'#'+normalizarTexto(s).replace(/[^a-z0-9]/g,'');
   const lin = state.lineas.find(l=>l.id===p.lineaArticuloId);
   const tags = ['#Durango','#DurangoMx','#ComprasDurango', tag(emp), lin?tag(lin.nombre):'', p.marca?tag(p.marca):''].filter(t=>t.length>2);
-  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
+  const enlace = ($('pub-enlace').checked && PUB.host) ? `🛍️ Míralo aquí: https://${PUB.host}/?p=${p.productoId}` : '';
+  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', enlace, tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
   $('pub-mkt').value = [`Título: ${p.nombre}`, `Precio: ${precio.replace('$','')}`, 'Estado: Nuevo', 'Descripción:', [p.nombre, p.marca, ...car, 'Entrega a domicilio en Durango.', tel?`Pedidos por WhatsApp ${tel}.`:''].filter(Boolean).join('. ')].join('\n');
 }
 async function pubCopiar(id){ try{ await navigator.clipboard.writeText($(id).value); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; }catch(e){ $(id).select(); document.execCommand('copy'); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; } }
