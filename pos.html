@@ -794,7 +794,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // Versión visible del archivo: MAYOR.MENOR.PARCHE — mientras el POS esté en construcción,
 // MAYOR se queda en 1; MENOR sube en cambios grandes; PARCHE (3 dígitos) sube en cada entrega,
 // así se puede confirmar a simple vista que el navegador está usando el archivo más reciente.
-const APP_VERSION = '1.11.004';
+const APP_VERSION = '1.11.005';
 
 // Ronda 33 (2026-09-05): solo estos roles deben poder entrar y operar el Punto de Venta — Adrián
 // reportó que un usuario con rol "Comprador" pudo entrar y vender, cuando ese rol es para
@@ -906,6 +906,10 @@ function aplicarMarcaColores(c, empresaId){
     if(data && data.empresa_id){
       aplicarMarcaColores(data.colores_pos, data.empresa_id);
       if(data.logo_url) lg.src = data.logo_url; // sin logo propio: no se muestra ninguno
+      if(data.nombre && data.empresa_id !== '96f14cb8-3068-4f66-a13e-30561c9068c3'){ // otras empresas: su nombre, no «Kositas»
+        const h = document.querySelector('#card-login h1'); if(h) h.textContent = 'POS ' + data.nombre;
+        document.title = 'POS ' + data.nombre + ' — Punto de Venta';
+      }
       return;
     }
   }catch(e){}
@@ -1745,7 +1749,7 @@ async function iniciarSesionApp(){
   if(!state.roles.some(r=>ROLES_PERMITIDOS_POS.includes(r))){
     await sb.auth.signOut();
     mostrarPantalla('pantalla-login');
-    $('login-error').innerHTML = `<div class="msg-error">Tu rol (${state.rol}) no tiene acceso al Punto de Venta. Usa Admin Kositas.</div>`;
+    $('login-error').innerHTML = `<div class="msg-error">Tu rol (${state.rol}) no tiene acceso al Punto de Venta. Usa el Admin.</div>`;
     return;
   }
   const esSuperAdmin = !asignacion.empresa_id;

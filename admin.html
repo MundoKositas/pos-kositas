@@ -2285,7 +2285,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.001';
+const APP_VERSION = '1.45.002';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -2536,6 +2536,11 @@ function aplicarMarcaColores(c, empresaId){
     if(data && data.empresa_id){
       aplicarMarcaColores(data.colores_pos, data.empresa_id);
       if(data.logo_url) lg.src = data.logo_url; // sin logo propio: no se muestra ninguno
+      if(data.nombre && data.empresa_id !== '96f14cb8-3068-4f66-a13e-30561c9068c3'){ // otras empresas: su nombre, no «Kositas»
+        const h = document.querySelector('#card-login h1'); if(h) h.textContent = 'Admin ' + data.nombre;
+        const n = document.querySelector('#card-login .nota'); if(n) n.textContent = 'Catálogo, precios e inventario — ' + data.nombre;
+        document.title = 'Admin ' + data.nombre + ' — Catálogo y Precios';
+      }
       return;
     }
   }catch(e){}
@@ -2938,7 +2943,7 @@ async function iniciarSesionApp(){
   state.rol = state.roles.join(', ') || 'sin rol';
   if(!state.roles.some(r=>ROLES_PERMITIDOS.includes(r))){
     await sb.auth.signOut();
-    return mostrarError(`Tu rol (${state.rol}) no tiene acceso a Admin Kositas. Usa el Punto de Venta.`);
+    return mostrarError(`Tu rol (${state.rol}) no tiene acceso al Admin. Usa el Punto de Venta.`);
   }
   const esSuperAdmin = !asignacion.empresa_id;
   state.esSuperAdmin = esSuperAdmin;
