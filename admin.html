@@ -655,6 +655,7 @@
         <div class="grid-2">
           <div class="campo"><label>Nombre del negocio</label><input type="text" id="rp-cfg-nombre"></div>
           <div class="campo"><label>Teléfono de WhatsApp del negocio</label><input type="tel" id="rp-cfg-telefono"></div>
+          <div class="campo"><label>Enlace corto de WhatsApp (wa.link, opcional; se usa en las publicaciones)</label><input type="text" id="rp-cfg-walink" placeholder="https://wa.link/xxxxxx"></div>
         </div>
         <div class="campo"><label>Dirección</label><input type="text" id="rp-cfg-direccion"></div>
         <div class="grid-2">
@@ -2322,7 +2323,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.007';
+const APP_VERSION = '1.45.008';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -10382,8 +10383,10 @@ function pubTextos(){
   const tag = s=>'#'+normalizarTexto(s).replace(/[^a-z0-9]/g,'');
   const lin = state.lineas.find(l=>l.id===p.lineaArticuloId);
   const tags = ['#Durango','#DurangoMx','#ComprasDurango', tag(emp), lin?tag(lin.nombre):'', p.marca?tag(p.marca):''].filter(t=>t.length>2);
+  const waLink = (PUB.cfg?.whatsapp_link || '').trim() || (PUB.cfg?.telefono ? 'https://wa.me/52' + String(PUB.cfg.telefono).replace(/\D/g,'') : '');
+  const wa = waLink ? `💬 WhatsApp directo: ${waLink}` : '';
   const enlace = ($('pub-enlace').checked && PUB.host) ? `🛍️ Míralo aquí: https://${PUB.host}/?p=${p.productoId}` : '';
-  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', enlace, tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
+  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', enlace, tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', wa, dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
   $('pub-mkt').value = [`Título: ${p.nombre}`, `Precio: ${precio.replace('$','')}`, 'Estado: Nuevo', 'Descripción:', [p.nombre, p.marca, ...car, 'Entrega a domicilio en Durango.', tel?`Pedidos por WhatsApp ${tel}.`:''].filter(Boolean).join('. ')].join('\n');
 }
 async function pubCopiar(id){ try{ await navigator.clipboard.writeText($(id).value); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; }catch(e){ $(id).select(); document.execCommand('copy'); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; } }
@@ -10545,13 +10548,13 @@ $('rp-zona-guardar').addEventListener('click', async ()=>{
 async function rpCargarConfig(){
   const { data } = await sb.from('config_reparto').select('*').eq('empresa_id', state.empresaId).maybeSingle();
   const c = data || {};
-  $('rp-cfg-nombre').value = c.nombre || ''; $('rp-cfg-telefono').value = c.telefono || ''; $('rp-cfg-direccion').value = c.direccion || '';
+  $('rp-cfg-nombre').value = c.nombre || ''; $('rp-cfg-telefono').value = c.telefono || ''; $('rp-cfg-walink').value = c.whatsapp_link || ''; $('rp-cfg-direccion').value = c.direccion || '';
   $('rp-cfg-desde').value = c.horario_desde || ''; $('rp-cfg-hasta').value = c.horario_hasta || '';
   $('rp-cfg-dom-desde').value = c.horario_dom_desde || ''; $('rp-cfg-dom-hasta').value = c.horario_dom_hasta || '';
   $('rp-cfg-envio').value = c.envio_base ?? 35; $('rp-cfg-banco').value = c.datos_bancarios || '';
 }
 $('rp-cfg-guardar').addEventListener('click', async ()=>{
-  const fila = { empresa_id: state.empresaId, nombre: $('rp-cfg-nombre').value.trim(), telefono: $('rp-cfg-telefono').value.replace(/\D/g,''), direccion: $('rp-cfg-direccion').value.trim(),
+  const fila = { empresa_id: state.empresaId, nombre: $('rp-cfg-nombre').value.trim(), telefono: $('rp-cfg-telefono').value.replace(/\D/g,''), whatsapp_link: $('rp-cfg-walink').value.trim() || null, direccion: $('rp-cfg-direccion').value.trim(),
     horario_desde: $('rp-cfg-desde').value || null, horario_hasta: $('rp-cfg-hasta').value || null, horario_dom_desde: $('rp-cfg-dom-desde').value || null, horario_dom_hasta: $('rp-cfg-dom-hasta').value || null,
     envio_base: Number($('rp-cfg-envio').value) || 0, datos_bancarios: $('rp-cfg-banco').value.trim(), actualizado_en: new Date().toISOString() };
   const { error } = await sb.from('config_reparto').upsert(fila, { onConflict: 'empresa_id' });
