@@ -18,7 +18,7 @@ a{color:var(--verde);font-weight:600}
 <p class="fecha">Última actualización: noviembre de 2026</p>
 
 <h2>¿Quién es responsable de tus datos?</h2>
-<p><b id="resp">Mundo Kositas</b>, en Durango, Durango, México, es responsable de recabar y cuidar tus datos personales. La tienda usa la plataforma Ofertienda · Desde Casa para recibir y organizar sus pedidos.</p>
+<p><b id="resp">Mundo Kositas</b>, con domicilio en Calle Crisantemo esquina Enredadera, Local 3, Colonia La Virgen, Durango, Durango, México, es responsable de recabar y cuidar tus datos personales. La tienda usa la plataforma Ofertienda · Desde Casa para recibir y organizar sus pedidos.</p>
 
 <h2>¿Qué datos pedimos?</h2>
 <p>Tu nombre, tu número de teléfono o WhatsApp, la dirección de entrega y los productos que pides. En el formulario de contacto de la plataforma también pedimos el nombre y giro de tu negocio.</p>
@@ -29,6 +29,9 @@ a{color:var(--verde);font-weight:600}
 <h2>¿Los compartimos?</h2>
 <p>No. Tus datos no se venden, no se comparten y no se transfieren a terceros. Solo los ve el personal de la tienda que prepara y entrega tu pedido.</p>
 
+<h2>Medición de visitas (Meta)</h2>
+<p>Este catálogo puede usar el píxel de Meta (Facebook e Instagram) para medir qué productos se ven y cuántos pedidos se hacen, y para mostrarte anuncios de la tienda. Para eso Meta recibe datos de navegación de tu dispositivo, como los productos que ves o agregas al carrito. No enviamos tu nombre, teléfono ni domicilio. Puedes limitar los anuncios personalizados desde la configuración de tu cuenta de Facebook o Instagram.</p>
+
 <h2>Tus derechos</h2>
 <p>Puedes pedir en cualquier momento acceder a tus datos, corregirlos, cancelarlos u oponerte a su uso (derechos ARCO). También puedes pedir que los borremos. Escríbenos por WhatsApp al <a href="https://wa.me/526182597230">618 259 7230</a> y te atendemos.</p>
 
@@ -37,6 +40,15 @@ a{color:var(--verde);font-weight:600}
 </main>
 <script>
 var t=new URLSearchParams(location.search).get('t');
-if(t)document.getElementById('resp').textContent=t.slice(0,80);
+if(t){document.getElementById('resp').textContent=t.slice(0,80);}
+else{
+  // Sin parámetro: toma el nombre de la empresa según el dominio desde el que se abre
+  fetch('https://vsfzkktmdwqkfbecmfcj.supabase.co/rest/v1/rpc/resolver_empresa',{method:'POST',
+    headers:{'Content-Type':'application/json','apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs','Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZnpra3RtZHdxa2ZiZWNtZmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxMzAwMTgsImV4cCI6MjEwMzcwNjAxOH0.q6unj5y4p2alR3YgcEZ9N3_UTXLQd_TC9Zfxm6WfDzs'},
+    body:JSON.stringify({p_host:location.hostname})})
+  .then(function(r){return r.json()}).then(function(d){
+    d=Array.isArray(d)?d[0]:d; if(d&&d.nombre)document.getElementById('resp').textContent=String(d.nombre).slice(0,80);
+  }).catch(function(){});
+}
 </script>
 </body></html>
