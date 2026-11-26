@@ -2320,7 +2320,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.005';
+const APP_VERSION = '1.45.006';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -3055,6 +3055,7 @@ async function iniciarSesionApp(){
 
   await cargarCatalogosBase();
   await cargarProductos();
+  await cargarTemporadas(); // las temporadas deben estar en memoria para el Reporte de resurtido y Pedidos a proveedor
   suscribirStockEnVivo();
   renderListasPrecio();
   renderReporteChecks();
@@ -5073,6 +5074,7 @@ function pvNombreProveedor(id){ return state.proveedores.find(x=>x.id===id)?.nom
 async function pvEntrar(){
   $('pv-error').innerHTML = ''; window.scrollTo(0, 0);
   await cargarProductos();
+  await cargarTemporadas();
   const { data, error } = await sb.rpc('proveedor_sugerido_variantes', { p_empresa_id: state.empresaId });
   if(error){ $('pv-error').innerHTML = `<div class="msg-error">${pvEsc(error.message)}</div>`; return; }
   pv.hist = new Map((data||[]).map(r=>[r.variante_id, r]));
