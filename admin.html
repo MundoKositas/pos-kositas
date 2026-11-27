@@ -1151,6 +1151,7 @@
         <div class="campo" id="pub-sub-wrap"><label>Subtítulo (segunda línea del encabezado, opcional)</label><input type="text" id="pub-sub" maxlength="90"></div>
         <div class="campo" id="pub-clave-wrap"><label>Clave para pedido (abajo a la izquierda, opcional)</label><input type="text" id="pub-clave" maxlength="40"></div>
         <div class="campo" id="pub-foto2-wrap"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="pub-foto2" checked style="width:auto;"> Usar 2 fotos (si el artículo tiene más de una)</label></div>
+        <div class="campo"><label>Vigencia del precio (días a partir de hoy; 0 = solo "hasta agotar existencias")</label><input type="number" id="pub-vigencia" min="0" max="365" step="1" value="15" style="max-width:120px;"></div>
         <div class="campo" id="pub-extra-wrap"><label>Texto adicional (abajo, opcional)</label><input type="text" id="pub-extra" maxlength="70" placeholder="Ej. Entrega a domicilio en Durango"></div>
         <div class="campo" id="pub-carac-wrap"><label>Características (modelo B, una por renglón)</label><textarea id="pub-carac" rows="4"></textarea></div>
         <div class="campo"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="pub-precio" checked style="width:auto;"> Mostrar precio en la imagen</label></div>
@@ -2333,7 +2334,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // Versión visible: MAYOR.MENOR.PARCHE — misma convención que pos.html, aplicación independiente.
-const APP_VERSION = '1.45.010';
+const APP_VERSION = '1.45.012';
 
 const money = (n) => (isNaN(Number(n)) ? '$0.00' : Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2,maximumFractionDigits:2}));
 const $ = (id) => document.getElementById(id);
@@ -10301,7 +10302,7 @@ $('pub-lista').addEventListener('click', async (e)=>{
   $('pub-foto2-wrap').style.opacity = PUB.foto2Img ? '1' : '.5';
   pubRedibujar(); pubTextos();
 });
-['pub-modelo','pub-lista-precio','pub-titulo','pub-sub','pub-clave','pub-foto2','pub-extra','pub-carac','pub-precio','pub-enlace'].forEach(id=>{
+['pub-vigencia','pub-modelo','pub-lista-precio','pub-titulo','pub-sub','pub-clave','pub-foto2','pub-extra','pub-carac','pub-precio','pub-enlace'].forEach(id=>{
   $(id).addEventListener('input', ()=>{ pubRedibujar(); pubTextos(); }); $(id).addEventListener('change', ()=>{ pubRedibujar(); pubTextos(); });
 });
 function pubAjustarTexto(ctx, txt, ancho, tamMax, tamMin, lineasMax, fuente){
@@ -10328,9 +10329,18 @@ function pubDibujarC(){
   ctx.fillStyle = barra; ctx.fillRect(0,0,W,HH);
   ctx.fillStyle = txtBarra; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const sub = $('pub-sub').value.trim();
-  const at = pubAjustarTexto(ctx, $('pub-titulo').value || p.nombre, 980, 70, 34, 1, F); ctx.font = `800 ${at.t}px ${F}`;
-  ctx.fillText(at.lin[0], W/2, sub ? 62 : HH/2);
-  if(sub){ const as = pubAjustarTexto(ctx, sub, 980, 40, 22, 1, F); ctx.font = `700 ${as.t}px ${F}`; ctx.fillText(as.lin[0], W/2, 124); }
+  const tit = $('pub-titulo').value || p.nombre;
+  // Título: primero intenta en 1 línea (grande); si no cabe, lo parte en 2 líneas y reduce la letra hasta que quepa completo
+  let at = null;
+  for(let t = 70; t >= 46; t -= 2){ ctx.font = `800 ${t}px ${F}`; if(ctx.measureText(tit).width <= 980){ at = { t, lin: [tit] }; break; } }
+  if(!at) at = pubAjustarTexto(ctx, tit, 980, sub ? 44 : 58, 28, 2, F);
+  let ts = 0, as = null;
+  if(sub){ as = pubAjustarTexto(ctx, sub, 980, at.lin.length > 1 ? 28 : 38, 20, 1, F); ts = as.t; }
+  const altoTit = at.lin.length * at.t * 1.12, altoSub = sub ? ts * 1.25 + 6 : 0;
+  let yy = (HH - (altoTit + altoSub)) / 2 + at.t * 0.56;
+  ctx.font = `800 ${at.t}px ${F}`;
+  at.lin.forEach((l, i)=>{ ctx.fillText(l, W/2, yy + i * at.t * 1.12); });
+  if(sub){ ctx.font = `700 ${ts}px ${F}`; ctx.fillText(as.lin[0], W/2, yy + (at.lin.length - 1) * at.t * 1.12 + at.t * 0.56 + ts * 0.8 + 6); }
   // precio arriba al centro
   const precio = pubPrecioDe(p), mostrarPrecio = $('pub-precio').checked;
   // fotos
@@ -10361,23 +10371,32 @@ function pubDibujarC(){
   const tel = pubTel(PUB.cfg?.telefono || '');
   if(tel){ ctx.font = `900 84px ${F}`; ctx.fillText(tel, 50, FY+62); }
   if(PUB.logoImg){
-    const bw = 330, bh = 110, bx = W-40-bw, by = FY+8;
+    const bw = 330, bh = 112, bx = W-40-bw, by = FY+8;
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 24); ctx.fill();
-    const r = Math.min((bw-26)/PUB.logoImg.width, (bh-20)/PUB.logoImg.height), lw = PUB.logoImg.width*r, lh = PUB.logoImg.height*r;
+    const r = Math.min((bw-14)/PUB.logoImg.width, (bh-10)/PUB.logoImg.height), lw = PUB.logoImg.width*r, lh = PUB.logoImg.height*r;
     ctx.drawImage(PUB.logoImg, bx+(bw-lw)/2, by+(bh-lh)/2, lw, lh);
   }
   ctx.fillStyle = txtBarra; ctx.textAlign = 'center';
   const env = Number(PUB.cfg?.envio_base);
   const extra = $('pub-extra').value.trim();
   ctx.font = `700 27px ${F}`;
-  ctx.fillText(`Servicio a domicilio en la ciudad de Durango${env ? ' +'+pubDinero(env)+' por pedido' : ''}${extra ? ' · '+extra : ''}`, W/2, FY+142);
-  ctx.font = `500 23px ${F}`;
-  ctx.fillText('Imágenes y colores ilustrativos. Vigencia hasta agotar existencias.', W/2, FY+178);
+  ctx.fillText(`Servicio a domicilio en la ciudad de Durango${env ? ' +'+pubDinero(env)+' por pedido' : ''}${extra ? ' · '+extra : ''}`, W/2, FY+138);
+  { const av = pubAjustarTexto(ctx, pubVigenciaTxt(), 1010, 27, 16, 1, F); ctx.font = `800 ${av.t}px ${F}`; ctx.fillText(av.lin[0], W/2, FY+170); }
+  ctx.font = `500 19px ${F}`;
+  ctx.fillText('Imágenes y colores ilustrativos.', W/2, FY+196);
   const web = String(PUB.host||'').replace(/^https?:\/\//,''), fb = String(PUB.cfg?.facebook_url||'').replace(/^https?:\/\//,'').replace(/\/$/,'');
   ctx.font = `800 26px ${F}`;
-  if(web && fb){ ctx.textAlign = 'left'; ctx.fillText(web, 40, FY+222); ctx.textAlign = 'right'; ctx.fillText(fb, W-40, FY+222); }
-  else if(web || fb){ ctx.fillText(web || fb, W/2, FY+222); }
+  if(web && fb){ ctx.textAlign = 'left'; ctx.fillText(web, 40, FY+230); ctx.textAlign = 'right'; ctx.fillText(fb, W-40, FY+230); }
+  else if(web || fb){ ctx.fillText(web || fb, W/2, FY+230); }
   ctx.textAlign = 'left';
+}
+// Texto de vigencia: fecha de hoy + N días (editable) o solo "hasta agotar existencias"
+function pubVigenciaTxt(){
+  const n = parseInt($('pub-vigencia').value, 10);
+  if(!(n > 0)) return 'Precio vigente hasta agotar existencias';
+  const f = new Date(); f.setDate(f.getDate() + n);
+  const fecha = f.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+  return 'Precio vigente hasta el ' + fecha + ' o hasta agotar existencias';
 }
 function pubRedibujar(){
   const p = PUB.sel; if(!p) return;
@@ -10395,7 +10414,7 @@ function pubRedibujar(){
   // encabezado
   ctx.fillStyle = barra; ctx.fillRect(0,0,W,HH);
   ctx.fillStyle = txtBarra; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  const ajuste = pubAjustarTexto(ctx, $('pub-titulo').value || p.nombre, 680, 60, 34, 2, F);
+  const ajuste = pubAjustarTexto(ctx, $('pub-titulo').value || p.nombre, 680, 60, 24, 3, F);
   ctx.font = `800 ${ajuste.t}px ${F}`;
   const alto = ajuste.t*1.12, y0 = HH/2 - (ajuste.lin.length-1)*alto/2;
   ajuste.lin.forEach((l,i)=>ctx.fillText(l, 50, y0 + i*alto));
@@ -10463,7 +10482,8 @@ function pubRedibujar(){
   if(dir){ const ad = pubAjustarTexto(ctx, dir, 1000, 28, 18, 1, F); ctx.font = `700 ${ad.t}px ${F}`; ctx.fillText(ad.lin[0], W/2, FY+178); }
   const env = Number(PUB.cfg?.envio_base);
   ctx.font = `600 22px ${F}`; ctx.fillText(`Servicio a domicilio en Durango. Pregunta por tu zona de cobertura.${env? ' Desde '+pubDinero(env)+' por pedido.':''}`, W/2, FY+222);
-  ctx.font = `500 20px ${F}`; ctx.fillText('Imágenes y colores ilustrativos. Hasta agotar existencias.', W/2, FY+256);
+  { const av = pubAjustarTexto(ctx, pubVigenciaTxt(), 1000, 24, 16, 1, F); ctx.font = `800 ${av.t}px ${F}`; ctx.fillText(av.lin[0], W/2, FY+252); }
+  ctx.font = `500 18px ${F}`; ctx.fillText('Imágenes y colores ilustrativos.', W/2, FY+276);
   ctx.textAlign = 'left';
 }
 function pubTextos(){
@@ -10477,8 +10497,8 @@ function pubTextos(){
   const waLink = (PUB.cfg?.whatsapp_link || '').trim() || (PUB.cfg?.telefono ? 'https://wa.me/52' + String(PUB.cfg.telefono).replace(/\D/g,'') : '');
   const wa = waLink ? `💬 WhatsApp directo: ${waLink}` : '';
   const enlace = ($('pub-enlace').checked && PUB.host) ? `🛍️ Míralo aquí: https://${PUB.host}/?p=${p.productoId}` : '';
-  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', enlace, tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', wa, dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
-  $('pub-mkt').value = [`Título: ${p.nombre}`, `Precio: ${precio.replace('$','')}`, 'Estado: Nuevo', 'Descripción:', [p.nombre, p.marca, ...car, 'Entrega a domicilio en Durango.', tel?`Pedidos por WhatsApp ${tel}.`:''].filter(Boolean).join('. ')].join('\n');
+  $('pub-texto').value = [`🛒 ${p.nombre}`, `💰 ${precio}`, `⏳ ${pubVigenciaTxt()}.`, car.length ? car.map(c=>`✔ ${c}`).join('\n') : '', '🚚 Entrega a domicilio en Durango', enlace, tel ? `📲 Escríbenos por WhatsApp: ${tel}` : '', wa, dir ? `📍 ${emp}: ${dir}` : '', '', [...new Set(tags)].join(' ')].filter((x,i,a)=>x!==''||a[i-1]!=='').join('\n');
+  $('pub-mkt').value = [`Título: ${p.nombre}`, `Precio: ${precio.replace('$','')} (${pubVigenciaTxt().replace('Precio vigente','vigente')})`, 'Estado: Nuevo', 'Descripción:', [p.nombre, p.marca, ...car, 'Entrega a domicilio en Durango.', tel?`Pedidos por WhatsApp ${tel}.`:''].filter(Boolean).join('. ')].join('\n');
 }
 async function pubCopiar(id){ try{ await navigator.clipboard.writeText($(id).value); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; }catch(e){ $(id).select(); document.execCommand('copy'); $('pub-estado').innerHTML = '<div class="msg-ok">Copiado.</div>'; } }
 $('pub-copiar-texto').addEventListener('click', ()=>pubCopiar('pub-texto'));
